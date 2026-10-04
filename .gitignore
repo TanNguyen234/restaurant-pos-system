@@ -1,0 +1,23 @@
+# .NET Core & Visual Studio
+bin/
+obj/
+*.user
+*.suo
+.vs/
+
+# Flutter & Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+*.lock
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# OS generated
+.DS_Store
+Thumbs.db
