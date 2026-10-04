@@ -10,22 +10,22 @@ The system adheres to an offline-resilient, layered architecture:
 
 ```
 [ Mobile Client (Flutter) ]
-  ├── Presentation Layer (StatefulWidget / View)
-  ├── Local Storage (SQLite via sqflite) ──> Local Cart, Sessions, Offline Queue
-  └── Repository Layer (HTTP Client)
-              │
-              │ RESTful JSON over HTTP / HTTPS
-              ▼
+  +-- Presentation Layer (StatefulWidget / View)
+  +-- Local Storage (SQLite via sqflite) --> Local Cart, Sessions, Offline Queue
+  +-- Repository Layer (HTTP Client)
+            |
+            | RESTful JSON over HTTP / HTTPS
+            v
 [ Backend API (ASP.NET Core 10) ]
-  ├── Controllers (BaseController)
-  ├── Service & Aggregator Layer (SiteProvider / BaseProvider)
-  ├── Data Access Layer (BaseRepository / Entity Repositories)
-  └── File Storage (wwwroot/images for media assets)
-              │
-              │ ADO.NET / EF Core 10
-              ▼
+  +-- Controllers (BaseController)
+  +-- Service and Aggregator Layer (SiteProvider / BaseProvider)
+  +-- Data Access Layer (BaseRepository / Entity Repositories)
+  +-- File Storage (wwwroot/images for media assets)
+            |
+            | ADO.NET / EF Core 10
+            v
 [ Relational Database (Microsoft SQL Server) ]
-  └── 10 Normalized Relational Tables (Roles, Accounts, Areas, DiningTables,
+  +-- 10 Normalized Relational Tables (Roles, Accounts, Areas, DiningTables,
        Categories, Products, ProductAttributes, Orders, OrderDetails, Payments)
 ```
 
@@ -35,9 +35,9 @@ The system adheres to an offline-resilient, layered architecture:
 
 | Component | Technology | Version | Purpose |
 | :--- | :--- | :--- | :--- |
-| **Mobile Client** | Flutter / Dart | 3.47.1 / 3.13.1 | Cross-platform staff ordering & customer terminal |
-| **Local Database** | SQLite (`sqflite`) | 2.4.4 | On-device persistent cart, local session, and offline cache |
-| **Backend API** | ASP.NET Core Web API | 10.0 (`net10.0`) | Centralized business logic, auth, media processing |
+| **Mobile Client** | Flutter / Dart | 3.47.1 / 3.13.1 | Cross-platform staff ordering and customer terminal |
+| **Local Database** | SQLite (sqflite) | 2.4.4 | On-device persistent cart, local session, and offline cache |
+| **Backend API** | ASP.NET Core Web API | 10.0 (net10.0) | Centralized business logic, auth, media processing |
 | **ORM** | Entity Framework Core | 10.0.12 | Object-relational mapping for SQL Server |
 | **Central Database** | Microsoft SQL Server | 2019 / 2022 | Primary ACID-compliant transactional datastore |
 | **Online Payments** | VietQR / VNPayment | NAPAS 247 / v2 | Dynamic banking QR codes and payment gateway integration |
@@ -46,58 +46,58 @@ The system adheres to an offline-resilient, layered architecture:
 
 ## Functional Specifications
 
-### 1. Identity & Role-Based Access Control (RBAC)
+### 1. Identity and Role-Based Access Control (RBAC)
 - **Account Operations:** Registration, authentication, password modification, and profile management.
-- **Session Management:** Token generation with secure persistent storage via SQLite and `SharedPreferences`.
-- **Role Separation:** Strict boundary enforcement between `Admin` (system configuration, catalog, reporting) and `Staff` / `Member` (order creation, table service).
+- **Session Management:** Token generation with secure persistent storage via SQLite and SharedPreferences.
+- **Role Separation:** Strict boundary enforcement between Admin (system configuration, catalog, reporting) and Staff / Member (order creation, table service).
 - **Extended Identity:** Email activation token tracking, password recovery tokens, and external OAuth provider linkage (Google, Facebook, Zalo).
 
-### 2. Category & Menu Management
+### 2. Category and Menu Management
 - **Hierarchical Catalog:** CRUD operations for food and beverage categories with priority sorting and active state toggles.
-- **Media Lifecycle:** Server-side file management (`wwwroot/images/categories`). Uploading a replacement image automatically deletes obsolete physical files from the host file system.
+- **Media Lifecycle:** Server-side file management (wwwroot/images/categories). Uploading a replacement image automatically deletes obsolete physical files from the host file system.
 - **Referential Integrity Protection:** Enforces non-destructive validation; categories containing active products cannot be deleted.
 
-### 3. Product Catalog & Asset Processing
-- **Server-Driven Pagination:** High-throughput `OFFSET-FETCH` pagination on indexed fields (`IX_Products_CategoryId`, `IX_Products_ProductName`).
+### 3. Product Catalog and Asset Processing
+- **Server-Driven Pagination:** High-throughput OFFSET-FETCH pagination on indexed fields (IX_Products_CategoryId, IX_Products_ProductName).
 - **Product Lifecycle:** Multi-part form-data image upload, automated file sanitization, and thumbnail handling.
-- **Financial Audit Safety:** Rejection of hard deletion for products present in historical orders (`OrderDetails`), preserving accounting accuracy.
+- **Financial Audit Safety:** Rejection of hard deletion for products present in historical orders (OrderDetails), preserving accounting accuracy.
 
-### 4. Home Terminal & Real-Time Discovery
+### 4. Home Terminal and Real-Time Discovery
 - **Showcase Navigation:** Category horizontal chips, latest menu additions with pagination, and search queries with client-side debouncing.
 - **Item Drilldown:** High-resolution asset preview, portion attributes, customizable modifiers (ice, sugar, size, toppings), and category-linked product recommendations.
 
-### 5. Cart Management & Checkout Pipeline
-- **Offline-First Persistence:** Cart items are stored directly in SQLite (`cart_items`), surviving app restarts, memory eviction, and intermittent network loss.
-- **Immediate State Synchronization:** Badge indicators compute total item volume via localized queries (`SELECT SUM(quantity)`).
+### 5. Cart Management and Checkout Pipeline
+- **Offline-First Persistence:** Cart items are stored directly in SQLite (cart_items), surviving app restarts, memory eviction, and intermittent network loss.
+- **Immediate State Synchronization:** Badge indicators compute total item volume via localized queries (SELECT SUM(quantity)).
 - **Atomic Checkout:** Multi-item orders execute inside SQL Server transactions, reserving tables, populating order lines, and purging local cart state upon server acknowledgement.
 - **Digital Payment Processing:**
-  - Dynamic **VietQR** generation encoding bank BIN, account number, order code, and exact checkout amount into NAPAS-standard QR payloads.
-  - **VNPayment** checkout URL generation using HMAC-SHA512 checksum validation.
+  - Dynamic VietQR generation encoding bank BIN, account number, order code, and exact checkout amount into NAPAS-standard QR payloads.
+  - VNPayment checkout URL generation using HMAC-SHA512 checksum validation.
 
-### 6. Kitchen Display System (KDS) & Order Dispatch
-- **Live Kitchen Board:** Order status progression (`Pending` $\rightarrow$ `Cooking` $\rightarrow$ `Ready` $\rightarrow$ `Served` $\rightarrow$ `Completed`).
-- **Date-Bound Reporting:** Filterable order archives supporting range lookups (`DateRangePicker`), order code lookups, and revenue summation.
-- **Floor & Table Management:** Visual table maps reflecting state colors (Empty: Green, Occupied: Red, Reserved: Blue, Awaiting Service: Orange).
+### 6. Kitchen Display System (KDS) and Order Dispatch
+- **Live Kitchen Board:** Order status progression: Pending -> Cooking -> Ready -> Served -> Completed.
+- **Date-Bound Reporting:** Filterable order archives supporting range lookups (DateRangePicker), order code lookups, and revenue summation.
+- **Floor and Table Management:** Visual table maps reflecting state colors (Empty: Green, Occupied: Red, Reserved: Blue, Awaiting Service: Orange).
 
 ---
 
 ## Database Architecture
 
-The system utilizes an enterprise relational schema deployed on Microsoft SQL Server. The full migration script and seed data are located in [`RestaurantPosDb.sql`](RestaurantPosDb.sql).
+The system utilizes an enterprise relational schema deployed on Microsoft SQL Server. The full migration script and seed data are located in [RestaurantPosDb.sql](RestaurantPosDb.sql).
 
 ### Entity Relationship Structure
 
 ```
-Roles (1) ───────────< Accounts (N)
-                           │
-Areas (1) ──< DiningTables (N)
-                  │
-                  └──< Orders (1) ──< OrderDetails (N) >── Products (1) >── Categories (1)
-                           │                │                  │
-                           │                │                  └──< ProductAttributes (N)
-                           │                └──< OrderDetailModifiers (N)
-                           │
-                           └──< Payments (N)
+Roles (1) <--- Accounts (N)
+                 |
+Areas (1) <-- DiningTables (N)
+                 |
+                 +---< Orders (1) <--- OrderDetails (N) ---> Products (1) ---> Categories (1)
+                         |                  |                   |
+                         |                  |                   +---< ProductAttributes (N)
+                         |                  +---< OrderDetailModifiers (N)
+                         |
+                         +---< Payments (N)
 ```
 
 ### Table Definitions
@@ -109,7 +109,7 @@ Areas (1) ──< DiningTables (N)
 | `Areas` | `AreaId` | Restaurant layout partitions (Air-conditioned floor, Balcony, VIP rooms, Garden) | 10 |
 | `DiningTables` | `TableId` | Seating units, capacity tracking, current occupancy status | 10 |
 | `Categories` | `CategoryId` | Menu classifications (Coffee, Espresso, Tea, Bakery, Breakfast, Snacks) | 10 |
-| `Products` | `ProductId` | Food and beverage items with pricing in VND (`DECIMAL(18,0)`), assets, units | 10 |
+| `Products` | `ProductId` | Food and beverage items with pricing in VND (DECIMAL(18,0)), assets, units | 10 |
 | `ProductAttributes` | `AttributeId` | Modifiers, size selections, sweetness levels, extra espresso shots, toppings | 10 |
 | `Orders` | `OrderId` | Transaction master records containing table bindings, order type, and amounts | 10 |
 | `OrderDetails` | `OrderDetailId` | Line items with unit pricing, kitchen cooking status, and custom preparation notes | 10 |
@@ -121,33 +121,33 @@ Areas (1) ──< DiningTables (N)
 
 ```
 restaurant_pos_app/
-├── RestaurantPosDb.sql           # Complete SQL Server DDL & DML script (10 records/table)
-├── backend/                      # ASP.NET Core 10 Web API
-│   ├── Api/
-│   │   └── Controllers/          # BaseController, CategoryController, etc.
-│   ├── Models/                   # RestaurantPosContext, SiteProvider, Repositories, Entities
-│   ├── Services/                 # Helper utilities (image upload, physical file deletion)
-│   ├── wwwroot/images/           # Static asset directory for products and categories
-│   ├── appsettings.json          # Connection strings and logging configuration
-│   ├── Program.cs                # Dependency injection, CORS policy, middleware pipeline
-│   └── WebApi.csproj             # .NET 10 project definition and package references
-├── mobile/                       # Flutter Mobile Application
-│   ├── lib/
-│   │   ├── models/               # Domain models with fromMap() / toMap() mappers
-│   │   ├── repositories/         # REST API clients and HTTP communication
-│   │   ├── utils/                # DatabaseHelper (SQLite singleton)
-│   │   ├── views/                # Presentation screens (CategoryPage, HomePage, CartPage)
-│   │   └── main.dart             # Application root and theme configuration
-│   ├── pubspec.yaml              # Flutter dependencies (http, sqflite, path, intl)
-│   └── test/widget_test.dart     # Automated test suite
-└── docs/                         # Technical documentation and specifications
-    ├── 01_YEU_CAU_CUNG_VA_BAREM_DIEM.md
-    ├── 02_CHUC_NANG_MO_RONG_DANG_LAM.md
-    ├── 03_LUONG_HOAT_DONG_CHI_TIET.md
-    ├── 04_THIET_KE_CO_SO_DU_LIEU_MERMAID.md
-    ├── 05_MERMAID_SEQUENCE_FLOWS.md
-    ├── 06_KE_HOACH_PHAN_CHIA_PHASE_CONG_VIEC.md
-    └── TAI_LIEU_HUONG_DAN_COLLABORATOR_FULL.docx
++-- RestaurantPosDb.sql           # Complete SQL Server DDL & DML script (10 records/table)
++-- backend/                      # ASP.NET Core 10 Web API
+|   +-- Api/
+|   |   +-- Controllers/          # BaseController, CategoryController, etc.
+|   +-- Models/                   # RestaurantPosContext, SiteProvider, Repositories, Entities
+|   +-- Services/                 # Helper utilities (image upload, physical file deletion)
+|   +-- wwwroot/images/           # Static asset directory for products and categories
+|   +-- appsettings.json          # Connection strings and logging configuration
+|   +-- Program.cs                # Dependency injection, CORS policy, middleware pipeline
+|   +-- WebApi.csproj             # .NET 10 project definition and package references
++-- mobile/                       # Flutter Mobile Application
+|   +-- lib/
+|   |   +-- models/               # Domain models with fromMap() / toMap() mappers
+|   |   +-- repositories/         # REST API clients and HTTP communication
+|   |   +-- utils/                # DatabaseHelper (SQLite singleton)
+|   |   +-- views/                # Presentation screens (CategoryPage, HomePage, CartPage)
+|   |   +-- main.dart             # Application root and theme configuration
+|   +-- pubspec.yaml              # Flutter dependencies (http, sqflite, path, intl)
+|   +-- test/widget_test.dart     # Automated test suite
++-- docs/                         # Technical documentation and specifications
+    +-- 01_YEU_CAU_CUNG_VA_BAREM_DIEM.md
+    +-- 02_CHUC_NANG_MO_RONG_DANG_LAM.md
+    +-- 03_LUONG_HOAT_DONG_CHI_TIET.md
+    +-- 04_THIET_KE_CO_SO_DU_LIEU_MERMAID.md
+    +-- 05_MERMAID_SEQUENCE_FLOWS.md
+    +-- 06_KE_HOACH_PHAN_CHIA_PHASE_CONG_VIEC.md
+    +-- TAI_LIEU_HUONG_DAN_COLLABORATOR_FULL.docx
 ```
 
 ---
@@ -157,18 +157,18 @@ restaurant_pos_app/
 ### Prerequisites
 
 Ensure the following runtimes and tools are installed:
-- [.NET SDK 10.0](https://dotnet.microsoft.com/download) (`dotnet --version` >= 10.0)
-- [Flutter SDK](https://flutter.dev/docs/get-started/install) (`flutter --version` >= 3.47)
-- [Microsoft SQL Server](https://www.microsoft.com/sql-server) (2019 or later)
-- [SQL Server Management Studio (SSMS)](https://learn.microsoft.com/sql/ssms/download-sql-server-management-studio-ssms)
+- .NET SDK 10.0 (dotnet --version >= 10.0)
+- Flutter SDK (flutter --version >= 3.47)
+- Microsoft SQL Server (2019 or later)
+- SQL Server Management Studio (SSMS)
 
 ---
 
 ### Step 1: Database Initialization
 
-1. Connect to your SQL Server instance using SSMS or `sqlcmd`.
-2. Open and execute [`RestaurantPosDb.sql`](RestaurantPosDb.sql).
-3. Confirm that database `RestaurantPosDb` is created with all 10 tables and populated with the default 10 records per table.
+1. Connect to your SQL Server instance using SSMS or sqlcmd.
+2. Open and execute [RestaurantPosDb.sql](RestaurantPosDb.sql).
+3. Confirm that database RestaurantPosDb is created with all 10 tables and populated with the default 10 records per table.
 
 ```sql
 -- Verification query
@@ -179,13 +179,13 @@ FROM sys.tables t;
 
 ---
 
-### Step 2: Backend API Configuration & Execution
+### Step 2: Backend API Configuration and Execution
 
 1. Navigate to the backend directory:
    ```bash
    cd backend
    ```
-2. Verify or update the SQL Server connection string in `appsettings.json`:
+2. Verify or update the SQL Server connection string in appsettings.json:
    ```json
    "ConnectionStrings": {
      "RestaurantPosDb": "Server=localhost;Database=RestaurantPosDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true;"
@@ -204,7 +204,7 @@ FROM sys.tables t;
 
 ---
 
-### Step 3: Mobile Client Configuration & Execution
+### Step 3: Mobile Client Configuration and Execution
 
 1. Navigate to the mobile directory:
    ```bash
@@ -224,11 +224,8 @@ FROM sys.tables t;
    flutter run
    ```
 
-> [!IMPORTANT]
-> **Android Emulator Network Mapping:**
-> When running the application inside an Android Virtual Device (AVD), requests directed to `localhost` resolve to the emulator's internal loopback. Use `http://10.0.2.2:5138/api/...` as the base URL to route traffic back to the host machine.
->
-> On Windows Desktop, macOS, or physical devices connected via local Wi-Fi, target `http://localhost:5138` or your machine's LAN IP address.
+**Android Emulator Network Configuration:**
+When running the application inside an Android Virtual Device (AVD), requests directed to `localhost` resolve to the emulator's internal loopback. Use `http://10.0.2.2:5138/api/...` as the base URL to route traffic back to the host machine. On Windows Desktop, macOS, or physical devices connected via local Wi-Fi, target `http://localhost:5138` or your machine's LAN IP address.
 
 ---
 
@@ -256,7 +253,7 @@ All requests and responses use standard JSON encoding unless submitting binary m
 
 ---
 
-## Quality Assurance & Verification
+## Quality Assurance and Verification
 
 Before submitting pull requests or packaging build artifacts, run the automated verification suite:
 
