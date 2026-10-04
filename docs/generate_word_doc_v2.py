@@ -279,10 +279,128 @@ def create_document():
     )
 
     # --- PHẦN 4: HƯỚNG DẪN CHI TIẾT TỪNG BƯỚC CHO COLLABORATOR ---
-    add_h1("4. HƯỚNG DẪN TRIỂN KHAI TỪNG FILE & PHÂN CÔNG COLLABORATOR")
+    add_h1("4. HƯỚNG DẪN TRIỂN KHAI TỪNG FILE & PHÂN CÔNG COLLABORATOR (NHÓM 3 NGƯỜI)")
     add_p(
-        "Để đảm bảo tiến độ và không bị xung đột mã nguồn (merge conflict), dự án được phân chia thành 6 Phase rõ ràng. "
-        "Mỗi collaborator mở đúng file được phân công để làm việc:"
+        "Để đảm bảo tiến độ và không bị xung đột mã nguồn (merge conflict), dự án được phân chia độc lập giữa 3 thành viên "
+        "(Bao gồm: Thành viên 1 - Bạn/Lead, Thành viên 2 - Collaborator A/Frontend, Thành viên 3 - Collaborator B/Backend & Security). "
+        "Mỗi thành viên chịu trách nhiệm trọn vẹn trên các file riêng biệt:"
+    )
+
+    add_h2("4.1. Bảng Phân Bổ Vai Trò & Điểm Barem Nhóm 3 Người")
+    headers_team = ["Thành Viên", "Vai Trò Chính", "Trọng Tâm Trách Nhiệm", "Barem Phụ Trách"]
+    team_data = [
+        ["Thành viên 1 (Bạn)", "Team Leader & Fullstack Architect", "CSDL SQL Server, Kiến trúc Base Backend & Mobile, Sơ đồ Bàn ăn, Đồng bộ Offline SQLite, Tích hợp & Review code", "Toàn bộ hệ thống + 2.5đ mở rộng"],
+        ["Thành viên 2 (Collab A)", "Frontend & Catalog Specialist", "UI/UX Trang chủ, Quản trị Danh mục, Sản phẩm phân trang, Upload/Xóa ảnh wwwroot, Giỏ hàng SQLite trên điện thoại", "6.50 điểm (Nhóm 2, 3, 4, 5)"],
+        ["Thành viên 3 (Collab B)", "Backend & Security Specialist", "Xác thực tài khoản (Auth/RBAC), Quản lý đơn hàng Admin, Tích hợp thanh toán VietQR & VNPay, Màn hình Bếp KDS", "6.50 điểm (Nhóm 1, 6 + Thanh toán, KDS)"]
+    ]
+
+    t_team = doc.add_table(rows=len(team_data) + 1, cols=len(headers_team))
+    t_team.alignment = WD_TABLE_ALIGNMENT.CENTER
+    t_team.autofit = False
+
+    for i, col_name in enumerate(headers_team):
+        t_team.rows[0].cells[i].text = col_name
+        set_cell_background(t_team.rows[0].cells[i], "D9D9D9")
+        for p in t_team.rows[0].cells[i].paragraphs:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.line_spacing = 1.5
+            for r in p.runs:
+                r.font.name = 'Times New Roman'
+                r.font.size = Pt(11)
+                r.font.bold = True
+                r.font.color.rgb = RGBColor(0, 0, 0)
+
+    for r_i, row_vals in enumerate(team_data):
+        row_cells = t_team.rows[r_i + 1].cells
+        for c_i, val in enumerate(row_vals):
+            row_cells[c_i].text = val
+            for p in row_cells[c_i].paragraphs:
+                p.paragraph_format.line_spacing = 1.2
+                p.paragraph_format.space_after = Pt(2)
+                if c_i in [0, 1, 3]:
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for r in p.runs:
+                    r.font.name = 'Times New Roman'
+                    r.font.size = Pt(10.5)
+                    r.font.color.rgb = RGBColor(0, 0, 0)
+                    if c_i in [0, 1]:
+                        r.font.bold = True
+
+    add_p("")
+
+    add_h2("4.2. Ma Trận Sở Hữu File Mã Nguồn (Phòng Tránh Xung Đột Git)")
+    headers_files = ["Phân Vùng", "File Mã Nguồn Cụ Thể", "Nhiệm Vụ Triển Khai", "Phụ Trách"]
+    files_data = [
+        ["Database", "RestaurantPosDb.sql", "DDL 10 bảng quan hệ, DML 10 dòng/bảng, Index", "Thành viên 1 (Bạn)"],
+        ["Backend", "RestaurantPosContext.cs", "DbContext, 10 DbSet, quan hệ Fluent API", "Thành viên 1 (Bạn)"],
+        ["Backend", "BaseProvider, BaseRepo, SiteProvider", "Kiến trúc Facade / Provider chuẩn của thầy", "Thành viên 1 (Bạn)"],
+        ["Backend", "TableController.cs, TableRepository.cs", "API sơ đồ bàn ăn, đổi trạng thái bàn, chuyển bàn", "Thành viên 1 (Bạn)"],
+        ["Backend", "Helper.cs (Image processing)", "Lưu ảnh vào wwwroot/images và dọn dẹp ảnh cũ", "Thành viên 2 (Collab A)"],
+        ["Backend", "CategoryController.cs, CategoryRepo.cs", "API danh mục, kiểm tra HasProducts() chặn xóa", "Thành viên 2 (Collab A)"],
+        ["Backend", "ProductController.cs, ProductRepo.cs", "API sản phẩm phân trang, kiểm tra HasOrders() chặn xóa", "Thành viên 2 (Collab A)"],
+        ["Backend", "AuthController.cs, AccountRepo.cs", "Đăng ký, đăng nhập băm mật khẩu, đổi MK, OAuth", "Thành viên 3 (Collab B)"],
+        ["Backend", "OrderController.cs, OrderRepo.cs", "Tạo đơn Transaction, đổi trạng thái đơn, lọc ngày", "Thành viên 3 (Collab B)"],
+        ["Backend", "PaymentController.cs, PaymentRepo.cs", "Tạo mã VietQR động NAPAS 247, URL VNPayment", "Thành viên 3 (Collab B)"],
+        ["Backend", "KdsController.cs", "API màn hình bếp (lấy món chờ nấu, CookingStatus)", "Thành viên 3 (Collab B)"],
+        ["Mobile", "utils/database_helper.dart", "Singleton SQLite (cart_items, user_session, offline)", "Thành viên 1 (Bạn)"],
+        ["Mobile", "views/table/floor_table_page.dart", "Sơ đồ bàn theo khu vực (Trống, Có khách, Đổi bàn)", "Thành viên 1 (Bạn)"],
+        ["Mobile", "services/offline_sync_service.dart", "Đồng bộ đơn hàng ngoại tuyến khi có mạng trở lại", "Thành viên 1 (Bạn)"],
+        ["Mobile", "models/category.dart, product.dart", "Model DTO có factory fromMap() và toMap()", "Thành viên 2 (Collab A)"],
+        ["Mobile", "repositories/category_repo, product_repo", "Gọi HTTP GET/POST/PUT/DELETE danh mục & sản phẩm", "Thành viên 2 (Collab A)"],
+        ["Mobile", "views/home_page.dart", "Trang chủ: Menu ngang, món mới & search phân trang", "Thành viên 2 (Collab A)"],
+        ["Mobile", "views/product_detail_page.dart", "Xem hình lớn, Size/Topping, món liên quan, thêm giỏ", "Thành viên 2 (Collab A)"],
+        ["Mobile", "views/cart_page.dart", "Giỏ hàng SQLite: Badge, nút +/- tính tiền, xóa món", "Thành viên 2 (Collab A)"],
+        ["Mobile", "views/admin/admin_category_page.dart", "Quản trị danh mục: Thêm/Sửa/Xóa chọn ảnh từ máy", "Thành viên 2 (Collab A)"],
+        ["Mobile", "views/admin/admin_product_page.dart", "Quản trị món ăn: Cuộn tải thêm phân trang, form món", "Thành viên 2 (Collab A)"],
+        ["Mobile", "models/user.dart, order.dart, payment.dart", "Model DTO cho Auth, Đơn hàng và Thanh toán", "Thành viên 3 (Collab B)"],
+        ["Mobile", "repositories/auth_repo, order_repo", "Gọi API Auth, Checkout đơn hàng, Thanh toán", "Thành viên 3 (Collab B)"],
+        ["Mobile", "views/auth/login_page, register_page.dart", "Đăng nhập/ký, lưu session SQLite, phân quyền Role", "Thành viên 3 (Collab B)"],
+        ["Mobile", "views/order/order_checkout_page.dart", "Chọn bàn, xác nhận đặt món, phương thức thanh toán", "Thành viên 3 (Collab B)"],
+        ["Mobile", "views/order/order_detail_page.dart", "Chi tiết đơn, hiển thị mã VietQR động cho khách quét", "Thành viên 3 (Collab B)"],
+        ["Mobile", "views/admin/admin_order_list_page.dart", "Dashboard đơn hàng, bộ lọc DateRangePicker", "Thành viên 3 (Collab B)"],
+        ["Mobile", "views/kitchen/kitchen_display_page.dart", "Màn hình Bếp KDS: Đếm giờ món, 'Đang làm'/'Xong'", "Thành viên 3 (Collab B)"]
+    ]
+
+    t_files = doc.add_table(rows=len(files_data) + 1, cols=len(headers_files))
+    t_files.alignment = WD_TABLE_ALIGNMENT.CENTER
+    t_files.autofit = False
+
+    for i, col_name in enumerate(headers_files):
+        t_files.rows[0].cells[i].text = col_name
+        set_cell_background(t_files.rows[0].cells[i], "D9D9D9")
+        for p in t_files.rows[0].cells[i].paragraphs:
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+            p.paragraph_format.line_spacing = 1.5
+            for r in p.runs:
+                r.font.name = 'Times New Roman'
+                r.font.size = Pt(11)
+                r.font.bold = True
+                r.font.color.rgb = RGBColor(0, 0, 0)
+
+    for r_i, row_vals in enumerate(files_data):
+        row_cells = t_files.rows[r_i + 1].cells
+        for c_i, val in enumerate(row_vals):
+            row_cells[c_i].text = val
+            for p in row_cells[c_i].paragraphs:
+                p.paragraph_format.line_spacing = 1.2
+                p.paragraph_format.space_after = Pt(2)
+                if c_i in [0, 3]:
+                    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                for r in p.runs:
+                    r.font.name = 'Times New Roman'
+                    r.font.size = Pt(10)
+                    r.font.color.rgb = RGBColor(0, 0, 0)
+                    if c_i in [0, 3]:
+                        r.font.bold = True
+
+    add_p("")
+
+    add_h2("4.3. Kịch Bản Bảo Vệ Đồ Án Trước Giảng Viên (Defense Strategy)")
+    add_p(
+        "Khi báo cáo trước hội đồng chấm thi, mỗi thành viên đại diện trình bày đúng phân hệ do mình trực tiếp phụ trách:\n"
+        "1. Thành viên 1 (Bạn): Báo cáo thiết kế CSDL 10 bảng, 10 lần tự phản biện, kiến trúc Base Provider/Repository chuẩn của thầy, demo Sơ đồ bàn ăn và cơ chế đồng bộ ngoại tuyến SQLite.\n"
+        "2. Thành viên 2 (Collab A): Báo cáo và demo Quản trị Danh mục & Món ăn, cơ chế Upload ảnh 3 trường hợp, demo tính năng chặn xóa khi có ràng buộc, demo Trang chủ phân trang và Giỏ hàng SQLite.\n"
+        "3. Thành viên 3 (Collab B): Báo cáo và demo Xác thực tài khoản, băm mật khẩu, phân quyền Role, quy trình Đặt hàng đẩy sang Màn hình Bếp KDS và demo quét mã VietQR ngân hàng thực tế."
     )
 
     steps = [
