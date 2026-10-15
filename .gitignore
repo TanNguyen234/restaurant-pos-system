@@ -21,3 +21,6 @@ build/
 # OS generated
 .DS_Store
 Thumbs.db
+
+# Agent workspaces & scratch
+.agents/
