@@ -22,8 +22,12 @@ builder.Services.AddDbContext<RestaurantPosContext>(options =>
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<SiteProvider>();
 
-// 4. Thêm Controllers
-builder.Services.AddControllers();
+// 4. Thêm Controllers kèm cấu hình xử lý chu kỳ JSON an toàn
+builder.Services.AddControllers()
+    .AddJsonOptions(options =>
+    {
+        options.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles;
+    });
 
 var app = builder.Build();
 
