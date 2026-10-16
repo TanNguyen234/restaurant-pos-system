@@ -41,7 +41,6 @@ class _FloorTablePageState extends State<FloorTablePage>
 
       if (!mounted) return;
 
-      // Update TabController if areas changed
       if (_tabController == null || _tabController!.length != areas.length) {
         _tabController?.dispose();
         _tabController = TabController(length: areas.length, vsync: this);
@@ -85,7 +84,6 @@ class _FloorTablePageState extends State<FloorTablePage>
   }
 
   Future<void> _handleTableTransfer(DiningTable sourceTable) async {
-    // Chỉ lấy các bàn đang trống (status == 0) và khác bàn hiện tại
     final availableTables = _allTables
         .where((t) => t.status == 0 && t.id != sourceTable.id)
         .toList();
@@ -223,7 +221,6 @@ class _FloorTablePageState extends State<FloorTablePage>
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Header with table name and status badge
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
@@ -276,14 +273,13 @@ class _FloorTablePageState extends State<FloorTablePage>
                 ),
                 const Divider(height: 24),
 
-                // Table quick action list
                 ListTile(
                   leading: const CircleAvatar(
                     backgroundColor: Color(0xFFE8F5E9),
                     child: Icon(Icons.edit_note, color: Color(0xFF2E7D32)),
                   ),
                   title: const Text('Đổi trạng thái bàn'),
-                  subtitle: const Text('Trống (Xanh), Có khách (Đỏ), Đặt trước (Cam)'),
+                  subtitle: const Text('Trống, Đang có khách, Đã đặt trước'),
                   trailing: const Icon(Icons.chevron_right),
                   onTap: () {
                     Navigator.pop(bottomSheetCtx);
@@ -340,7 +336,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                 dialogCtx,
                 table,
                 status: 0,
-                title: 'Bàn trống (Available)',
+                title: 'Bàn trống',
                 color: const Color(0xFF2E7D32),
                 icon: Icons.check_circle_outline,
               ),
@@ -348,7 +344,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                 dialogCtx,
                 table,
                 status: 1,
-                title: 'Có khách (Occupied)',
+                title: 'Có khách',
                 color: const Color(0xFFC62828),
                 icon: Icons.restaurant,
               ),
@@ -356,7 +352,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                 dialogCtx,
                 table,
                 status: 2,
-                title: 'Đã đặt trước / Chờ phục vụ',
+                title: 'Đã đặt trước',
                 color: const Color(0xFFEF6C00),
                 icon: Icons.bookmark_border,
               ),
@@ -561,17 +557,17 @@ class _FloorTablePageState extends State<FloorTablePage>
 
   Widget _buildTableCard(DiningTable table) {
     return Card(
-      elevation: 2,
+      elevation: 1,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         side: BorderSide(
-          color: table.statusColor.withAlpha(120),
-          width: 1.5,
+          color: table.statusColor.withAlpha(90),
+          width: 1.0,
         ),
       ),
       color: table.statusBackgroundColor,
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
         onTap: () => _showTableActionSheet(table),
         child: Padding(
           padding: const EdgeInsets.all(12),
@@ -579,7 +575,6 @@ class _FloorTablePageState extends State<FloorTablePage>
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              // Top row: Table name & Status icon
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -598,8 +593,6 @@ class _FloorTablePageState extends State<FloorTablePage>
                   Icon(table.statusIcon, color: table.statusColor, size: 20),
                 ],
               ),
-
-              // Middle: Capacity
               Row(
                 children: [
                   Icon(Icons.people_outline, size: 16, color: Colors.grey.shade700),
@@ -631,8 +624,6 @@ class _FloorTablePageState extends State<FloorTablePage>
                   ],
                 ],
               ),
-
-              // Bottom: Status badge
               Container(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 4),
@@ -664,13 +655,12 @@ class _FloorTablePageState extends State<FloorTablePage>
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          'Sơ đồ Bàn ăn (Floor Plan)',
+          'Sơ đồ bàn ăn',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.brown.shade800,
         foregroundColor: Colors.white,
         actions: [
-          // Unsynced offline orders indicator
           ValueListenableBuilder<int>(
             valueListenable: _syncService.unsyncedCountNotifier,
             builder: (context, count, _) {

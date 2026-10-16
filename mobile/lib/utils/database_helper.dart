@@ -28,7 +28,6 @@ class DatabaseHelper {
       path,
       version: 1,
       onCreate: (db, version) async {
-        // 1. Bảng lưu trữ phiên đăng nhập người dùng trên điện thoại
         await db.execute('''
           CREATE TABLE user_session (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -41,7 +40,6 @@ class DatabaseHelper {
           )
         ''');
 
-        // 2. Bảng lưu giỏ hàng ngoại tuyến (Cart)
         await db.execute('''
           CREATE TABLE cart_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,7 +52,6 @@ class DatabaseHelper {
           )
         ''');
 
-        // 3. Bảng lưu đơn hàng chờ đồng bộ khi mất mạng (Offline Orders Queue)
         await db.execute('''
           CREATE TABLE offline_orders (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -70,12 +67,10 @@ class DatabaseHelper {
     );
   }
 
-  // ==================== USER SESSION OPERATIONS ====================
-
-  /// Lưu phiên đăng nhập của người dùng. Xóa session cũ trước khi lưu session mới.
+  /// Lưu phiên đăng nhập của người dùng.
   Future<int> saveUserSession(Map<String, dynamic> session) async {
     final db = await database;
-    await db.delete('user_session'); // Clear old session
+    await db.delete('user_session');
     final sessionData = Map<String, dynamic>.from(session);
     sessionData['logged_in_at'] ??= DateTime.now().toIso8601String();
     return await db.insert('user_session', sessionData);
@@ -103,8 +98,6 @@ class DatabaseHelper {
     final db = await database;
     return await db.delete('user_session');
   }
-
-  // ==================== CART OPERATIONS ====================
 
   Future<int> insertOrUpdateCart(Map<String, dynamic> item) async {
     final db = await database;
@@ -170,8 +163,6 @@ class DatabaseHelper {
     final db = await database;
     return await db.delete('cart_items');
   }
-
-  // ==================== OFFLINE ORDERS QUEUE OPERATIONS ====================
 
   /// Lưu đơn hàng ngoại tuyến vào hàng đợi (is_synced = 0).
   Future<int> saveOfflineOrder(Map<String, dynamic> order) async {

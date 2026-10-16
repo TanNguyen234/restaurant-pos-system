@@ -112,7 +112,6 @@ class OfflineSyncService {
         );
       }
 
-      // Kiểm tra kết nối mạng trước khi gửi
       final isOnline = await checkNetworkReachability();
       if (!isOnline) {
         return SyncResult(
@@ -194,7 +193,6 @@ class OfflineSyncService {
     final id = await DatabaseHelper().saveOfflineOrder(order);
     await refreshUnsyncedCount();
 
-    // Thử đồng bộ ngầm nếu có mạng
     unawaited(syncNow());
 
     return id;

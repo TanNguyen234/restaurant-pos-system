@@ -95,8 +95,8 @@ class _CategoryPageState extends State<CategoryPage> {
                       const Icon(Icons.coffee, size: 64, color: Colors.grey),
                       const SizedBox(height: 12),
                       const Text(
-                        "Chưa có danh mục hoặc chưa kết nối Web API",
-                        style: TextStyle(color: Colors.grey),
+                        "Không thể tải danh mục thực đơn",
+                        style: TextStyle(color: Colors.grey, fontSize: 15),
                       ),
                       const SizedBox(height: 12),
                       ElevatedButton(

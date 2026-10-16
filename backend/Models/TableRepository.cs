@@ -93,13 +93,11 @@ public class TableRepository : BaseRepository
             return (false, $"Không tìm thấy bàn đích (ID: {toTableId})", fromTableId, toTableId);
         }
 
-        // Kiểm tra bàn nguồn có đang trống không
         if (fromTable.Status == 0 && !fromTable.CurrentOrderId.HasValue)
         {
             return (false, $"Bàn nguồn '{fromTable.TableName}' hiện đang trống, không thể thực hiện chuyển bàn", fromTableId, toTableId);
         }
 
-        // Kiểm tra sơ bộ bàn đích trước khi mở transaction
         if (toTable.Status != 0)
         {
             return (false, $"Bàn đích '{toTable.TableName}' đang có khách hoặc đã đặt trước, không thể chuyển đến", fromTableId, toTableId);
@@ -108,7 +106,6 @@ public class TableRepository : BaseRepository
         using var transaction = context.Database.BeginTransaction();
         try
         {
-            // Bảo vệ chống TOCTOU race condition: reload dữ liệu bàn đích từ database trong transaction
             context.Entry(toTable).Reload();
             if (toTable.Status != 0)
             {
@@ -116,7 +113,6 @@ public class TableRepository : BaseRepository
                 return (false, $"Bàn đích '{toTable.TableName}' đang có khách hoặc đã đặt trước, không thể chuyển đến", fromTableId, toTableId);
             }
 
-            // Reload dữ liệu bàn nguồn để đảm bảo tính nhất quán
             context.Entry(fromTable).Reload();
             if (fromTable.Status == 0 && !fromTable.CurrentOrderId.HasValue)
             {
@@ -124,18 +120,15 @@ public class TableRepository : BaseRepository
                 return (false, $"Bàn nguồn '{fromTable.TableName}' hiện đang trống, không thể thực hiện chuyển bàn", fromTableId, toTableId);
             }
 
-            // 1. Tìm tất cả đơn hàng đang hoạt động liên quan đến bàn nguồn (Status < 3: chưa hoàn thành / chưa hủy)
             var activeOrders = context.Orders
                 .Where(o => o.TableId == fromTableId && o.Status < 3)
                 .ToList();
 
-            // 2. Chuyển tất cả đơn hàng đang hoạt động sang bàn đích
             foreach (var order in activeOrders)
             {
                 order.TableId = toTableId;
             }
 
-            // Nếu bàn nguồn có CurrentOrderId nhưng chưa nằm trong activeOrders, cũng cập nhật TableId
             if (fromTable.CurrentOrderId.HasValue && activeOrders.All(o => o.OrderId != fromTable.CurrentOrderId.Value))
             {
                 var currentOrder = context.Orders.Find(fromTable.CurrentOrderId.Value);
@@ -145,14 +138,10 @@ public class TableRepository : BaseRepository
                 }
             }
 
-            // 3. Gán CurrentOrderId cho bàn đích
             toTable.CurrentOrderId = activeOrders.OrderByDescending(o => o.OrderId).FirstOrDefault()?.OrderId ?? fromTable.CurrentOrderId;
-
-            // 4. Cập nhật trạng thái bàn đích
             toTable.Status = fromTable.Status != 0 ? fromTable.Status : 1;
             toTable.UpdatedAt = DateTime.Now;
 
-            // 5. Giải phóng bàn nguồn
             fromTable.Status = 0;
             fromTable.CurrentOrderId = null;
             fromTable.UpdatedAt = DateTime.Now;

@@ -80,7 +80,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify AppBar title of initial floor plan page
-    expect(find.text('Sơ đồ Bàn ăn (Floor Plan)'), findsOneWidget);
+    expect(find.text('Sơ đồ bàn ăn'), findsOneWidget);
 
     // Verify NavigationBar destinations
     expect(find.text('Sơ đồ bàn'), findsOneWidget);
@@ -99,7 +99,7 @@ void main() {
     await tester.pumpAndSettle();
 
     // Verify OrdersSyncPage is loaded
-    expect(find.text('Đơn hàng & Đồng bộ ngoại tuyến'), findsOneWidget);
+    expect(find.text('Đơn hàng ngoại tuyến'), findsOneWidget);
     expect(find.text('Trạng thái đồng bộ hàng đợi SQLite'), findsOneWidget);
   });
 }

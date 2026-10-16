@@ -161,7 +161,7 @@ class _OrdersSyncPageState extends State<OrdersSyncPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text(
-          'Đơn hàng & Đồng bộ ngoại tuyến',
+          'Đơn hàng ngoại tuyến',
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
         backgroundColor: Colors.brown.shade800,
@@ -176,7 +176,6 @@ class _OrdersSyncPageState extends State<OrdersSyncPage> {
       ),
       body: Column(
         children: [
-          // Top Sync Controller Card
           Container(
             padding: const EdgeInsets.all(16),
             color: Colors.brown.shade50,
@@ -237,7 +236,6 @@ class _OrdersSyncPageState extends State<OrdersSyncPage> {
             ),
           ),
 
-          // Orders List
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
