@@ -3,6 +3,8 @@ import '../models/category.dart';
 import '../repositories/category_repository.dart';
 import '../utils/database_helper.dart';
 import 'cart_page.dart';
+import 'home_page.dart';
+import 'admin/admin_category_page.dart';
 
 class CategoryPage extends StatefulWidget {
   final String title;
@@ -110,94 +112,164 @@ class _CategoryPageState extends State<CategoryPage> {
                 ),
             ],
           ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined),
+            tooltip: 'Quản trị danh mục (Admin)',
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const AdminCategoryPage()),
+              ).then((_) => _initData());
+            },
+          ),
           const SizedBox(width: 4),
         ],
       ),
       body: isLoading
           ? const Center(child: CircularProgressIndicator())
-          : categories.isEmpty
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(Icons.category_outlined, size: 64, color: Colors.grey[400]),
-                      const SizedBox(height: 16),
-                      Text(
-                        'Chưa có danh mục nào',
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.grey[600],
-                          fontWeight: FontWeight.w500,
-                        ),
-                      ),
-                    ],
-                  ),
-                )
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: categories.length,
-                  itemBuilder: (context, index) {
-                    final item = categories[index];
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 12),
+          : RefreshIndicator(
+              onRefresh: () async {
+                _initData();
+                _loadCartCount();
+              },
+              child: ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  // Banner điều hướng nhanh sang HomePage
+                  InkWell(
+                    onTap: () {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (context) => const HomePage()),
+                      ).then((_) => _loadCartCount());
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(14),
+                      margin: const EdgeInsets.only(bottom: 16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+                        ),
                         borderRadius: BorderRadius.circular(16),
                         boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x0A000000),
-                            blurRadius: 10,
-                            offset: Offset(0, 4),
+                          BoxShadow(color: Color(0x14000000), blurRadius: 10, offset: Offset(0, 4)),
+                        ],
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.storefront, color: Color(0xFFF59E0B), size: 28),
+                          SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Xem Trang chủ & Thực đơn món',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  'Món mới phân trang, tìm kiếm & thêm vào giỏ',
+                                  style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.arrow_forward_ios, color: Colors.white70, size: 14),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                  if (categories.isEmpty)
+                    Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.category_outlined, size: 64, color: Colors.grey[400]),
+                          const SizedBox(height: 16),
+                          Text(
+                            'Chưa có danh mục nào',
+                            style: TextStyle(
+                              fontSize: 16,
+                              color: Colors.grey[600],
+                              fontWeight: FontWeight.w500,
+                            ),
                           ),
                         ],
                       ),
-                      child: ListTile(
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                        leading: Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0F172A).withOpacity(0.05),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: const Icon(
-                            Icons.restaurant_menu,
-                            color: Color(0xFF0F172A),
-                            size: 24,
-                          ),
-                        ),
-                        title: Text(
-                          item.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.bold,
-                            fontSize: 15,
-                            color: Color(0xFF0F172A),
-                          ),
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 4),
-                          child: Text(
-                            item.description.isNotEmpty ? item.description : item.title,
-                            style: TextStyle(
-                              color: Colors.grey[600],
-                              fontSize: 12,
+                    )
+                  else
+                    ...categories.map((item) {
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white,
+                          borderRadius: BorderRadius.circular(16),
+                          boxShadow: const [
+                            BoxShadow(
+                              color: Color(0x0A000000),
+                              blurRadius: 10,
+                              offset: Offset(0, 4),
                             ),
-                            maxLines: 2,
-                            overflow: TextOverflow.ellipsis,
+                          ],
+                        ),
+                        child: ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          leading: Container(
+                            width: 48,
+                            height: 48,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0F172A).withOpacity(0.05),
+                              borderRadius: BorderRadius.circular(12),
+                            ),
+                            child: const Icon(
+                              Icons.restaurant_menu,
+                              color: Color(0xFF0F172A),
+                              size: 24,
+                            ),
                           ),
+                          title: Text(
+                            item.name,
+                            style: const TextStyle(
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                              color: Color(0xFF0F172A),
+                            ),
+                          ),
+                          subtitle: Padding(
+                            padding: const EdgeInsets.only(top: 4),
+                            child: Text(
+                              item.description.isNotEmpty ? item.description : item.title,
+                              style: TextStyle(
+                                color: Colors.grey[600],
+                                fontSize: 12,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          trailing: const Icon(
+                            Icons.arrow_forward_ios,
+                            size: 14,
+                            color: Color(0xFF94A3B8),
+                          ),
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(builder: (context) => const HomePage()),
+                            ).then((_) => _loadCartCount());
+                          },
                         ),
-                        trailing: const Icon(
-                          Icons.arrow_forward_ios,
-                          size: 14,
-                          color: Color(0xFF94A3B8),
-                        ),
-                        onTap: () {
-                          // Tap into category
-                        },
-                      ),
-                    );
-                  },
-                ),
+                      );
+                    }),
+                ],
+              ),
+            ),
     );
   }
 }

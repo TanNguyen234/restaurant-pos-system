@@ -8,6 +8,8 @@ import '../repositories/product_repository.dart';
 import '../utils/database_helper.dart';
 import 'cart_page.dart';
 import 'product_detail_page.dart';
+import 'admin/admin_category_page.dart';
+import 'admin/admin_product_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -200,6 +202,45 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                 ),
+            ],
+          ),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert, color: Colors.white),
+            tooltip: 'Tùy chọn quản trị',
+            onSelected: (val) {
+              if (val == 'admin_category') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AdminCategoryPage()),
+                ).then((_) => _loadCategories());
+              } else if (val == 'admin_product') {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (context) => const AdminProductPage()),
+                ).then((_) => _loadProducts(page: _currentPage));
+              }
+            },
+            itemBuilder: (context) => [
+              const PopupMenuItem(
+                value: 'admin_category',
+                child: Row(
+                  children: [
+                    Icon(Icons.category_outlined, color: Color(0xFF0F172A), size: 20),
+                    SizedBox(width: 8),
+                    Text('Quản trị Danh mục (Admin)', style: TextStyle(fontSize: 13)),
+                  ],
+                ),
+              ),
+              const PopupMenuItem(
+                value: 'admin_product',
+                child: Row(
+                  children: [
+                    Icon(Icons.inventory_2_outlined, color: Color(0xFF0F172A), size: 20),
+                    SizedBox(width: 8),
+                    Text('Quản trị Món ăn (Admin)', style: TextStyle(fontSize: 13)),
+                  ],
+                ),
+              ),
             ],
           ),
         ],

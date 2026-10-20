@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:restaurant_pos_app/models/product.dart';
 import 'package:restaurant_pos_app/utils/database_helper.dart';
+import 'package:restaurant_pos_app/views/admin/admin_category_page.dart';
+import 'package:restaurant_pos_app/views/admin/admin_product_page.dart';
 import 'package:restaurant_pos_app/views/cart_page.dart';
 import 'package:restaurant_pos_app/views/home_page.dart';
 import 'package:restaurant_pos_app/views/product_detail_page.dart';
@@ -108,6 +110,32 @@ void main() {
       expect(find.text('Restaurant & Cafe POS'), findsOneWidget);
       expect(find.text('Tất cả món'), findsOneWidget);
       expect(find.byType(TextField), findsOneWidget);
+    });
+  });
+
+  group('Admin Pages Widget Tests', () {
+    testWidgets('AdminCategoryPage renders header and category list', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: AdminCategoryPage(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Quản trị Danh mục'), findsOneWidget);
+      expect(find.byType(FloatingActionButton), findsOneWidget);
+    });
+
+    testWidgets('AdminProductPage renders search, category dropdown and product list', (WidgetTester tester) async {
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: AdminProductPage(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.text('Quản trị Món ăn'), findsOneWidget);
+      expect(find.byType(FloatingActionButton), findsOneWidget);
     });
   });
 }

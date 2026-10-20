@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 import 'services/offline_sync_service.dart';
 import 'utils/database_helper.dart';
 import 'views/category_page.dart';
+import 'views/cart_page.dart';
+import 'views/home_page.dart';
 import 'views/table/floor_table_page.dart';
 
 void main() {
@@ -91,7 +93,9 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
 
   final List<Widget> _pages = const [
     FloorTablePage(),
+    HomePage(),
     CategoryPage(title: 'Thực đơn & Danh mục'),
+    CartPage(),
     OrdersSyncPage(),
   ];
 
@@ -114,9 +118,19 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
             label: 'Sơ đồ bàn',
           ),
           const NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'Trang chủ',
+          ),
+          const NavigationDestination(
             icon: Icon(Icons.restaurant_menu_outlined),
             selectedIcon: Icon(Icons.restaurant_menu_rounded),
             label: 'Thực đơn',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.shopping_cart_outlined),
+            selectedIcon: Icon(Icons.shopping_cart_rounded),
+            label: 'Giỏ hàng',
           ),
           NavigationDestination(
             icon: ValueListenableBuilder<int>(
