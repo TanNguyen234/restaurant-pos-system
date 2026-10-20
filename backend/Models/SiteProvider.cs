@@ -7,6 +7,9 @@ public class SiteProvider : BaseProvider
     CategoryRepository? category;
     public CategoryRepository Category => category ??= new CategoryRepository(Context);
 
+    ProductRepository? product;
+    public ProductRepository Product => product ??= new ProductRepository(Context);
+
     TableRepository? table;
     public TableRepository Table => table ??= new TableRepository(Context);
 }

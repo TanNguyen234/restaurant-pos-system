@@ -1,6 +1,93 @@
-@WebApi_HostAddress = http://localhost:5254
+@WebApi_HostAddress = http://localhost:5138
 
-GET {{WebApi_HostAddress}}/weatherforecast/
+### 1. Lấy danh sách danh mục
+GET {{WebApi_HostAddress}}/api/category
 Accept: application/json
 
-###
+### 2. Lấy chi tiết danh mục theo ID
+GET {{WebApi_HostAddress}}/api/category/1
+Accept: application/json
+
+### 3. Thêm danh mục mới
+POST {{WebApi_HostAddress}}/api/category
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="Name"
+
+Cà phê Đặc sản
+--boundary
+Content-Disposition: form-data; name="Title"
+
+Cà phê Arabica Cầu Đất hảo hạng
+--boundary
+Content-Disposition: form-data; name="Description"
+
+Hương thơm hoa quả nhẹ nhàng, vị chua thanh tinh tế
+--boundary
+Content-Disposition: form-data; name="SortOrder"
+
+6
+--boundary--
+
+### 4. Lấy danh sách sản phẩm phân trang
+GET {{WebApi_HostAddress}}/api/product?page=1&pageSize=5
+Accept: application/json
+
+### 5. Lọc sản phẩm theo danh mục và tìm kiếm
+GET {{WebApi_HostAddress}}/api/product?categoryId=1&search=đen&page=1&pageSize=5
+Accept: application/json
+
+### 6. Sắp xếp sản phẩm theo giá tăng dần
+GET {{WebApi_HostAddress}}/api/product?sortBy=price_asc&page=1&pageSize=10
+Accept: application/json
+
+### 7. Lấy danh sách sản phẩm nổi bật
+GET {{WebApi_HostAddress}}/api/product/featured?limit=6
+Accept: application/json
+
+### 8. Lấy chi tiết sản phẩm theo ID (kèm thuộc tính Size, Topping)
+GET {{WebApi_HostAddress}}/api/product/1
+Accept: application/json
+
+### 9. Lấy danh sách sản phẩm liên quan cùng danh mục (có phân trang)
+GET {{WebApi_HostAddress}}/api/product/related/1?page=1&pageSize=4
+Accept: application/json
+
+### 10. Thêm sản phẩm mới
+POST {{WebApi_HostAddress}}/api/product
+Content-Type: multipart/form-data; boundary=boundary
+
+--boundary
+Content-Disposition: form-data; name="CategoryId"
+
+1
+--boundary
+Content-Disposition: form-data; name="ProductName"
+
+Cold Brew Cam Sả
+--boundary
+Content-Disposition: form-data; name="Price"
+
+45000
+--boundary
+Content-Disposition: form-data; name="Unit"
+
+Ly
+--boundary
+Content-Disposition: form-data; name="Description"
+
+Cà phê ủ lạnh kết hợp vị chua ngọt của cam vàng và hương sả
+--boundary
+Content-Disposition: form-data; name="IsFeatured"
+
+true
+--boundary--
+
+### 11. Xóa sản phẩm (Kiểm tra ràng buộc kế toán nếu đã có trong OrderDetails)
+DELETE {{WebApi_HostAddress}}/api/product/1
+Accept: application/json
+
+### 12. Xóa danh mục (Kiểm tra ràng buộc nếu còn sản phẩm)
+DELETE {{WebApi_HostAddress}}/api/category/1
+Accept: application/json

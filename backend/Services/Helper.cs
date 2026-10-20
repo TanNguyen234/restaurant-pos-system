@@ -34,10 +34,21 @@ public static class Helper
     public static void DeleteImage(string fileName, string folder = "images")
     {
         if (string.IsNullOrEmpty(fileName)) return;
-        string fullPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", folder, fileName);
+        // Bảo vệ ảnh mặc định hệ thống không bị xóa
+        if (fileName.StartsWith("default_") || fileName.StartsWith("sample_")) return;
+
+        string cleanFileName = Path.GetFileName(fileName);
+        string fullPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", folder, cleanFileName);
         if (File.Exists(fullPath))
         {
-            File.Delete(fullPath);
+            try
+            {
+                File.Delete(fullPath);
+            }
+            catch
+            {
+                // Bỏ qua lỗi khóa file nếu đang được sử dụng
+            }
         }
     }
 }
