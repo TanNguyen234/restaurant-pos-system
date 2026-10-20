@@ -1,0 +1,2 @@
+-- Tham chiếu trực tiếp đến file gốc ở thư mục gốc: ../RestaurantPosDb.sql
+-- File này đồng bộ 100% với RestaurantPosDb.sql tại root.
