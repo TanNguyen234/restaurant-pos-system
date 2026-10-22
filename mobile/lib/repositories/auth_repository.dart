@@ -17,7 +17,7 @@ class AuthRepository {
   /// Đăng nhập tài khoản hệ thống POS
   Future<Map<String, dynamic>> login(String username, String password) async {
     try {
-      final response = await http.post(Uri.parse('$baseUrl/login'),
+      final response = await ApiConfig.post(Uri.parse('$baseUrl/login'),
         headers: {'Content-Type':'application/json'},
         body:jsonEncode({'username':username.trim(),'password':password})).timeout(timeoutDuration);
       if (response.statusCode != 200) return {'success':false,'message':'Đăng nhập thất bại (HTTP ${response.statusCode})'};
@@ -39,7 +39,7 @@ class AuthRepository {
     int? roleId,
   }) async {
     try {
-      final response = await http.post(Uri.parse('$baseUrl/register'),headers:{'Content-Type':'application/json'},
+      final response = await ApiConfig.post(Uri.parse('$baseUrl/register'),headers:{'Content-Type':'application/json'},
         body:jsonEncode({'username':username.trim(),'password':password,'fullName':fullName.trim(),'email':email?.trim(),'phoneNumber':phoneNumber?.trim()})).timeout(timeoutDuration);
       final data = jsonDecode(response.body) as Map<String,dynamic>;
       return {'success':response.statusCode == 200,'message':data['message'] ?? data['error'] ?? 'Đăng ký thất bại','accountId':data['accountId']};
@@ -53,7 +53,7 @@ class AuthRepository {
     required String newPassword,
   }) async {
     try {
-      final response = await http.post(Uri.parse('$baseUrl/change-password'),headers:{'Content-Type':'application/json'},
+      final response = await ApiConfig.post(Uri.parse('$baseUrl/change-password'),headers:{'Content-Type':'application/json'},
         body:jsonEncode({'accountId':accountId,'oldPassword':oldPassword,'newPassword':newPassword})).timeout(timeoutDuration);
       final data = jsonDecode(response.body) as Map<String,dynamic>;
       return {'success':response.statusCode == 200 && data['success'] == true,'message':data['message'] ?? 'Đổi mật khẩu thất bại'};
@@ -76,7 +76,7 @@ class AuthRepository {
 
   /// Lấy danh sách thành viên/nhân viên (Admin)
   Future<List<UserAccount>> getMembers() async {
-    final response = await http.get(Uri.parse('$accountBaseUrl/members')).timeout(timeoutDuration);
+    final response = await ApiConfig.get(Uri.parse('$accountBaseUrl/members')).timeout(timeoutDuration);
     if (response.statusCode != 200) throw StateError('Tải thành viên thất bại (HTTP ${response.statusCode})');
     final List<dynamic> items = jsonDecode(response.body);
     return items.map((e) => UserAccount.fromMap(e)).toList();
