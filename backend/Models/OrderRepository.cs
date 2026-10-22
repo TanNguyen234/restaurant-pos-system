@@ -44,13 +44,15 @@ public class OrderRepository : BaseRepository
                 orderCode = $"{todayPrefix}{(countToday + 1):D3}";
             }
 
-            // Tính tổng tiền từ danh sách món
-            decimal totalAmount = 0;
-            foreach (var item in request.Items)
-            {
-                decimal itemSubtotal = item.UnitPrice * item.Quantity;
-                totalAmount += itemSubtotal;
-            }
+            // Never accept client-supplied item prices as financial truth.
+            if (request.Items.Any(i => i.Quantity <= 0 || i.Quantity > 100 || i.ProductId <= 0))
+                return (false, "Số lượng hoặc mã món không hợp lệ", null);
+            var ids = request.Items.Select(i => i.ProductId).Distinct().ToList();
+            var products = context.Products.Where(p => ids.Contains(p.ProductId) && p.IsAvailable)
+                .ToDictionary(p => p.ProductId);
+            if (products.Count != ids.Count)
+                return (false, "Một số món không tồn tại hoặc ngừng bán", null);
+            decimal totalAmount = request.Items.Sum(i => products[i.ProductId].Price * i.Quantity);
 
             decimal discount = request.DiscountAmount ?? 0;
             if (discount < 0) discount = 0;
@@ -85,8 +87,8 @@ public class OrderRepository : BaseRepository
                     OrderId = order.OrderId,
                     ProductId = item.ProductId,
                     Quantity = item.Quantity > 0 ? item.Quantity : 1,
-                    UnitPrice = item.UnitPrice,
-                    SubTotal = item.UnitPrice * (item.Quantity > 0 ? item.Quantity : 1),
+                    UnitPrice = products[item.ProductId].Price,
+                    SubTotal = products[item.ProductId].Price * item.Quantity,
                     ItemNote = item.ItemNote?.Trim(),
                     CookingStatus = 0 // 0: Chờ nấu (Pending)
                 };

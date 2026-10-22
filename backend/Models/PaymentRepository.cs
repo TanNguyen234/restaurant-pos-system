@@ -7,16 +7,14 @@ namespace WebApi.Models;
 
 public class PaymentRepository : BaseRepository
 {
-    // Cấu hình ngân hàng mặc định cho mã VietQR NAPAS 247
-    public const string DefaultBankId = "MB"; // MBBank (Ngân hàng Quân Đội)
-    public const string DefaultBankName = "MB Bank (Ngân hàng TMCP Quân Đội)";
-    public const string DefaultAccountNo = "0901234567";
-    public const string DefaultAccountName = "NHA HANG RESTAURANT POS";
-
-    // Cấu hình Cổng thanh toán VNPay Sandbox
-    public const string VnpayUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-    public const string VnpayTmnCode = "RESTAUR1";
-    public const string VnpayHashSecret = "VNPAYSECRETKEY20261020RESTAURANT";
+    // Financial configuration must be supplied from the deployment environment.
+    private static string BankId => Environment.GetEnvironmentVariable("VIETQR_BANK_ID") ?? "";
+    private static string AccountNo => Environment.GetEnvironmentVariable("VIETQR_ACCOUNT_NO") ?? "";
+    private static string AccountName => Environment.GetEnvironmentVariable("VIETQR_ACCOUNT_NAME") ?? "";
+    private static string VnpayTmnCode => Environment.GetEnvironmentVariable("VNPAY_TMN_CODE") ?? "";
+    private static string VnpayHashSecret => Environment.GetEnvironmentVariable("VNPAY_HASH_SECRET") ?? "";
+    private static string VnpayReturnUrl => Environment.GetEnvironmentVariable("VNPAY_RETURN_URL") ?? "";
+    private const string VnpayUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
 
     public PaymentRepository(RestaurantPosContext context) : base(context) { }
 
@@ -38,10 +36,18 @@ public class PaymentRepository : BaseRepository
             return (false, $"Không tìm thấy đơn hàng #{request.OrderId}", null);
         }
 
+        var due = order.FinalAmount > 0 ? order.FinalAmount : order.TotalAmount;
+        if (order.PaymentStatus == 1) return (false, "Đơn hàng đã thanh toán", null);
+        if (order.Status == 4) return (false, "Không thể thanh toán đơn đã hủy", null);
+        if (due <= 0 || (request.Amount > 0 && request.Amount != due))
+            return (false, "Số tiền thanh toán không khớp hóa đơn", null);
+        if (request.PaymentMethod is not ("Cash" or "VietQR" or "VNPay"))
+            return (false, "Phương thức thanh toán không hợp lệ", null);
+
         using var transaction = context.Database.BeginTransaction();
         try
         {
-            decimal payAmount = request.Amount > 0 ? request.Amount : (order.FinalAmount > 0 ? order.FinalAmount : order.TotalAmount);
+            decimal payAmount = due;
             string method = string.IsNullOrWhiteSpace(request.PaymentMethod) ? "Cash" : request.PaymentMethod.Trim();
             string txnRef = !string.IsNullOrWhiteSpace(request.TransactionRef)
                 ? request.TransactionRef.Trim()
@@ -97,23 +103,25 @@ public class PaymentRepository : BaseRepository
         var order = context.Orders.Find(orderId);
         if (order == null) return null;
 
+        if (string.IsNullOrWhiteSpace(BankId) || string.IsNullOrWhiteSpace(AccountNo) ||
+            string.IsNullOrWhiteSpace(AccountName)) return null;
         decimal amount = order.FinalAmount > 0 ? order.FinalAmount : order.TotalAmount;
         string description = $"THANH TOAN {order.OrderCode}";
 
         // URL chuẩn hóa của cổng VietQR QuickLink (NAPAS 247)
         // Cú pháp: https://img.vietqr.io/image/<BANK_ID>-<ACCOUNT_NO>-compact2.png?amount=<AMOUNT>&addInfo=<DESCRIPTION>&accountName=<ACCOUNT_NAME>
         string encodedDesc = Uri.EscapeDataString(description);
-        string encodedName = Uri.EscapeDataString(DefaultAccountName);
-        string qrImageUrl = $"https://img.vietqr.io/image/{DefaultBankId}-{DefaultAccountNo}-compact2.png?amount={(long)amount}&addInfo={encodedDesc}&accountName={encodedName}";
+        string encodedName = Uri.EscapeDataString(AccountName);
+        string qrImageUrl = $"https://img.vietqr.io/image/{BankId}-{AccountNo}-compact2.png?amount={(long)amount}&addInfo={encodedDesc}&accountName={encodedName}";
 
         return new VietQrResponse
         {
             OrderId = order.OrderId,
             OrderCode = order.OrderCode,
-            BankId = DefaultBankId,
-            BankName = DefaultBankName,
-            AccountNo = DefaultAccountNo,
-            AccountName = DefaultAccountName,
+            BankId = BankId,
+            BankName = BankId,
+            AccountNo = AccountNo,
+            AccountName = AccountName,
             Amount = amount,
             Description = description,
             QrImageUrl = qrImageUrl
@@ -123,10 +131,15 @@ public class PaymentRepository : BaseRepository
     /// <summary>
     /// Tạo URL chuyển hướng sang cổng thanh toán VNPay Sandbox có chữ ký HMAC-SHA512
     /// </summary>
-    public string CreateVnpayUrl(int orderId, decimal amount, string? orderInfo, string? clientIp, string? returnUrl)
+    public string? CreateVnpayUrl(int orderId, decimal amount, string? orderInfo, string? clientIp, string? returnUrl)
     {
         var order = context.Orders.Find(orderId);
-        string orderCode = order != null ? order.OrderCode : $"ORD-{orderId}";
+        if (order == null || order.PaymentStatus == 1 || order.Status == 4) return null;
+        var due = order.FinalAmount > 0 ? order.FinalAmount : order.TotalAmount;
+        if (due <= 0 || amount != due ||
+            string.IsNullOrWhiteSpace(VnpayTmnCode) || string.IsNullOrWhiteSpace(VnpayHashSecret) ||
+            string.IsNullOrWhiteSpace(VnpayReturnUrl)) return null;
+        string orderCode = order.OrderCode;
         string desc = string.IsNullOrWhiteSpace(orderInfo) ? $"Thanh toan don hang {orderCode}" : orderInfo;
 
         var vnpayParams = new SortedDictionary<string, string>
@@ -141,7 +154,7 @@ public class PaymentRepository : BaseRepository
             { "vnp_Locale", "vn" },
             { "vnp_OrderInfo", desc },
             { "vnp_OrderType", "other" },
-            { "vnp_ReturnUrl", returnUrl ?? "http://localhost:5138/api/payment/vnpay-return" },
+            { "vnp_ReturnUrl", VnpayReturnUrl },
             { "vnp_TxnRef", $"{orderId}_{DateTime.Now.Ticks}" }
         };
 
@@ -167,6 +180,31 @@ public class PaymentRepository : BaseRepository
         queryBuilder.Append("&vnp_SecureHash=" + secureHash);
 
         return $"{VnpayUrl}?{queryBuilder}";
+    }
+
+    /// <summary>
+    /// Verify HMAC over the provider's query before changing payment state.
+    /// The return URL alone is not trusted; successful payment must also match the order.
+    /// </summary>
+    public bool ValidateVnpayCallback(Dictionary<string, string> query)
+    {
+        if (string.IsNullOrWhiteSpace(VnpayHashSecret) ||
+            !query.TryGetValue("vnp_SecureHash", out var signature) ||
+            !query.TryGetValue("vnp_TmnCode", out var merchant) ||
+            merchant != VnpayTmnCode || signature.Length != 128)
+            return false;
+
+        var paramsToSign = new SortedDictionary<string, string>(query, StringComparer.Ordinal);
+        paramsToSign.Remove("vnp_SecureHash");
+        paramsToSign.Remove("vnp_SecureHashType");
+
+        var data = string.Join("&", paramsToSign.Where(kv => !string.IsNullOrEmpty(kv.Value))
+            .Select(kv => WebUtility.UrlEncode(kv.Key) + "=" + WebUtility.UrlEncode(kv.Value)));
+        byte[] provided;
+        try { provided = Convert.FromHexString(signature); }
+        catch (FormatException) { return false; }
+        var expected = Convert.FromHexString(HmacSha512(VnpayHashSecret, data));
+        return CryptographicOperations.FixedTimeEquals(provided, expected);
     }
 
     /// <summary>

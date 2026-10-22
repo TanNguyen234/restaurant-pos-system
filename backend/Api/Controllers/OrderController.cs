@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using WebApi.Models;
 
 namespace WebApi.Api.Controllers;
@@ -19,6 +20,10 @@ public class OrderController : BaseController
             return BadRequest(new { statusCode = 400, error = "Giỏ hàng không có món nào để tạo đơn" });
         }
 
+        // Server owns the identity and discount authorization.
+        request.AccountId = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var currentId) ? currentId : null;
+        if (!User.IsInRole("ADMIN") && !User.IsInRole("MANAGER"))
+            request.DiscountAmount = 0;
         var result = Provider.Order.CreateOrder(request);
         if (!result.Success)
         {

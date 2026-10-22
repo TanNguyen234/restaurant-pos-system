@@ -19,6 +19,8 @@ public class PaymentController : BaseController
             return BadRequest(new { success = false, message = "Vui lòng cung cấp mã đơn hàng cần thanh toán" });
         }
 
+        if (request.PaymentMethod == "VNPay")
+            return BadRequest(new { success = false, message = "Thanh toán VNPay phải được xác thực qua callback có chữ ký" });
         var result = Provider.Payment.ConfirmPayment(request);
         if (!result.Success)
         {
@@ -48,7 +50,7 @@ public class PaymentController : BaseController
         var qrData = Provider.Payment.GenerateVietQr(orderId);
         if (qrData == null)
         {
-            return NotFound(new { success = false, message = $"Không tìm thấy đơn hàng #{orderId} để tạo mã VietQR" });
+            return StatusCode(503, new { success = false, message = "Chưa cấu hình VietQR thật hoặc đơn không tồn tại" });
         }
 
         return Ok(new
@@ -71,13 +73,15 @@ public class PaymentController : BaseController
         }
 
         string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
-        string paymentUrl = Provider.Payment.CreateVnpayUrl(
+        string? paymentUrl = Provider.Payment.CreateVnpayUrl(
             request.OrderId,
             request.Amount,
             request.OrderInfo,
             clientIp,
             request.ReturnUrl
         );
+
+        if (paymentUrl == null) return StatusCode(503, new { success = false, message = "VNPay chưa cấu hình hoặc số tiền không khớp hóa đơn" });
 
         return Ok(new
         {
@@ -95,6 +99,8 @@ public class PaymentController : BaseController
     [HttpGet("vnpay-return")]
     public IActionResult VnpayReturn([FromQuery] Dictionary<string, string> query)
     {
+        if (!Provider.Payment.ValidateVnpayCallback(query))
+            return BadRequest(new { success = false, message = "Chữ ký VNPay không hợp lệ" });
         string responseCode = query.ContainsKey("vnp_ResponseCode") ? query["vnp_ResponseCode"] : "99";
         string txnRef = query.ContainsKey("vnp_TxnRef") ? query["vnp_TxnRef"] : string.Empty;
         string amountStr = query.ContainsKey("vnp_Amount") ? query["vnp_Amount"] : "0";
@@ -113,10 +119,10 @@ public class PaymentController : BaseController
             amount = rawAmount / 100; // VNPay nhân 100
         }
 
-        if (responseCode == "00" && orderId > 0)
+        if (responseCode == "00" && query.GetValueOrDefault("vnp_TransactionStatus") == "00" && orderId > 0)
         {
             // Giao dịch thành công
-            Provider.Payment.ConfirmPayment(new ConfirmPaymentRequest
+            var outcome = Provider.Payment.ConfirmPayment(new ConfirmPaymentRequest
             {
                 OrderId = orderId,
                 PaymentMethod = "VNPay",
@@ -125,6 +131,7 @@ public class PaymentController : BaseController
                 Note = "Thanh toán thành công qua cổng VNPay Sandbox"
             });
 
+            if (!outcome.Success) return BadRequest(new { success = false, message = outcome.Message });
             return Ok(new
             {
                 success = true,
