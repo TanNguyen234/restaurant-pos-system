@@ -13,9 +13,35 @@ public class AccountRepository : BaseRepository
     /// </summary>
     public static string HashPassword(string password)
     {
-        using var sha256 = SHA256.Create();
-        var bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-        return Convert.ToHexString(bytes).ToLowerInvariant();
+        var salt = RandomNumberGenerator.GetBytes(16);
+        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 210_000, HashAlgorithmName.SHA256, 32);
+        return $"pbkdf2$210000${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
+    }
+
+    private static bool VerifyPassword(string password, string stored)
+    {
+        var components = stored.Split('$');
+        if (components.Length == 4 && components[0] == "pbkdf2" &&
+            int.TryParse(components[1], out var rounds) && rounds >= 100_000 && rounds <= 1_000_000)
+        {
+            try
+            {
+                var salt = Convert.FromBase64String(components[2]);
+                var expected = Convert.FromBase64String(components[3]);
+                if (salt.Length != 16 || expected.Length != 32) return false;
+                var supplied = Rfc2898DeriveBytes.Pbkdf2(password, salt, rounds, HashAlgorithmName.SHA256, 32);
+                return CryptographicOperations.FixedTimeEquals(supplied, expected);
+            }
+            catch (FormatException) { return false; }
+        }
+
+        // One-time migration for legacy SHA256 hashes stored in RestaurantPosDb.sql.
+        if (stored.Length != 64) return false;
+        byte[] legacy;
+        try { legacy = Convert.FromHexString(stored); }
+        catch (FormatException) { return false; }
+        var computed = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+        return CryptographicOperations.FixedTimeEquals(legacy, computed);
     }
 
     /// <summary>
@@ -26,15 +52,20 @@ public class AccountRepository : BaseRepository
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
             return null;
 
-        string hash = HashPassword(password);
         var account = context.Accounts
             .FirstOrDefault(a => a.Username.ToLower() == username.Trim().ToLower() && a.IsActive);
 
         if (account == null) return null;
 
         // Kiểm tra khớp mật khẩu băm SHA-256 (hoặc so sánh trực tiếp nếu mật khẩu chưa băm)
-        if (account.PasswordHash == hash || account.PasswordHash == password)
+        if (VerifyPassword(password, account.PasswordHash))
         {
+            if (!account.PasswordHash.StartsWith("pbkdf2$", StringComparison.Ordinal))
+            {
+                account.PasswordHash = HashPassword(password);
+                account.UpdatedAt = DateTime.UtcNow;
+                context.SaveChanges();
+            }
             return account;
         }
 
@@ -55,8 +86,8 @@ public class AccountRepository : BaseRepository
         if (string.IsNullOrWhiteSpace(username))
             return (false, "Tên đăng nhập không được để trống", null);
 
-        if (string.IsNullOrWhiteSpace(password) || password.Length < 4)
-            return (false, "Mật khẩu phải chứa ít nhất 4 ký tự", null);
+        if (string.IsNullOrWhiteSpace(password) || password.Length < 10)
+            return (false, "Mật khẩu phải chứa ít nhất 10 ký tự", null);
 
         if (string.IsNullOrWhiteSpace(fullName))
             return (false, "Họ tên không được để trống", null);
@@ -78,12 +109,8 @@ public class AccountRepository : BaseRepository
             }
         }
 
-        // Kiểm tra role tồn tại
-        var role = context.Roles.Find(roleId);
-        if (role == null)
-        {
-            roleId = 4; // Mặc định Waiter / Member
-        }
+        // Self-registration can only create a customer account; role changes are admin actions.
+        roleId = 8;
 
         var newAccount = new Account
         {
@@ -117,15 +144,14 @@ public class AccountRepository : BaseRepository
             return (false, "Không tìm thấy tài khoản");
         }
 
-        string oldHash = HashPassword(oldPassword);
-        if (account.PasswordHash != oldHash && account.PasswordHash != oldPassword)
+        if (!VerifyPassword(oldPassword, account.PasswordHash))
         {
             return (false, "Mật khẩu cũ không chính xác");
         }
 
         if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 4)
         {
-            return (false, "Mật khẩu mới phải chứa ít nhất 4 ký tự");
+            return (false, "Mật khẩu mới phải chứa ít nhất 10 ký tự");
         }
 
         account.PasswordHash = HashPassword(newPassword);

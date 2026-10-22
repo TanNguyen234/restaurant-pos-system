@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using System.Security.Claims;
 using WebApi.Models;
 
 namespace WebApi.Api.Controllers;
@@ -30,7 +31,7 @@ public class AuthController : BaseController
         string roleName = role != null ? role.RoleName : "Người dùng";
 
         // Tạo chuỗi token phiên làm việc
-        string token = $"pos_{Guid.NewGuid():N}_{account.AccountId}";
+        string token = HttpContext.RequestServices.GetRequiredService<PosTokenService>().Issue(account);
 
         return Ok(new
         {
@@ -67,7 +68,7 @@ public class AuthController : BaseController
             request.FullName,
             request.Email,
             request.PhoneNumber,
-            request.RoleId ?? 4 // Mặc định Waiter / Member
+            8 // Public registration must never select staff/admin role
         );
 
         if (!result.Success)
@@ -102,7 +103,9 @@ public class AuthController : BaseController
             return BadRequest(new { success = false, message = "Thông tin đổi mật khẩu không hợp lệ" });
         }
 
-        var result = Provider.Account.ChangePassword(request.AccountId, request.OldPassword, request.NewPassword);
+        var callerId = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var id) ? id : 0;
+        if (callerId != request.AccountId) return Forbid();
+        var result = Provider.Account.ChangePassword(callerId, request.OldPassword, request.NewPassword);
         if (!result.Success)
         {
             return BadRequest(new { success = false, message = result.Message });
@@ -118,6 +121,8 @@ public class AuthController : BaseController
     [HttpGet("profile/{id:int}")]
     public IActionResult GetProfile(int id)
     {
+        var callerId = int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var current) ? current : 0;
+        if (callerId != id && !User.IsInRole("ADMIN") && !User.IsInRole("MANAGER")) return Forbid();
         var account = Provider.Account.GetById(id);
         if (account == null)
         {
