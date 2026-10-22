@@ -14,7 +14,6 @@ class OrderRepository {
 
   final DatabaseHelper _dbHelper = DatabaseHelper();
 
-  // Seeded fallback orders for offline demo & reliable test execution
 
   /// Tạo đơn hàng mới từ giỏ hàng.
   /// Nếu có mạng: gọi Backend API `POST /api/order`.
@@ -46,7 +45,7 @@ class OrderRepository {
     final res=await http.get(Uri.parse('$baseUrl/admin').replace(queryParameters:q)).timeout(timeoutDuration);
     if(res.statusCode!=200)throw StateError('Không tải được đơn hàng (HTTP ${res.statusCode})');
     final d=jsonDecode(res.body) as Map<String,dynamic>;
-    final orders=(d['orders'] as List<dynamic>???[]).map((e)=>OrderModel.fromMap(e)).toList();
+    final orders=(d['orders'] as List<dynamic>? ?? []).map((e)=>OrderModel.fromMap(e)).toList();
     return {'totalOrders':d['totalOrders']??orders.length,'totalRevenue':(d['totalRevenue'] as num? ?? 0).toDouble(),'orders':orders};
   }
 
