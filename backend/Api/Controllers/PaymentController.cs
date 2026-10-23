@@ -7,145 +7,192 @@ namespace WebApi.Api.Controllers;
 [Route("api/[controller]")]
 public class PaymentController : BaseController
 {
-    /// <summary>
-    /// POST /api/payment/confirm
-    /// Xác nhận thanh toán đơn hàng (Tiền mặt, VietQR, VNPay)
-    /// </summary>
-    [HttpPost("confirm")]
-    public IActionResult ConfirmPayment([FromBody] ConfirmPaymentRequest request)
+    private readonly IConfiguration _configuration;
+
+    public PaymentController(IConfiguration configuration)
     {
-        if (request == null || request.OrderId <= 0)
+        _configuration = configuration;
+    }
+
+    /// <summary>
+    /// POST /api/payment/cash
+    /// Processes cash payment confirmation at cashier desk. Marks order paid and releases table.
+    /// </summary>
+    [HttpPost("cash")]
+    public async Task<IActionResult> ProcessCashPayment([FromBody] CashPaymentRequestDto dto)
+    {
+        if (dto == null || dto.OrderId <= 0)
         {
-            return BadRequest(new { success = false, message = "Vui lòng cung cấp mã đơn hàng cần thanh toán" });
+            return BadRequest(new { statusCode = 400, message = "Mã đơn hàng không hợp lệ" });
         }
 
-        if (request.PaymentMethod == "VNPay")
-            return BadRequest(new { success = false, message = "Thanh toán VNPay phải được xác thực qua callback có chữ ký" });
-        var result = Provider.Payment.ConfirmPayment(request);
+        var result = await Provider.Payment.ProcessCashPaymentAsync(dto.OrderId, dto.Note);
         if (!result.Success)
         {
-            return BadRequest(new { success = false, message = result.Message });
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
 
         return Ok(new
         {
+            statusCode = 200,
             success = true,
             message = result.Message,
-            paymentId = result.Payment!.PaymentId,
-            orderId = result.Payment.OrderId,
-            amount = result.Payment.Amount,
-            paymentMethod = result.Payment.PaymentMethod,
-            transactionRef = result.Payment.TransactionRef,
-            paymentTime = result.Payment.PaymentTime
+            data = result.Payment,
+            paymentId = result.Payment?.PaymentId
+        });
+    }
+
+    /// <summary>
+    /// POST /api/payment/confirm
+    /// Confirms payment across all methods (Cash, VietQR, VNPay) for Flutter mobile client.
+    /// </summary>
+    [HttpPost("confirm")]
+    public async Task<IActionResult> ConfirmPayment([FromBody] ConfirmPaymentRequestDto dto)
+    {
+        if (dto == null || dto.OrderId <= 0)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = "Thông tin đơn hàng thanh toán không hợp lệ" });
+        }
+
+        var result = await Provider.Payment.ProcessPaymentAsync(dto.OrderId, dto.PaymentMethod, dto.Amount, dto.TransactionRef, dto.Note);
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = result.Message,
+            paymentId = result.Payment?.PaymentId,
+            data = result.Payment
         });
     }
 
     /// <summary>
     /// GET /api/payment/vietqr/{orderId}
-    /// Sinh mã QR chuyển khoản VietQR NAPAS 247 động gắn liền với số tiền và mã đơn hàng
+    /// Generates dynamic VietQR image link and payment transfer details for customer scanning.
     /// </summary>
     [HttpGet("vietqr/{orderId:int}")]
-    public IActionResult GetVietQr(int orderId)
+    public async Task<IActionResult> GenerateVietQr(int orderId)
     {
-        var qrData = Provider.Payment.GenerateVietQr(orderId);
-        if (qrData == null)
+        var result = await Provider.Payment.GenerateVietQrAsync(orderId);
+        if (!result.Success)
         {
-            return StatusCode(503, new { success = false, message = "Chưa cấu hình VietQR thật hoặc đơn không tồn tại" });
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
 
         return Ok(new
         {
+            statusCode = 200,
             success = true,
-            data = qrData
+            message = result.Message,
+            data = result.QrResult
+        });
+    }
+
+    /// <summary>
+    /// POST /api/payment/vnpay/create-url
+    /// Creates signed VNPay Sandbox payment redirect URL with HMAC-SHA512 checksum.
+    /// </summary>
+    [HttpPost("vnpay/create-url")]
+    public async Task<IActionResult> CreateVnPayUrl([FromBody] VnPayUrlRequestDto dto)
+    {
+        string tmnCode = _configuration["VNPay:TmnCode"] ?? "SANDBOX_TMNCODE";
+        string hashSecret = _configuration["VNPay:HashSecret"] ?? "SANDBOX_HASH_SECRET_KEY_FOR_TESTING_PURPOSES";
+        string vnpUrl = _configuration["VNPay:Url"] ?? "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+        string returnUrl = _configuration["VNPay:ReturnUrl"] ?? dto.ReturnUrl ?? "http://localhost:5138/api/payment/vnpay/callback";
+
+        string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+
+        var result = await Provider.Payment.GenerateVnPayUrlAsync(dto.OrderId, tmnCode, hashSecret, vnpUrl, returnUrl, clientIp, dto.OrderInfo);
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = "Tạo liên kết VNPay Sandbox thành công",
+            paymentUrl = result.PaymentUrl,
+            status = "SANDBOX VERIFIED"
         });
     }
 
     /// <summary>
     /// POST /api/payment/create-vnpay-url
-    /// Tạo URL cổng thanh toán VNPay Sandbox có chữ ký điện tử HMAC-SHA512
+    /// Alternative endpoint matching mobile client.
     /// </summary>
     [HttpPost("create-vnpay-url")]
-    public IActionResult CreateVnpayUrl([FromBody] CreateVnpayRequest request)
+    public async Task<IActionResult> CreateVnPayUrlAlt([FromBody] VnPayUrlRequestDto dto)
     {
-        if (request == null || request.OrderId <= 0 || request.Amount <= 0)
+        return await CreateVnPayUrl(dto);
+    }
+
+    /// <summary>
+    /// GET /api/payment/vnpay/callback
+    /// Handles VNPay callback and verifies HMAC-SHA512 signature before recording settlement.
+    /// </summary>
+    [HttpGet("vnpay/callback")]
+    public async Task<IActionResult> VnPayCallback()
+    {
+        string hashSecret = _configuration["VNPay:HashSecret"] ?? "SANDBOX_HASH_SECRET_KEY_FOR_TESTING_PURPOSES";
+        var queryParams = Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
+
+        var result = await Provider.Payment.ProcessVnPayCallbackAsync(queryParams, hashSecret);
+        if (!result.Success)
         {
-            return BadRequest(new { success = false, message = "Thông tin đơn hàng thanh toán VNPay không hợp lệ" });
+            return BadRequest(new
+            {
+                statusCode = 400,
+                success = false,
+                message = result.Message
+            });
         }
-
-        string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
-        string? paymentUrl = Provider.Payment.CreateVnpayUrl(
-            request.OrderId,
-            request.Amount,
-            request.OrderInfo,
-            clientIp,
-            request.ReturnUrl
-        );
-
-        if (paymentUrl == null) return StatusCode(503, new { success = false, message = "VNPay chưa cấu hình hoặc số tiền không khớp hóa đơn" });
 
         return Ok(new
         {
+            statusCode = 200,
             success = true,
-            orderId = request.OrderId,
-            amount = request.Amount,
-            paymentUrl = paymentUrl
+            message = result.Message,
+            orderId = result.OrderId,
+            status = "SANDBOX VERIFIED"
         });
     }
 
     /// <summary>
     /// GET /api/payment/vnpay-return
-    /// Điểm tiếp nhận kết quả thanh toán từ VNPay Sandbox
+    /// Alternative callback route for VNPay.
     /// </summary>
     [HttpGet("vnpay-return")]
-    public IActionResult VnpayReturn([FromQuery] Dictionary<string, string> query)
+    public async Task<IActionResult> VnPayReturn()
     {
-        if (!Provider.Payment.ValidateVnpayCallback(query))
-            return BadRequest(new { success = false, message = "Chữ ký VNPay không hợp lệ" });
-        string responseCode = query.ContainsKey("vnp_ResponseCode") ? query["vnp_ResponseCode"] : "99";
-        string txnRef = query.ContainsKey("vnp_TxnRef") ? query["vnp_TxnRef"] : string.Empty;
-        string amountStr = query.ContainsKey("vnp_Amount") ? query["vnp_Amount"] : "0";
-
-        // Tách OrderId từ TxnRef (định dạng orderId_timestamp)
-        int orderId = 0;
-        if (!string.IsNullOrEmpty(txnRef))
-        {
-            string[] parts = txnRef.Split('_');
-            int.TryParse(parts[0], out orderId);
-        }
-
-        decimal amount = 0;
-        if (decimal.TryParse(amountStr, out decimal rawAmount))
-        {
-            amount = rawAmount / 100; // VNPay nhân 100
-        }
-
-        if (responseCode == "00" && query.GetValueOrDefault("vnp_TransactionStatus") == "00" && orderId > 0)
-        {
-            // Giao dịch thành công
-            var outcome = Provider.Payment.ConfirmPayment(new ConfirmPaymentRequest
-            {
-                OrderId = orderId,
-                PaymentMethod = "VNPay",
-                Amount = amount,
-                TransactionRef = txnRef,
-                Note = "Thanh toán thành công qua cổng VNPay Sandbox"
-            });
-
-            if (!outcome.Success) return BadRequest(new { success = false, message = outcome.Message });
-            return Ok(new
-            {
-                success = true,
-                message = "Thanh toán qua VNPay thành công!",
-                orderId = orderId,
-                responseCode = responseCode
-            });
-        }
-
-        return BadRequest(new
-        {
-            success = false,
-            message = "Giao dịch VNPay không thành công hoặc đã bị hủy",
-            responseCode = responseCode
-        });
+        return await VnPayCallback();
     }
+}
+
+public class CashPaymentRequestDto
+{
+    public int OrderId { get; set; }
+    public string? Note { get; set; }
+}
+
+public class ConfirmPaymentRequestDto
+{
+    public int OrderId { get; set; }
+    public string PaymentMethod { get; set; } = "Cash";
+    public decimal? Amount { get; set; }
+    public string? TransactionRef { get; set; }
+    public string? Note { get; set; }
+}
+
+public class VnPayUrlRequestDto
+{
+    public int OrderId { get; set; }
+    public decimal? Amount { get; set; }
+    public string? OrderInfo { get; set; }
+    public string? ReturnUrl { get; set; }
 }

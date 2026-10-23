@@ -28,9 +28,11 @@ class UserAccount {
   });
 
   bool get isAdmin => role.toUpperCase() == 'ADMIN';
+  bool get isManager => role.toUpperCase() == 'ADMIN' || role.toUpperCase() == 'MANAGER';
   bool get isCashier => role.toUpperCase() == 'CASHIER';
   bool get isWaiter => role.toUpperCase() == 'WAITER';
-  bool get isChef => role.toUpperCase().contains('CHEF') || role.toUpperCase().contains('BARISTA');
+  bool get isChef => role.toUpperCase().contains('CHEF') || role.toUpperCase().contains('BARISTA') || role.toUpperCase().contains('KITCHEN');
+  bool get isStaff => isAdmin || isManager || isWaiter || isCashier || isChef;
 
   factory UserAccount.fromMap(Map<String, dynamic> map) {
     return UserAccount(

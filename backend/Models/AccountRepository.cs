@@ -1,6 +1,5 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
+using WebApi.Services;
 
 namespace WebApi.Models;
 
@@ -9,239 +8,213 @@ public class AccountRepository : BaseRepository
     public AccountRepository(RestaurantPosContext context) : base(context) { }
 
     /// <summary>
-    /// Băm mật khẩu bằng thuật toán chuẩn SHA-256 (tương thích 100% với kịch bản SQL nạp mẫu)
+    /// Registers a new account with SHA-256 + salt password hashing.
+    /// Checks for unique username and unique email.
     /// </summary>
-    public static string HashPassword(string password)
+    public async Task<(bool Success, string Message, Account? Account)> RegisterAsync(RegisterDto dto)
     {
-        var salt = RandomNumberGenerator.GetBytes(16);
-        var hash = Rfc2898DeriveBytes.Pbkdf2(password, salt, 210_000, HashAlgorithmName.SHA256, 32);
-        return $"pbkdf2$210000${Convert.ToBase64String(salt)}${Convert.ToBase64String(hash)}";
-    }
-
-    private static bool VerifyPassword(string password, string stored)
-    {
-        var components = stored.Split('$');
-        if (components.Length == 4 && components[0] == "pbkdf2" &&
-            int.TryParse(components[1], out var rounds) && rounds >= 100_000 && rounds <= 1_000_000)
+        string username = dto.Username.Trim();
+        if (await context.Accounts.AnyAsync(a => a.Username.ToLower() == username.ToLower()))
         {
-            try
-            {
-                var salt = Convert.FromBase64String(components[2]);
-                var expected = Convert.FromBase64String(components[3]);
-                if (salt.Length != 16 || expected.Length != 32) return false;
-                var supplied = Rfc2898DeriveBytes.Pbkdf2(password, salt, rounds, HashAlgorithmName.SHA256, 32);
-                return CryptographicOperations.FixedTimeEquals(supplied, expected);
-            }
-            catch (FormatException) { return false; }
+            return (false, "Tên đăng nhập đã tồn tại trong hệ thống", null);
         }
 
-        // One-time migration for legacy SHA256 hashes stored in RestaurantPosDb.sql.
-        if (stored.Length != 64) return false;
-        byte[] legacy;
-        try { legacy = Convert.FromHexString(stored); }
-        catch (FormatException) { return false; }
-        var computed = SHA256.HashData(Encoding.UTF8.GetBytes(password));
-        return CryptographicOperations.FixedTimeEquals(legacy, computed);
-    }
-
-    /// <summary>
-    /// Xác thực đăng nhập tài khoản
-    /// </summary>
-    public Account? Login(string username, string password)
-    {
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(password))
-            return null;
-
-        var account = context.Accounts
-            .FirstOrDefault(a => a.Username.ToLower() == username.Trim().ToLower() && a.IsActive);
-
-        if (account == null) return null;
-
-        // Kiểm tra khớp mật khẩu băm SHA-256 (hoặc so sánh trực tiếp nếu mật khẩu chưa băm)
-        if (VerifyPassword(password, account.PasswordHash))
+        if (!string.IsNullOrWhiteSpace(dto.Email))
         {
-            if (!account.PasswordHash.StartsWith("pbkdf2$", StringComparison.Ordinal))
-            {
-                account.PasswordHash = HashPassword(password);
-                account.UpdatedAt = DateTime.UtcNow;
-                context.SaveChanges();
-            }
-            return account;
-        }
-
-        return null;
-    }
-
-    /// <summary>
-    /// Đăng ký tài khoản mới kèm kiểm tra trùng username và email
-    /// </summary>
-    public (bool Success, string Message, Account? Account) Register(
-        string username,
-        string password,
-        string fullName,
-        string? email,
-        string? phoneNumber,
-        int roleId = 4)
-    {
-        if (string.IsNullOrWhiteSpace(username))
-            return (false, "Tên đăng nhập không được để trống", null);
-
-        if (string.IsNullOrWhiteSpace(password) || password.Length < 10)
-            return (false, "Mật khẩu phải chứa ít nhất 10 ký tự", null);
-
-        if (string.IsNullOrWhiteSpace(fullName))
-            return (false, "Họ tên không được để trống", null);
-
-        // Kiểm tra trùng username
-        bool usernameExists = context.Accounts.Any(a => a.Username.ToLower() == username.Trim().ToLower());
-        if (usernameExists)
-        {
-            return (false, "Tên đăng nhập đã được sử dụng trong hệ thống", null);
-        }
-
-        // Kiểm tra trùng email (nếu có cung cấp email)
-        if (!string.IsNullOrWhiteSpace(email))
-        {
-            bool emailExists = context.Accounts.Any(a => a.Email != null && a.Email.ToLower() == email.Trim().ToLower());
-            if (emailExists)
+            string email = dto.Email.Trim();
+            if (await context.Accounts.AnyAsync(a => a.Email != null && a.Email.ToLower() == email.ToLower()))
             {
                 return (false, "Email đã được sử dụng trong hệ thống", null);
             }
         }
 
-        // Self-registration can only create a customer account; role changes are admin actions.
-        roleId = 8;
+        // SECURITY FIX (Anti-Privilege Escalation):
+        // Public registration must ALWAYS be assigned strictly to the MEMBER role.
+        // Client-supplied RoleId or RoleCode in public registration is ignored to prevent unauthorized privilege escalation.
+        var memberRole = await context.Roles
+            .FirstOrDefaultAsync(r => r.RoleCode == "MEMBER")
+            ?? await context.Roles.FirstOrDefaultAsync(r => r.RoleCode == "CUSTOMER");
+        int resolvedRoleId = memberRole?.RoleId ?? 8;
 
-        var newAccount = new Account
+        var account = new Account
         {
-            RoleId = roleId,
-            Username = username.Trim(),
-            PasswordHash = HashPassword(password),
-            FullName = fullName.Trim(),
-            Email = string.IsNullOrWhiteSpace(email) ? null : email.Trim(),
-            PhoneNumber = string.IsNullOrWhiteSpace(phoneNumber) ? null : phoneNumber.Trim(),
-            Avatar = "default_avatar.png",
+            Username = username,
+            PasswordHash = PasswordHasher.HashPassword(dto.Password),
+            FullName = dto.FullName.Trim(),
+            Email = string.IsNullOrWhiteSpace(dto.Email) ? null : dto.Email.Trim(),
+            PhoneNumber = string.IsNullOrWhiteSpace(dto.PhoneNumber) ? null : dto.PhoneNumber.Trim(),
+            RoleId = resolvedRoleId,
             IsActive = true,
             IsEmailVerified = false,
             OAuthProvider = "Local",
             CreatedAt = DateTime.Now
         };
 
-        context.Accounts.Add(newAccount);
-        context.SaveChanges();
+        context.Accounts.Add(account);
+        await context.SaveChangesAsync();
 
-        return (true, "Đăng ký tài khoản thành công", newAccount);
+        return (true, "Đăng ký tài khoản thành công", account);
     }
 
     /// <summary>
-    /// Đổi mật khẩu tài khoản
+    /// Validates login credentials and returns account with role information.
     /// </summary>
-    public (bool Success, string Message) ChangePassword(int accountId, string oldPassword, string newPassword)
+    public async Task<(bool Success, string Message, Account? Account, Role? Role)> LoginAsync(LoginDto dto)
     {
-        var account = context.Accounts.Find(accountId);
+        string username = dto.Username.Trim();
+        var account = await context.Accounts
+            .FirstOrDefaultAsync(a => a.Username.ToLower() == username.ToLower());
+
+        if (account == null)
+        {
+            return (false, "Tên đăng nhập hoặc mật khẩu không chính xác", null, null);
+        }
+
+        if (!account.IsActive)
+        {
+            return (false, "Tài khoản của bạn đã bị khóa hoặc ngừng hoạt động", null, null);
+        }
+
+        bool isPasswordValid = PasswordHasher.VerifyPassword(dto.Password, account.PasswordHash);
+        if (!isPasswordValid)
+        {
+            return (false, "Tên đăng nhập hoặc mật khẩu không chính xác", null, null);
+        }
+
+        var role = await context.Roles.FindAsync(account.RoleId);
+
+        return (true, "Đăng nhập thành công", account, role);
+    }
+
+    /// <summary>
+    /// Changes password after verifying existing password.
+    /// Saves newly salted and hashed password to database.
+    /// </summary>
+    public async Task<(bool Success, string Message)> ChangePasswordAsync(string username, string oldPassword, string newPassword)
+    {
+        var account = await context.Accounts
+            .FirstOrDefaultAsync(a => a.Username.ToLower() == username.ToLower());
+
         if (account == null)
         {
             return (false, "Không tìm thấy tài khoản");
         }
 
-        if (!VerifyPassword(oldPassword, account.PasswordHash))
+        if (!PasswordHasher.VerifyPassword(oldPassword, account.PasswordHash))
         {
-            return (false, "Mật khẩu cũ không chính xác");
+            return (false, "Mật khẩu hiện tại không chính xác");
         }
 
-        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 10)
-        {
-            return (false, "Mật khẩu mới phải chứa ít nhất 10 ký tự");
-        }
-
-        account.PasswordHash = HashPassword(newPassword);
+        account.PasswordHash = PasswordHasher.HashPassword(newPassword);
         account.UpdatedAt = DateTime.Now;
-        context.SaveChanges();
 
+        await context.SaveChangesAsync();
         return (true, "Đổi mật khẩu thành công");
     }
 
     /// <summary>
-    /// Lấy danh sách thành viên/nhân viên kèm thông tin vai trò
+    /// Changes password by AccountId after verifying existing password.
     /// </summary>
-    public List<AccountMemberDto> GetMembers()
+    public async Task<(bool Success, string Message)> ChangePasswordAsync(int accountId, string oldPassword, string newPassword)
+    {
+        var account = await context.Accounts.FindAsync(accountId);
+        if (account == null)
+        {
+            return (false, "Không tìm thấy tài khoản");
+        }
+
+        if (!PasswordHasher.VerifyPassword(oldPassword, account.PasswordHash))
+        {
+            return (false, "Mật khẩu hiện tại không chính xác");
+        }
+
+        account.PasswordHash = PasswordHasher.HashPassword(newPassword);
+        account.UpdatedAt = DateTime.Now;
+
+        await context.SaveChangesAsync();
+        return (true, "Đổi mật khẩu thành công");
+    }
+
+    /// <summary>
+    /// Updates account role. Restricted to administrative workflows.
+    /// </summary>
+    public async Task<(bool Success, string Message)> UpdateRoleAsync(int accountId, int newRoleId)
+    {
+        var account = await context.Accounts.FindAsync(accountId);
+        if (account == null) return (false, "Không tìm thấy tài khoản");
+
+        var role = await context.Roles.FindAsync(newRoleId);
+        if (role == null) return (false, "Vai trò không hợp lệ");
+
+        account.RoleId = newRoleId;
+        account.UpdatedAt = DateTime.Now;
+        await context.SaveChangesAsync();
+
+        return (true, $"Đã cập nhật vai trò thành công sang '{role.RoleName}'");
+    }
+
+    /// <summary>
+    /// Retrieves members with joined role details, optionally filtered by RoleId.
+    /// Excludes password hash and sensitive tokens.
+    /// </summary>
+    public async Task<List<AccountDto>> GetMembersAsync(int? roleId = null)
     {
         var query = from a in context.Accounts
                     join r in context.Roles on a.RoleId equals r.RoleId into roleGroup
                     from r in roleGroup.DefaultIfEmpty()
-                    orderby a.AccountId
-                    select new AccountMemberDto
+                    select new AccountDto
                     {
                         AccountId = a.AccountId,
                         RoleId = a.RoleId,
-                        RoleName = r != null ? r.RoleName : "Chưa phân quyền",
                         RoleCode = r != null ? r.RoleCode : "UNKNOWN",
+                        RoleName = r != null ? r.RoleName : "Không xác định",
                         Username = a.Username,
                         FullName = a.FullName,
                         Email = a.Email,
                         PhoneNumber = a.PhoneNumber,
                         Avatar = a.Avatar,
                         IsActive = a.IsActive,
-                        CreatedAt = a.CreatedAt
+                        IsEmailVerified = a.IsEmailVerified,
+                        OAuthProvider = a.OAuthProvider,
+                        CreatedAt = a.CreatedAt,
+                        UpdatedAt = a.UpdatedAt
                     };
 
-        return query.ToList();
+        if (roleId.HasValue && roleId.Value > 0)
+        {
+            query = query.Where(a => a.RoleId == roleId.Value);
+        }
+
+        return await query.OrderBy(a => a.AccountId).ToListAsync();
     }
 
-    /// <summary>
-    /// Lấy thông tin tài khoản theo ID
-    /// </summary>
-    public Account? GetById(int accountId)
+    public async Task<Account?> GetByIdAsync(int accountId)
     {
-        return context.Accounts.Find(accountId);
+        return await context.Accounts.FindAsync(accountId);
     }
 
-    /// <summary>
-    /// Cập nhật vai trò (Role) cho tài khoản
-    /// </summary>
-    public (bool Success, string Message) UpdateRole(int accountId, int newRoleId)
+    public async Task<Account?> GetByUsernameAsync(string username)
     {
-        var account = context.Accounts.Find(accountId);
-        if (account == null) return (false, "Không tìm thấy tài khoản");
-
-        var role = context.Roles.Find(newRoleId);
-        if (role == null) return (false, "Vai trò không hợp lệ");
-
-        account.RoleId = newRoleId;
-        account.UpdatedAt = DateTime.Now;
-        context.SaveChanges();
-
-        return (true, $"Đã cập nhật vai trò thành công sang '{role.RoleName}'");
+        return await context.Accounts
+            .FirstOrDefaultAsync(a => a.Username.ToLower() == username.ToLower());
     }
 
-    /// <summary>
-    /// Lấy danh sách toàn bộ vai trò trong hệ thống
-    /// </summary>
-    public List<Role> GetRoles()
+    public async Task<Role?> GetRoleByIdAsync(int roleId)
     {
-        return context.Roles.OrderBy(r => r.RoleId).ToList();
+        return await context.Roles.FindAsync(roleId);
     }
 
-    /// <summary>
-    /// Lấy Role theo RoleId
-    /// </summary>
-    public Role? GetRoleById(int roleId)
+    public async Task<List<RoleDto>> GetRolesAsync()
     {
-        return context.Roles.Find(roleId);
+        return await context.Roles
+            .OrderBy(r => r.RoleId)
+            .Select(r => new RoleDto
+            {
+                RoleId = r.RoleId,
+                RoleName = r.RoleName,
+                RoleCode = r.RoleCode,
+                Description = r.Description
+            })
+            .ToListAsync();
     }
-}
-
-public class AccountMemberDto
-{
-    public int AccountId { get; set; }
-    public int RoleId { get; set; }
-    public string RoleName { get; set; } = string.Empty;
-    public string RoleCode { get; set; } = string.Empty;
-    public string Username { get; set; } = string.Empty;
-    public string FullName { get; set; } = string.Empty;
-    public string? Email { get; set; }
-    public string? PhoneNumber { get; set; }
-    public string? Avatar { get; set; }
-    public bool IsActive { get; set; }
-    public DateTime CreatedAt { get; set; }
 }

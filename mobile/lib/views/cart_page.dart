@@ -60,27 +60,6 @@ class _CartPageState extends State<CartPage> {
     await _loadCart();
   }
 
-  Future<void> _deleteItem(Map<String, dynamic> item) async {
-    final id = item['id'] as int;
-    final shouldDelete = await _showConfirmDialog(
-      title: 'Xóa món ăn',
-      content: 'Bạn có chắc muốn xóa "${item['product_name']}" khỏi giỏ hàng?',
-    );
-    if (shouldDelete == true) {
-      await _dbHelper.deleteCartItem(id);
-      await _loadCart();
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Đã xóa "${item['product_name']}" khỏi giỏ hàng'),
-            duration: const Duration(seconds: 2),
-            backgroundColor: const Color(0xFF0F172A),
-          ),
-        );
-      }
-    }
-  }
-
   Future<void> _clearAllCart() async {
     final confirm = await _showConfirmDialog(
       title: 'Dọn sạch giỏ hàng',

@@ -8,66 +8,132 @@ namespace WebApi.Api.Controllers;
 [Route("api/[controller]")]
 public class ProductController : BaseController
 {
+    /// <summary>
+    /// GET /api/product
+    /// Retrieves paginated list of products, optionally filtered by category, search term, and sort.
+    /// </summary>
     [HttpGet]
-    public IActionResult GetProducts(
-        [FromQuery] short? categoryId,
-        [FromQuery] string? search,
+    public async Task<IActionResult> Get(
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 10,
+        [FromQuery] short? categoryId = null,
+        [FromQuery] string? search = null,
         [FromQuery] string? sortBy = null)
     {
-        var result = Provider.Product.GetPaged(categoryId, search, page, pageSize, sortBy);
+        var result = await Provider.Product.GetPagedProductsAsync(page, pageSize, categoryId, search, sortBy);
         return Ok(result);
     }
 
+    /// <summary>
+    /// GET /api/product/featured
+    /// Retrieves featured products for mobile homepage.
+    /// </summary>
     [HttpGet("featured")]
-    public IActionResult GetFeatured([FromQuery] int limit = 10)
+    public async Task<IActionResult> GetFeatured([FromQuery] int limit = 10)
     {
-        var items = Provider.Product.GetFeatured(limit);
-        return Ok(items);
+        var result = await Provider.Product.GetFeaturedProductsAsync(limit);
+        return Ok(result);
     }
 
-    [HttpGet("{id}")]
-    public IActionResult GetById(int id)
+    /// <summary>
+    /// GET /api/product/latest
+    /// Retrieves latest products with pagination.
+    /// </summary>
+    [HttpGet("latest")]
+    public async Task<IActionResult> GetLatest([FromQuery] int page = 1, [FromQuery] int pageSize = 10)
     {
-        var detail = Provider.Product.GetDetailById(id);
-        if (detail == null)
-        {
-            return NotFound(new { error = "Không tìm thấy sản phẩm" });
-        }
-        return Ok(detail);
+        var result = await Provider.Product.GetLatestProductsAsync(page, pageSize);
+        return Ok(result);
     }
 
-    [HttpGet("related/{id}")]
-    public IActionResult GetRelated(int id, [FromQuery] int page = 1, [FromQuery] int pageSize = 6)
+    /// <summary>
+    /// GET /api/product/by-category/{categoryId}
+    /// Retrieves products belonging to a specific category with pagination.
+    /// </summary>
+    [HttpGet("by-category/{categoryId}")]
+    public async Task<IActionResult> GetByCategory(short categoryId, [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
     {
-        var product = Provider.Product.GetById(id);
+        var result = await Provider.Product.GetByCategoryAsync(categoryId, page, pageSize);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// GET /api/product/search
+    /// Searches products by keyword with pagination.
+    /// </summary>
+    [HttpGet("search")]
+    public async Task<IActionResult> Search([FromQuery] string keyword, [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
+    {
+        var result = await Provider.Product.SearchProductsAsync(keyword, page, pageSize);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// GET /api/product/{id}
+    /// Retrieves single product detail including custom attributes (Size, Sugar, Ice, Toppings).
+    /// </summary>
+    [HttpGet("{id:int}")]
+    public async Task<IActionResult> GetById(int id)
+    {
+        var product = await Provider.Product.GetWithAttributesByIdAsync(id);
         if (product == null)
         {
-            return NotFound(new { error = "Không tìm thấy sản phẩm" });
+            return NotFound(new { statusCode = 404, message = "Không tìm thấy món ăn" });
         }
+        return Ok(product);
+    }
 
-        var result = Provider.Product.GetRelatedProducts(id, product.CategoryId, page, pageSize);
+    /// <summary>
+    /// GET /api/product/{id}/related
+    /// Retrieves related products in the same category with pagination.
+    /// </summary>
+    [HttpGet("{id:int}/related")]
+    public async Task<IActionResult> GetRelated(int id, [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
+    {
+        var result = await Provider.Product.GetRelatedProductsAsync(id, page, pageSize);
         return Ok(result);
     }
 
-    [HttpGet("{id}/attributes")]
-    public IActionResult GetAttributes(int id)
+    /// <summary>
+    /// GET /api/product/related/{id}
+    /// Alternative route for related products matching mobile client repository.
+    /// </summary>
+    [HttpGet("related/{id:int}")]
+    public async Task<IActionResult> GetRelatedAlt(int id, [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
     {
-        var attrs = Provider.Product.GetAttributes(id);
-        return Ok(attrs);
+        var result = await Provider.Product.GetRelatedProductsAsync(id, page, pageSize);
+        return Ok(result);
     }
 
+    /// <summary>
+    /// POST /api/product
+    /// Creates a new product with image upload and validations.
+    /// </summary>
     [HttpPost]
     public async Task<IActionResult> Post([FromForm] Product obj, IFormFile? file)
     {
-        if (!ModelState.IsValid)
+        if (string.IsNullOrWhiteSpace(obj.ProductName))
         {
-            return BadRequest(ModelState);
+            return BadRequest(new { statusCode = 400, message = "Tên món ăn không được để trống" });
         }
 
-        if (file != null && file.Length > 0)
+        if (obj.Price < 0)
         {
+            return BadRequest(new { statusCode = 400, message = "Đơn giá món ăn không được âm" });
+        }
+
+        var category = Provider.Category.GetById(obj.CategoryId);
+        if (category == null)
+        {
+            return BadRequest(new { statusCode = 400, message = "Danh mục được chọn không tồn tại" });
+        }
+
+        if (file != null)
+        {
+            if (!Helper.ValidateImage(file, out string? imageError))
+            {
+                return BadRequest(new { statusCode = 400, message = imageError });
+            }
             obj.ImageUrl = await Helper.SaveImageAsync(file, "images/products");
         }
         else if (string.IsNullOrEmpty(obj.ImageUrl))
@@ -75,21 +141,42 @@ public class ProductController : BaseController
             obj.ImageUrl = "default_product.png";
         }
 
-        int result = Provider.Product.Add(obj);
+        int result = await Provider.Product.AddAsync(obj);
         if (result > 0)
         {
-            return CreatedAtAction(nameof(GetById), new { id = obj.ProductId }, obj);
+            return Ok(new { statusCode = 200, success = true, message = "Thêm món ăn thành công", data = obj, product = obj });
         }
-        return BadRequest(new { error = "Thêm sản phẩm thất bại" });
+
+        return BadRequest(new { statusCode = 400, message = "Thêm món ăn thất bại" });
     }
 
-    [HttpPut("{id}")]
+    /// <summary>
+    /// PUT /api/product/{id}
+    /// Updates product and cleans up old image file upon image replacement.
+    /// </summary>
+    [HttpPut("{id:int}")]
     public async Task<IActionResult> Put(int id, [FromForm] Product obj, IFormFile? file)
     {
-        var existing = Provider.Product.GetById(id);
+        var existing = await Provider.Product.GetByIdAsync(id);
         if (existing == null)
         {
-            return NotFound(new { error = "Không tìm thấy sản phẩm" });
+            return NotFound(new { statusCode = 404, message = "Không tìm thấy món ăn" });
+        }
+
+        if (string.IsNullOrWhiteSpace(obj.ProductName))
+        {
+            return BadRequest(new { statusCode = 400, message = "Tên món ăn không được để trống" });
+        }
+
+        if (obj.Price < 0)
+        {
+            return BadRequest(new { statusCode = 400, message = "Đơn giá món ăn không được âm" });
+        }
+
+        var category = Provider.Category.GetById(obj.CategoryId);
+        if (category == null)
+        {
+            return BadRequest(new { statusCode = 400, message = "Danh mục được chọn không tồn tại" });
         }
 
         existing.CategoryId = obj.CategoryId;
@@ -100,38 +187,56 @@ public class ProductController : BaseController
         existing.IsAvailable = obj.IsAvailable;
         existing.IsFeatured = obj.IsFeatured;
 
-        if (file != null && file.Length > 0)
+        if (file != null)
         {
-            // Xóa ảnh cũ nếu có (bảo toàn nếu là ảnh default)
-            Helper.DeleteImage(existing.ImageUrl, "images/products");
-            // Lưu ảnh mới
+            if (!Helper.ValidateImage(file, out string? imageError))
+            {
+                return BadRequest(new { statusCode = 400, message = imageError });
+            }
+
+            // Cleanup old image if not default
+            if (!string.IsNullOrEmpty(existing.ImageUrl) && existing.ImageUrl != "default_product.png")
+            {
+                Helper.DeleteImage(existing.ImageUrl, "images/products");
+            }
+
             existing.ImageUrl = await Helper.SaveImageAsync(file, "images/products");
         }
 
-        Provider.Product.Update(existing);
-        return Ok(existing);
+        await Provider.Product.UpdateAsync(existing);
+        return Ok(new { statusCode = 200, success = true, message = "Cập nhật món ăn thành công", data = existing, product = existing });
     }
 
-    [HttpDelete("{id}")]
-    public IActionResult Delete(int id)
+    /// <summary>
+    /// DELETE /api/product/{id}
+    /// Deletes product only if not referenced in any historical order. Cleans up image from wwwroot.
+    /// </summary>
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id)
     {
-        // Kiểm tra ràng buộc bảo toàn kế toán: Nếu sản phẩm đã từng nằm trong đơn hàng thì chặn xóa
-        if (Provider.Product.HasOrders(id))
+        bool hasOrders = await Provider.Product.HasOrdersAsync(id);
+        if (hasOrders)
         {
             return BadRequest(new
             {
-                error = "Sản phẩm đã có trong hóa đơn, không được xóa để bảo toàn số liệu kế toán! Hãy chọn ẩn sản phẩm."
+                statusCode = 400,
+                success = false,
+                message = "Không thể xóa món ăn này vì đã có dữ liệu trong các đơn hàng lịch sử!"
             });
         }
 
-        var existing = Provider.Product.GetById(id);
+        var existing = await Provider.Product.GetByIdAsync(id);
         if (existing == null)
         {
-            return NotFound(new { error = "Không tìm thấy sản phẩm" });
+            return NotFound(new { statusCode = 404, message = "Không tìm thấy món ăn để xóa" });
         }
 
-        Helper.DeleteImage(existing.ImageUrl, "images/products");
-        Provider.Product.Delete(id);
-        return Ok(new { message = "Đã xóa sản phẩm thành công" });
+        if (!string.IsNullOrEmpty(existing.ImageUrl) && existing.ImageUrl != "default_product.png")
+        {
+            Helper.DeleteImage(existing.ImageUrl, "images/products");
+        }
+
+        await Provider.Product.DeleteAsync(id);
+        return Ok(new { statusCode = 200, success = true, message = "Đã xóa món ăn thành công" });
     }
 }

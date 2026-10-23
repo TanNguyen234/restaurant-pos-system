@@ -1,259 +1,336 @@
-using System.Net;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 
 namespace WebApi.Models;
 
+public class PaymentDto
+{
+    public int PaymentId { get; set; }
+    public int OrderId { get; set; }
+    public string OrderCode { get; set; } = string.Empty;
+    public string PaymentMethod { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string? TransactionRef { get; set; }
+    public int Status { get; set; }
+    public string StatusText => Status switch
+    {
+        1 => "Thành công",
+        2 => "Thất bại",
+        _ => "Chờ xử lý"
+    };
+    public string? Note { get; set; }
+    public DateTime PaymentTime { get; set; }
+}
+
+public class VietQrResultDto
+{
+    public int OrderId { get; set; }
+    public string OrderCode { get; set; } = string.Empty;
+    public decimal Amount { get; set; }
+    public string BankId { get; set; } = "vietinbank";
+    public string BankName { get; set; } = "Ngân hàng TMCP Công Thương Việt Nam (VietinBank)";
+    public string AccountNo { get; set; } = "102871234567";
+    public string AccountName { get; set; } = "NHA HANG POS SYSTEM";
+    public string TransferContent { get; set; } = string.Empty;
+    public string Description => TransferContent;
+    public string QrCodeUrl { get; set; } = string.Empty;
+    public string QrImageUrl => QrCodeUrl;
+}
+
 public class PaymentRepository : BaseRepository
 {
-    // Financial configuration must be supplied from the deployment environment.
-    private static string BankId => Environment.GetEnvironmentVariable("VIETQR_BANK_ID") ?? "";
-    private static string AccountNo => Environment.GetEnvironmentVariable("VIETQR_ACCOUNT_NO") ?? "";
-    private static string AccountName => Environment.GetEnvironmentVariable("VIETQR_ACCOUNT_NAME") ?? "";
-    private static string VnpayTmnCode => Environment.GetEnvironmentVariable("VNPAY_TMN_CODE") ?? "";
-    private static string VnpayHashSecret => Environment.GetEnvironmentVariable("VNPAY_HASH_SECRET") ?? "";
-    private static string VnpayReturnUrl => Environment.GetEnvironmentVariable("VNPAY_RETURN_URL") ?? "";
-    private const string VnpayUrl = "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-
     public PaymentRepository(RestaurantPosContext context) : base(context) { }
 
-    /// <summary>
-    /// Xác nhận thanh toán hóa đơn bằng Tiền mặt, VietQR hoặc VNPay.
-    /// Tự động cập nhật trạng thái đơn (PaymentStatus = 1, Status = 3: Hoàn thành)
-    /// và giải phóng bàn ăn về trạng thái 0 (Bàn trống).
-    /// </summary>
-    public (bool Success, string Message, Payment? Payment) ConfirmPayment(ConfirmPaymentRequest request)
+    public async Task<(bool Success, string Message, PaymentDto? Payment)> ProcessCashPaymentAsync(int orderId, string? note = null)
     {
-        if (request == null || request.OrderId <= 0)
-        {
-            return (false, "Thông tin đơn hàng thanh toán không hợp lệ", null);
-        }
-
-        var order = context.Orders.Find(request.OrderId);
-        if (order == null)
-        {
-            return (false, $"Không tìm thấy đơn hàng #{request.OrderId}", null);
-        }
-
-        var due = order.FinalAmount > 0 ? order.FinalAmount : order.TotalAmount;
-        if (order.PaymentStatus == 1) return (false, "Đơn hàng đã thanh toán", null);
-        if (order.Status == 4) return (false, "Không thể thanh toán đơn đã hủy", null);
-        if (due <= 0 || (request.Amount > 0 && request.Amount != due))
-            return (false, "Số tiền thanh toán không khớp hóa đơn", null);
-        if (request.PaymentMethod is not ("Cash" or "VietQR" or "VNPay"))
-            return (false, "Phương thức thanh toán không hợp lệ", null);
-
-        using var transaction = context.Database.BeginTransaction();
-        try
-        {
-            decimal payAmount = due;
-            string method = string.IsNullOrWhiteSpace(request.PaymentMethod) ? "Cash" : request.PaymentMethod.Trim();
-            string txnRef = !string.IsNullOrWhiteSpace(request.TransactionRef)
-                ? request.TransactionRef.Trim()
-                : $"{method.ToUpper()}-{DateTime.Now:yyyyMMddHHmmss}-{order.OrderId}";
-
-            var payment = new Payment
-            {
-                OrderId = order.OrderId,
-                PaymentMethod = method,
-                Amount = payAmount,
-                TransactionRef = txnRef,
-                Status = 1, // 1: Thành công
-                Note = request.Note?.Trim() ?? $"Thanh toán thành công đơn {order.OrderCode}",
-                PaymentTime = DateTime.Now
-            };
-
-            context.Payments.Add(payment);
-
-            // Cập nhật đơn hàng: Đã thanh toán (1) và Hoàn thành (3)
-            order.PaymentStatus = 1;
-            order.Status = 3;
-            order.CompletedAt = DateTime.Now;
-
-            // Nếu đơn gắn với bàn ăn, giải phóng bàn về trạng thái Trống (0)
-            if (order.TableId.HasValue)
-            {
-                var table = context.DiningTables.Find(order.TableId.Value);
-                if (table != null)
-                {
-                    table.Status = 0; // Trống
-                    table.CurrentOrderId = null;
-                    table.UpdatedAt = DateTime.Now;
-                }
-            }
-
-            context.SaveChanges();
-            transaction.Commit();
-
-            return (true, $"Xác nhận thanh toán đơn {order.OrderCode} thành công bằng {method}!", payment);
-        }
-        catch (Exception ex)
-        {
-            transaction.Rollback();
-            return (false, $"Lỗi xử lý xác nhận thanh toán: {ex.Message}", null);
-        }
+        return await ProcessPaymentAsync(orderId, "Cash", null, null, note);
     }
 
-    /// <summary>
-    /// Sinh thông tin mã VietQR NAPAS 247 động theo đơn hàng
-    /// </summary>
-    public VietQrResponse? GenerateVietQr(int orderId)
+    public async Task<(bool Success, string Message, PaymentDto? Payment)> ProcessPaymentAsync(
+        int orderId,
+        string paymentMethod,
+        decimal? amount = null,
+        string? transactionRef = null,
+        string? note = null)
     {
-        var order = context.Orders.Find(orderId);
-        if (order == null) return null;
+        var order = await context.Orders.FindAsync(orderId);
+        if (order == null)
+        {
+            return (false, "Không tìm thấy đơn hàng", null);
+        }
 
-        if (string.IsNullOrWhiteSpace(BankId) || string.IsNullOrWhiteSpace(AccountNo) ||
-            string.IsNullOrWhiteSpace(AccountName)) return null;
-        decimal amount = order.FinalAmount > 0 ? order.FinalAmount : order.TotalAmount;
-        string description = $"THANH TOAN {order.OrderCode}";
+        if (order.PaymentStatus == 1)
+        {
+            return (false, "Đơn hàng này đã được thanh toán trước đó", null);
+        }
 
-        // URL chuẩn hóa của cổng VietQR QuickLink (NAPAS 247)
-        // Cú pháp: https://img.vietqr.io/image/<BANK_ID>-<ACCOUNT_NO>-compact2.png?amount=<AMOUNT>&addInfo=<DESCRIPTION>&accountName=<ACCOUNT_NAME>
-        string encodedDesc = Uri.EscapeDataString(description);
-        string encodedName = Uri.EscapeDataString(AccountName);
-        string qrImageUrl = $"https://img.vietqr.io/image/{BankId}-{AccountNo}-compact2.png?amount={(long)amount}&addInfo={encodedDesc}&accountName={encodedName}";
+        string method = string.IsNullOrWhiteSpace(paymentMethod) ? "Cash" : paymentMethod.Trim();
+        decimal payAmount = (amount.HasValue && amount.Value > 0) ? amount.Value : order.FinalAmount;
+        string txnRef = !string.IsNullOrWhiteSpace(transactionRef)
+            ? transactionRef.Trim()
+            : $"{method.ToUpper()}-{DateTime.Now:yyyyMMddHHmmss}-{order.OrderId}";
 
-        return new VietQrResponse
+        var payment = new Payment
+        {
+            OrderId = orderId,
+            PaymentMethod = method,
+            Amount = payAmount,
+            TransactionRef = txnRef,
+            Status = 1, // Success
+            Note = string.IsNullOrWhiteSpace(note) ? $"Thanh toán đơn hàng {order.OrderCode}" : note.Trim(),
+            PaymentTime = DateTime.Now
+        };
+
+        context.Payments.Add(payment);
+
+        order.PaymentStatus = 1; // Paid
+        order.Status = 3; // Completed
+        order.CompletedAt = DateTime.Now;
+        context.Orders.Update(order);
+
+        // Release dining table
+        if (order.TableId.HasValue)
+        {
+            var table = await context.DiningTables.FindAsync(order.TableId.Value);
+            if (table != null && table.CurrentOrderId == order.OrderId)
+            {
+                table.Status = 0; // Empty
+                table.CurrentOrderId = null;
+                table.UpdatedAt = DateTime.Now;
+                context.DiningTables.Update(table);
+            }
+        }
+
+        await context.SaveChangesAsync();
+
+        var dto = new PaymentDto
+        {
+            PaymentId = payment.PaymentId,
+            OrderId = payment.OrderId,
+            OrderCode = order.OrderCode,
+            PaymentMethod = payment.PaymentMethod,
+            Amount = payment.Amount,
+            TransactionRef = payment.TransactionRef,
+            Status = payment.Status,
+            Note = payment.Note,
+            PaymentTime = payment.PaymentTime
+        };
+
+        return (true, "Xác nhận thanh toán thành công", dto);
+    }
+
+    public async Task<(bool Success, string Message, VietQrResultDto? QrResult)> GenerateVietQrAsync(int orderId)
+    {
+        var order = await context.Orders.FindAsync(orderId);
+        if (order == null)
+        {
+            return (false, "Không tìm thấy đơn hàng", null);
+        }
+
+        string bankId = "vietinbank";
+        string accountNo = "102871234567";
+        string accountName = "NHA HANG POS SYSTEM";
+        string transferContent = order.OrderCode;
+        long amountInt = (long)order.FinalAmount;
+
+        string qrUrl = $"https://img.vietqr.io/image/{bankId}-{accountNo}-compact2.png?amount={amountInt}&addInfo={Uri.EscapeDataString(transferContent)}&accountName={Uri.EscapeDataString(accountName)}";
+
+        var result = new VietQrResultDto
         {
             OrderId = order.OrderId,
             OrderCode = order.OrderCode,
-            BankId = BankId,
-            BankName = BankId,
-            AccountNo = AccountNo,
-            AccountName = AccountName,
-            Amount = amount,
-            Description = description,
-            QrImageUrl = qrImageUrl
+            Amount = order.FinalAmount,
+            BankId = bankId,
+            AccountNo = accountNo,
+            AccountName = accountName,
+            TransferContent = transferContent,
+            QrCodeUrl = qrUrl
         };
+
+        return (true, "Tạo thông tin VietQR thành công", result);
     }
 
-    /// <summary>
-    /// Tạo URL chuyển hướng sang cổng thanh toán VNPay Sandbox có chữ ký HMAC-SHA512
-    /// </summary>
-    public string? CreateVnpayUrl(int orderId, decimal amount, string? orderInfo, string? clientIp, string? returnUrl)
+    public async Task<(bool Success, string Message, string? PaymentUrl)> GenerateVnPayUrlAsync(
+        int orderId,
+        string tmnCode,
+        string hashSecret,
+        string vnpUrl,
+        string returnUrl,
+        string clientIp,
+        string? orderInfo = null)
     {
-        var order = context.Orders.Find(orderId);
-        if (order == null || order.PaymentStatus == 1 || order.Status == 4) return null;
-        var due = order.FinalAmount > 0 ? order.FinalAmount : order.TotalAmount;
-        if (due <= 0 || amount != due ||
-            string.IsNullOrWhiteSpace(VnpayTmnCode) || string.IsNullOrWhiteSpace(VnpayHashSecret) ||
-            string.IsNullOrWhiteSpace(VnpayReturnUrl)) return null;
-        string orderCode = order.OrderCode;
-        string desc = string.IsNullOrWhiteSpace(orderInfo) ? $"Thanh toan don hang {orderCode}" : orderInfo;
-
-        var vnpayParams = new SortedDictionary<string, string>
+        var order = await context.Orders.FindAsync(orderId);
+        if (order == null)
         {
-            { "vnp_Version", "2.1.0" },
-            { "vnp_Command", "pay" },
-            { "vnp_TmnCode", VnpayTmnCode },
-            { "vnp_Amount", ((long)(amount * 100)).ToString() }, // VNPay quy định nhân 100
-            { "vnp_CreateDate", DateTime.Now.ToString("yyyyMMddHHmmss") },
-            { "vnp_CurrCode", "VND" },
-            { "vnp_IpAddr", string.IsNullOrWhiteSpace(clientIp) ? "127.0.0.1" : clientIp },
-            { "vnp_Locale", "vn" },
-            { "vnp_OrderInfo", desc },
-            { "vnp_OrderType", "other" },
-            { "vnp_ReturnUrl", VnpayReturnUrl },
-            { "vnp_TxnRef", $"{orderId}_{DateTime.Now.Ticks}" }
+            return (false, "Không tìm thấy đơn hàng", null);
+        }
+
+        if (order.PaymentStatus == 1)
+        {
+            return (false, "Đơn hàng này đã được thanh toán trước đó", null);
+        }
+
+        string vnp_Version = "2.1.0";
+        string vnp_Command = "pay";
+        string vnp_CreateDate = DateTime.Now.ToString("yyyyMMddHHmmss");
+        string vnp_CurrCode = "VND";
+        string vnp_Locale = "vn";
+        string vnp_OrderType = "other";
+        string vnp_TxnRef = $"{order.OrderId}_{DateTime.Now.Ticks}";
+        long vnp_Amount = (long)(order.FinalAmount * 100); // VNPay expects amount multiplied by 100
+        string vnp_OrderInfo = string.IsNullOrWhiteSpace(orderInfo) ? $"Thanh toan don hang {order.OrderCode}" : orderInfo.Trim();
+
+        var vnp_Params = new SortedDictionary<string, string>
+        {
+            { "vnp_Version", vnp_Version },
+            { "vnp_Command", vnp_Command },
+            { "vnp_TmnCode", tmnCode },
+            { "vnp_Amount", vnp_Amount.ToString() },
+            { "vnp_CreateDate", vnp_CreateDate },
+            { "vnp_CurrCode", vnp_CurrCode },
+            { "vnp_IpAddr", clientIp },
+            { "vnp_Locale", vnp_Locale },
+            { "vnp_OrderInfo", vnp_OrderInfo },
+            { "vnp_OrderType", vnp_OrderType },
+            { "vnp_ReturnUrl", returnUrl },
+            { "vnp_TxnRef", vnp_TxnRef }
         };
 
-        // Ghép chuỗi query để ký
         var queryBuilder = new StringBuilder();
-        var dataSignBuilder = new StringBuilder();
+        var hashDataBuilder = new StringBuilder();
 
-        foreach (var kv in vnpayParams)
+        foreach (var kv in vnp_Params)
         {
             if (!string.IsNullOrEmpty(kv.Value))
             {
-                if (dataSignBuilder.Length > 0)
-                {
-                    dataSignBuilder.Append('&');
-                    queryBuilder.Append('&');
-                }
-                dataSignBuilder.Append(WebUtility.UrlEncode(kv.Key) + "=" + WebUtility.UrlEncode(kv.Value));
-                queryBuilder.Append(WebUtility.UrlEncode(kv.Key) + "=" + WebUtility.UrlEncode(kv.Value));
+                if (hashDataBuilder.Length > 0) hashDataBuilder.Append('&');
+                hashDataBuilder.Append(Uri.EscapeDataString(kv.Key)).Append('=').Append(Uri.EscapeDataString(kv.Value));
+
+                if (queryBuilder.Length > 0) queryBuilder.Append('&');
+                queryBuilder.Append(Uri.EscapeDataString(kv.Key)).Append('=').Append(Uri.EscapeDataString(kv.Value));
             }
         }
 
-        string secureHash = HmacSha512(VnpayHashSecret, dataSignBuilder.ToString());
-        queryBuilder.Append("&vnp_SecureHash=" + secureHash);
+        string rawHashData = hashDataBuilder.ToString();
+        string secureHash = HmacSha512(hashSecret, rawHashData);
+        string finalUrl = $"{vnpUrl}?{queryBuilder}&vnp_SecureHash={secureHash}";
 
-        return $"{VnpayUrl}?{queryBuilder}";
+        return (true, "Tạo liên kết thanh toán VNPay thành công", finalUrl);
     }
 
-    /// <summary>
-    /// Verify HMAC over the provider's query before changing payment state.
-    /// The return URL alone is not trusted; successful payment must also match the order.
-    /// </summary>
-    public bool ValidateVnpayCallback(Dictionary<string, string> query)
+    public async Task<(bool Success, string Message, int? OrderId)> ProcessVnPayCallbackAsync(
+        IDictionary<string, string> queryParams,
+        string hashSecret)
     {
-        if (string.IsNullOrWhiteSpace(VnpayHashSecret) ||
-            !query.TryGetValue("vnp_SecureHash", out var signature) ||
-            !query.TryGetValue("vnp_TmnCode", out var merchant) ||
-            merchant != VnpayTmnCode || signature.Length != 128)
-            return false;
+        if (!queryParams.TryGetValue("vnp_SecureHash", out var receivedHash) || string.IsNullOrEmpty(receivedHash))
+        {
+            return (false, "Thiếu chữ ký bảo mật VNPay", null);
+        }
 
-        var paramsToSign = new SortedDictionary<string, string>(query, StringComparer.Ordinal);
-        paramsToSign.Remove("vnp_SecureHash");
-        paramsToSign.Remove("vnp_SecureHashType");
+        var sortedParams = new SortedDictionary<string, string>();
+        foreach (var kv in queryParams)
+        {
+            if (!string.IsNullOrEmpty(kv.Key) &&
+                !kv.Key.Equals("vnp_SecureHash", StringComparison.OrdinalIgnoreCase) &&
+                !kv.Key.Equals("vnp_SecureHashType", StringComparison.OrdinalIgnoreCase))
+            {
+                sortedParams.Add(kv.Key, kv.Value);
+            }
+        }
 
-        var data = string.Join("&", paramsToSign.Where(kv => !string.IsNullOrEmpty(kv.Value))
-            .Select(kv => WebUtility.UrlEncode(kv.Key) + "=" + WebUtility.UrlEncode(kv.Value)));
-        byte[] provided;
-        try { provided = Convert.FromHexString(signature); }
-        catch (FormatException) { return false; }
-        var expected = Convert.FromHexString(HmacSha512(VnpayHashSecret, data));
-        return CryptographicOperations.FixedTimeEquals(provided, expected);
-    }
+        var hashDataBuilder = new StringBuilder();
+        foreach (var kv in sortedParams)
+        {
+            if (!string.IsNullOrEmpty(kv.Value))
+            {
+                if (hashDataBuilder.Length > 0) hashDataBuilder.Append('&');
+                hashDataBuilder.Append(Uri.EscapeDataString(kv.Key)).Append('=').Append(Uri.EscapeDataString(kv.Value));
+            }
+        }
 
-    /// <summary>
-    /// Lấy lịch sử giao dịch thanh toán của đơn hàng
-    /// </summary>
-    public List<Payment> GetPaymentsByOrderId(int orderId)
-    {
-        return context.Payments
-            .Where(p => p.OrderId == orderId)
-            .OrderByDescending(p => p.PaymentId)
-            .ToList();
+        string calculatedHash = HmacSha512(hashSecret, hashDataBuilder.ToString());
+        if (!calculatedHash.Equals(receivedHash, StringComparison.OrdinalIgnoreCase))
+        {
+            return (false, "Chữ ký bảo mật VNPay không khớp (Invalid Signature)", null);
+        }
+
+        if (!queryParams.TryGetValue("vnp_ResponseCode", out var responseCode) || responseCode != "00")
+        {
+            return (false, $"Giao dịch VNPay không thành công (ResponseCode: {responseCode})", null);
+        }
+
+        if (!queryParams.TryGetValue("vnp_TxnRef", out var txnRef) || string.IsNullOrEmpty(txnRef))
+        {
+            return (false, "Mã tham chiếu giao dịch vnp_TxnRef rỗng", null);
+        }
+
+        int orderId = int.Parse(txnRef.Split('_')[0]);
+        var order = await context.Orders.FindAsync(orderId);
+        if (order == null)
+        {
+            return (false, "Không tìm thấy đơn hàng", null);
+        }
+
+        if (order.PaymentStatus == 1)
+        {
+            // Already settled
+            return (true, "Đơn hàng đã được thanh toán trước đó (Idempotent)", orderId);
+        }
+
+        decimal paidAmount = 0;
+        if (queryParams.TryGetValue("vnp_Amount", out var amtStr) && long.TryParse(amtStr, out var rawAmt))
+        {
+            paidAmount = rawAmt / 100m;
+        }
+
+        var payment = new Payment
+        {
+            OrderId = orderId,
+            PaymentMethod = "VNPay",
+            Amount = paidAmount > 0 ? paidAmount : order.FinalAmount,
+            TransactionRef = queryParams.TryGetValue("vnp_TransactionNo", out var vnpTxn) ? vnpTxn : txnRef,
+            Status = 1,
+            Note = "Thanh toán qua cổng VNPay Sandbox",
+            PaymentTime = DateTime.Now
+        };
+
+        context.Payments.Add(payment);
+
+        order.PaymentStatus = 1;
+        order.Status = 3; // Completed
+        order.CompletedAt = DateTime.Now;
+        context.Orders.Update(order);
+
+        if (order.TableId.HasValue)
+        {
+            var table = await context.DiningTables.FindAsync(order.TableId.Value);
+            if (table != null && table.CurrentOrderId == order.OrderId)
+            {
+                table.Status = 0;
+                table.CurrentOrderId = null;
+                table.UpdatedAt = DateTime.Now;
+                context.DiningTables.Update(table);
+            }
+        }
+
+        await context.SaveChangesAsync();
+        return (true, "Xác thực và ghi nhận thanh toán VNPay thành công", orderId);
     }
 
     private static string HmacSha512(string key, string inputData)
     {
+        var hash = new StringBuilder();
         byte[] keyBytes = Encoding.UTF8.GetBytes(key);
         byte[] inputBytes = Encoding.UTF8.GetBytes(inputData);
-        using var hmac = new HMACSHA512(keyBytes);
-        byte[] hashValue = hmac.ComputeHash(inputBytes);
-        return Convert.ToHexString(hashValue).ToLowerInvariant();
+        using (var hmac = new HMACSHA512(keyBytes))
+        {
+            byte[] hashValue = hmac.ComputeHash(inputBytes);
+            foreach (var theByte in hashValue)
+            {
+                hash.Append(theByte.ToString("x2"));
+            }
+        }
+        return hash.ToString();
     }
-}
-
-public class ConfirmPaymentRequest
-{
-    public int OrderId { get; set; }
-    public string PaymentMethod { get; set; } = "Cash"; // 'Cash', 'VietQR', 'VNPay'
-    public decimal Amount { get; set; }
-    public string? TransactionRef { get; set; }
-    public string? Note { get; set; }
-}
-
-public class VietQrResponse
-{
-    public int OrderId { get; set; }
-    public string OrderCode { get; set; } = string.Empty;
-    public string BankId { get; set; } = string.Empty;
-    public string BankName { get; set; } = string.Empty;
-    public string AccountNo { get; set; } = string.Empty;
-    public string AccountName { get; set; } = string.Empty;
-    public decimal Amount { get; set; }
-    public string Description { get; set; } = string.Empty;
-    public string QrImageUrl { get; set; } = string.Empty;
-}
-
-public class CreateVnpayRequest
-{
-    public int OrderId { get; set; }
-    public decimal Amount { get; set; }
-    public string? OrderInfo { get; set; }
-    public string? ReturnUrl { get; set; }
 }

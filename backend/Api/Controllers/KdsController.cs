@@ -8,45 +8,73 @@ namespace WebApi.Api.Controllers;
 public class KdsController : BaseController
 {
     /// <summary>
+    /// GET /api/kds
+    /// Retrieves active dishes for the Kitchen Display System (sorted by status and creation time).
+    /// </summary>
+    [HttpGet]
+    public async Task<IActionResult> GetKdsItems()
+    {
+        var items = await Provider.Order.GetKdsItemsAsync();
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            totalItems = items.Count,
+            data = items
+        });
+    }
+
+    /// <summary>
     /// GET /api/kds/active-orders
-    /// Lấy danh sách các món ăn / đồ uống đang cần chế biến cho màn hình Bếp & Pha chế
+    /// Direct array response for Flutter Mobile KitchenDisplayPage.
     /// </summary>
     [HttpGet("active-orders")]
-    public IActionResult GetActiveOrders()
+    public async Task<IActionResult> GetActiveOrders()
     {
-        var items = Provider.Order.GetKdsActiveItems();
+        var items = await Provider.Order.GetKdsItemsAsync();
         return Ok(items);
     }
 
     /// <summary>
-    /// PUT /api/kds/order-detail/{id}/status
-    /// Cập nhật trạng thái nấu của món ăn (0: Chờ nấu -> 1: Đang làm -> 2: Đã nấu xong)
+    /// PUT /api/kds/{orderDetailId}/status
+    /// Updates cooking status of an item: 0 = Pending, 1 = Cooking (In Progress), 2 = Ready.
     /// </summary>
-    [HttpPut("order-detail/{id:int}/status")]
-    public IActionResult UpdateCookingStatus(int id, [FromBody] UpdateCookingStatusRequest request)
+    [HttpPut("{orderDetailId:int}/status")]
+    public async Task<IActionResult> UpdateCookingStatus(int orderDetailId, [FromBody] UpdateCookingStatusDto dto)
     {
-        if (request == null)
+        if (dto == null || dto.CookingStatus < 0 || dto.CookingStatus > 2)
         {
-            return BadRequest(new { success = false, message = "Dữ liệu trạng thái không hợp lệ" });
+            return BadRequest(new { statusCode = 400, message = "Trạng thái chế biến không hợp lệ (0: Chờ nấu, 1: Đang nấu, 2: Đã xong)" });
         }
 
-        var result = Provider.Order.UpdateCookingStatus(id, request.CookingStatus);
+        var result = await Provider.Order.UpdateCookingStatusAsync(orderDetailId, dto.CookingStatus);
         if (!result.Success)
         {
-            return BadRequest(new { success = false, message = result.Message });
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
 
         return Ok(new
         {
+            statusCode = 200,
             success = true,
             message = result.Message,
-            orderDetailId = id,
-            cookingStatus = request.CookingStatus
+            orderDetailId = orderDetailId,
+            cookingStatus = dto.CookingStatus
         });
+    }
+
+    /// <summary>
+    /// PUT /api/kds/order-detail/{orderDetailId}/status
+    /// Alternative route for Flutter mobile client compatibility.
+    /// </summary>
+    [HttpPut("order-detail/{orderDetailId:int}/status")]
+    public async Task<IActionResult> UpdateCookingStatusAlt(int orderDetailId, [FromBody] UpdateCookingStatusDto dto)
+    {
+        return await UpdateCookingStatus(orderDetailId, dto);
     }
 }
 
-public class UpdateCookingStatusRequest
+public class UpdateCookingStatusDto
 {
     public int CookingStatus { get; set; }
 }

@@ -367,39 +367,29 @@ void main() {
     });
   });
 
-  group('Challenge Task 1.3: Offline Fallback & Usability', () {
-    test('TableRepository provides fallback data on network failure without throwing', () async {
+  group('Challenge Task 1.3: Genuine Network Error Propagation & Offline Empty State', () {
+    test('TableRepository throws clean network exception on network failure without fake mocks', () async {
       HttpOverrides.global = ChallengeHttpOverrides(simulateOffline: true);
 
-      // 1. getAreas() returns fallback areas
-      final areas = await TableRepository.getAreas();
-      expect(areas.isNotEmpty, true);
-      expect(areas.length, 4);
-      expect(areas[0].name, contains('Tầng 1'));
+      // 1. getAreas() throws Exception on network failure
+      expect(() => TableRepository.getAreas(), throwsA(isA<Exception>()));
 
-      // 2. getAllTables() returns fallback tables
-      final tables = await TableRepository.getAllTables();
-      expect(tables.isNotEmpty, true);
-      expect(tables.length, 17);
+      // 2. getAllTables() throws Exception on network failure
+      expect(() => TableRepository.getAllTables(), throwsA(isA<Exception>()));
 
-      // 3. getTablesByArea(1) returns tables
-      final area1Tables = await TableRepository.getTablesByArea(1);
-      expect(area1Tables.isNotEmpty, true);
+      // 3. getTablesByArea(1) throws Exception on network failure
+      expect(() => TableRepository.getTablesByArea(1), throwsA(isA<Exception>()));
 
-      // 4. updateStatus updates fallback table
+      // 4. updateStatus returns false on network failure without fake memory mutation
       final updateOk = await TableRepository.updateStatus(1, 1);
-      expect(updateOk, true);
+      expect(updateOk, false);
 
-      // 5. transferTable updates fallback tables
+      // 5. transferTable returns false on network failure without fake memory mutation
       final transferOk = await TableRepository.transferTable(1, 3);
-      expect(transferOk, true);
-
-      // Cleanup
-      await TableRepository.updateStatus(1, 0);
-      await TableRepository.updateStatus(3, 0);
+      expect(transferOk, false);
     });
 
-    testWidgets('FloorTablePage renders fully and interactively in offline mode', (tester) async {
+    testWidgets('FloorTablePage renders genuine offline empty state when network is unreachable', (tester) async {
       HttpOverrides.global = ChallengeHttpOverrides(simulateOffline: true);
 
       await tester.pumpWidget(
@@ -410,18 +400,10 @@ void main() {
 
       await tester.pumpAndSettle();
 
-      // Verify that offline fallback areas are rendered
-      expect(find.text('Tầng 1 - Phòng lạnh'), findsOneWidget);
-      expect(find.text('Tầng 2 - Ban công'), findsOneWidget);
-      expect(find.text('Sân vườn nhiệt đới'), findsOneWidget);
-      expect(find.text('Phòng VIP'), findsOneWidget);
-
-      // Verify fallback tables are rendered
-      expect(find.text('Bàn T1-01'), findsOneWidget);
-      expect(find.text('Bàn T1-02'), findsOneWidget);
-
-      // Verify summary bar has live statistics computed from fallback data
-      expect(find.textContaining('Tổng bàn: 17'), findsOneWidget);
+      // Verify that genuine offline empty state is rendered (wifi_off icon and error text)
+      expect(find.byIcon(Icons.wifi_off_rounded), findsOneWidget);
+      expect(find.text('Không thể tải danh sách khu vực bàn ăn.'), findsOneWidget);
+      expect(find.text('Thử lại'), findsOneWidget);
 
       // Verify no unhandled exceptions
       expect(tester.takeException(), isNull);

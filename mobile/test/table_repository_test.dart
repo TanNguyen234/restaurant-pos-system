@@ -7,60 +7,27 @@ void main() {
     TableRepository.timeoutDuration = const Duration(milliseconds: 100);
   });
 
-  group('TableRepository Offline Fallback Tests', () {
-    test('getAreas returns default 4 F&B areas when offline', () async {
-      final areas = await TableRepository.getAreas();
-      expect(areas.length, 4);
-      expect(areas.any((a) => a.name.contains('Tầng 1')), true);
-      expect(areas.any((a) => a.name.contains('Tầng 2')), true);
-      expect(areas.any((a) => a.name.contains('Sân vườn')), true);
-      expect(areas.any((a) => a.name.contains('VIP')), true);
+  group('TableRepository Genuine Network Error Handling Tests (No Mock Fallbacks)', () {
+    test('getAreas throws Exception on network failure when backend is unreachable', () async {
+      expect(() => TableRepository.getAreas(), throwsA(isA<Exception>()));
     });
 
-    test('getTablesByArea returns correct tables for area 1', () async {
-      final tables = await TableRepository.getTablesByArea(1);
-      expect(tables.isNotEmpty, true);
-      expect(tables.every((t) => t.areaId == 1), true);
+    test('getTablesByArea throws Exception on network failure when backend is unreachable', () async {
+      expect(() => TableRepository.getTablesByArea(1), throwsA(isA<Exception>()));
     });
 
-    test('getAllTables returns all restaurant tables', () async {
-      final allTables = await TableRepository.getAllTables();
-      expect(allTables.length, greaterThanOrEqualTo(10));
+    test('getAllTables throws Exception on network failure when backend is unreachable', () async {
+      expect(() => TableRepository.getAllTables(), throwsA(isA<Exception>()));
     });
 
-    test('updateStatus updates local fallback table status', () async {
-      // Update table 1 status to 1 (Occupied)
+    test('updateStatus returns false without fake in-memory mutation on network failure', () async {
       final success = await TableRepository.updateStatus(1, 1);
-      expect(success, true);
-
-      final tables = await TableRepository.getAllTables();
-      final table1 = tables.firstWhere((t) => t.id == 1);
-      expect(table1.status, 1);
-
-      // Reset back to 0 (Available)
-      await TableRepository.updateStatus(1, 0);
-      final resetTables = await TableRepository.getAllTables();
-      expect(resetTables.firstWhere((t) => t.id == 1).status, 0);
+      expect(success, false);
     });
 
-    test('transferTable swaps table state properly in fallback mode', () async {
-      // Set table 1 to occupied (status 1)
-      await TableRepository.updateStatus(1, 1);
-      // Ensure table 3 is available (status 0)
-      await TableRepository.updateStatus(3, 0);
-
+    test('transferTable returns false without fake in-memory mutation on network failure', () async {
       final transferSuccess = await TableRepository.transferTable(1, 3);
-      expect(transferSuccess, true);
-
-      final tables = await TableRepository.getAllTables();
-      final source = tables.firstWhere((t) => t.id == 1);
-      final target = tables.firstWhere((t) => t.id == 3);
-
-      expect(source.status, 0); // Source becomes available
-      expect(target.status, 1); // Target becomes occupied
-
-      // Cleanup
-      await TableRepository.updateStatus(3, 0);
+      expect(transferSuccess, false);
     });
   });
 

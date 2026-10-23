@@ -8,9 +8,13 @@ class ApiConfig {
   );
 
   static Future<Map<String, String>> authHeaders() async {
-    final session = await DatabaseHelper().getCurrentSession();
-    final token = session?['token']?.toString();
-    return token == null || token.isEmpty ? {} : {'Authorization': 'Bearer $token'};
+    try {
+      final session = await DatabaseHelper().getCurrentSession();
+      final token = session?['token']?.toString();
+      return token == null || token.isEmpty ? {} : {'Authorization': 'Bearer $token'};
+    } catch (_) {
+      return {};
+    }
   }
 
   static Future<http.Response> get(Uri uri, {Map<String, String>? headers}) async =>

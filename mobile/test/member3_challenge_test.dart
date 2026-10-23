@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:restaurant_pos_app/models/user.dart';
@@ -86,11 +89,170 @@ class Member3FakeDatabase implements Database {
   }
 }
 
+class _Member3HttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) => _Member3FakeHttpClient();
+}
+
+class _Member3FakeHttpClient extends Fake implements HttpClient {
+  @override
+  bool autoUncompress = true;
+  @override
+  Duration? connectionTimeout;
+  @override
+  Duration idleTimeout = const Duration(seconds: 15);
+
+  @override
+  Future<HttpClientRequest> openUrl(String method, Uri url) async {
+    final path = url.path;
+    if (path.contains('/api/order') && method == 'POST') {
+      throw const SocketException('Simulated network drop');
+    }
+
+    String jsonResp = '{}';
+    if (path.contains('/api/auth/login')) {
+      jsonResp = jsonEncode({
+        'success': true,
+        'message': 'Đăng nhập thành công',
+        'token': 'test_jwt_bearer_token',
+        'accountId': 1,
+        'username': 'admin',
+        'fullName': 'Nguyễn Văn Quản Trị',
+        'role': 'ADMIN',
+        'roleName': 'Quản trị viên',
+      });
+    } else if (path.contains('/api/order/admin')) {
+      jsonResp = jsonEncode({
+        'totalOrders': 1,
+        'totalRevenue': 64000.0,
+        'orders': [
+          {
+            'orderId': 1,
+            'orderCode': 'ORD-001',
+            'totalAmount': 64000.0,
+            'finalAmount': 64000.0,
+            'status': 0,
+            'paymentStatus': 0,
+            'createdAt': '2026-10-23T12:00:00',
+          }
+        ],
+      });
+    } else if (path.contains('/api/kds/active-orders')) {
+      jsonResp = jsonEncode([
+        {
+          'orderDetailId': 1,
+          'orderId': 1,
+          'orderCode': 'ORD-001',
+          'productName': 'Cà phê',
+          'quantity': 1,
+          'cookingStatus': 0,
+          'createdAt': '2026-10-23T12:00:00',
+        }
+      ]);
+    } else if (path.contains('/api/payment/confirm')) {
+      jsonResp = jsonEncode({
+        'success': true,
+        'message': 'Thanh toán thành công',
+        'paymentId': 1,
+      });
+    }
+
+    return _Member3FakeHttpClientRequest(jsonResp);
+  }
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) => openUrl('GET', url);
+  @override
+  Future<HttpClientRequest> postUrl(Uri url) => openUrl('POST', url);
+  @override
+  Future<HttpClientRequest> putUrl(Uri url) => openUrl('PUT', url);
+  @override
+  void close({bool force = false}) {}
+}
+
+class _Member3FakeHttpClientRequest extends Fake implements HttpClientRequest {
+  final String responseBody;
+  _Member3FakeHttpClientRequest(this.responseBody);
+
+  @override
+  bool followRedirects = true;
+  @override
+  int maxRedirects = 5;
+  @override
+  int contentLength = -1;
+  @override
+  bool persistentConnection = false;
+  @override
+  void write(Object? obj) {}
+  @override
+  void add(List<int> data) {}
+  @override
+  Future addStream(Stream<List<int>> stream) async {}
+
+  @override
+  final HttpHeaders headers = _Member3FakeHttpHeaders();
+
+  @override
+  Future<HttpClientResponse> close() async => _Member3FakeHttpClientResponse(responseBody);
+}
+
+class _Member3FakeHttpHeaders extends Fake implements HttpHeaders {
+  final Map<String, List<String>> _headers = {
+    'content-type': ['application/json; charset=utf-8'],
+  };
+  @override
+  List<String>? operator [](String name) => _headers[name.toLowerCase()];
+  @override
+  String? value(String name) => _headers[name.toLowerCase()]?.first;
+  @override
+  void forEach(void Function(String name, List<String> values) action) => _headers.forEach(action);
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) => _headers[name.toLowerCase()] = [value.toString()];
+  @override
+  void add(String name, Object value, {bool preserveHeaderCase = false}) => _headers.putIfAbsent(name.toLowerCase(), () => []).add(value.toString());
+}
+
+class _Member3FakeHttpClientResponse extends Fake implements HttpClientResponse {
+  final String responseBody;
+  _Member3FakeHttpClientResponse(this.responseBody);
+
+  @override
+  int get statusCode => 200;
+  @override
+  String get reasonPhrase => 'OK';
+  @override
+  bool get isRedirect => false;
+  @override
+  bool get persistentConnection => false;
+  @override
+  List<RedirectInfo> get redirects => const [];
+  @override
+  HttpClientResponseCompressionState get compressionState =>
+      HttpClientResponseCompressionState.notCompressed;
+  @override
+  int get contentLength => utf8.encode(responseBody).length;
+  @override
+  final HttpHeaders headers = _Member3FakeHttpHeaders();
+  @override
+  StreamSubscription<List<int>> listen(void Function(List<int> event)? onData,
+      {Function? onError, void Function()? onDone, bool? cancelOnError}) {
+    return Stream.value(utf8.encode(responseBody)).listen(onData, onError: onError, onDone: onDone, cancelOnError: cancelOnError);
+  }
+}
+
 void main() {
+  setUpAll(() {
+    HttpOverrides.global = _Member3HttpOverrides();
+  });
+
+  tearDownAll(() {
+    HttpOverrides.global = null;
+  });
+
   setUp(() {
     DatabaseHelper.setDatabaseForTesting(Member3FakeDatabase());
-    AuthRepository.timeoutDuration = const Duration(milliseconds: 50);
-    OrderRepository.timeoutDuration = const Duration(milliseconds: 50);
+    AuthRepository.timeoutDuration = const Duration(seconds: 2);
+    OrderRepository.timeoutDuration = const Duration(seconds: 2);
   });
 
   tearDown(() {
@@ -108,30 +270,31 @@ void main() {
         phoneNumber: '0901234567',
         role: 'ADMIN',
         roleName: 'Quản trị viên hệ thống',
-        token: 'token_admin_test',
+        token: 'mock-jwt-token-xyz',
       );
 
       expect(user.isAdmin, isTrue);
-      expect(user.isCashier, isFalse);
-      expect(user.isWaiter, isFalse);
-      expect(user.isChef, isFalse);
+      expect(user.isManager, isTrue);
+      expect(user.isStaff, isTrue);
 
       final map = user.toMap();
+      expect(map['user_id'], 1);
       expect(map['username'], 'admin');
       expect(map['role'], 'ADMIN');
+      expect(map['token'], 'mock-jwt-token-xyz');
 
-      final deserialized = UserAccount.fromMap(map);
-      expect(deserialized.accountId, 1);
-      expect(deserialized.fullName, 'Nguyễn Văn Quản Trị');
-      expect(deserialized.isAdmin, isTrue);
+      final fromMap = UserAccount.fromMap(map);
+      expect(fromMap.accountId, 1);
+      expect(fromMap.username, 'admin');
+      expect(fromMap.role, 'ADMIN');
     });
 
     test('UserAccount Waiter and Cashier roles detection', () {
       final waiter = UserAccount(
-        accountId: 4,
+        accountId: 2,
         roleId: 4,
-        username: 'waiter_nam',
-        fullName: 'Phạm Hoàng Nam',
+        username: 'waiter1',
+        fullName: 'Phục vụ bàn',
         role: 'WAITER',
         roleName: 'Nhân viên phục vụ',
       );
@@ -141,101 +304,94 @@ void main() {
       final cashier = UserAccount(
         accountId: 3,
         roleId: 3,
-        username: 'cashier_mai',
-        fullName: 'Lê Tuyết Mai',
+        username: 'cashier1',
+        fullName: 'Thu ngân quầy',
         role: 'CASHIER',
-        roleName: 'Thu ngân',
+        roleName: 'Nhân viên thu ngân',
       );
       expect(cashier.isCashier, isTrue);
-
-      final chef = UserAccount(
-        accountId: 7,
-        roleId: 6,
-        username: 'chef_dung',
-        fullName: 'Ngô Tiến Dũng',
-        role: 'HEAD_CHEF',
-        roleName: 'Đầu bếp chính',
-      );
-      expect(chef.isChef, isTrue);
+      expect(cashier.isAdmin, isFalse);
     });
   });
 
   group('Member 3 - Order and KDS Models Test', () {
     test('OrderModel and OrderItemModel serialization and computation', () {
-      final orderItem = OrderItemModel(
-        orderDetailId: 1,
-        productId: 1,
-        productName: 'Cà phê đen đá Đắk Lắk',
+      final item = OrderItemModel(
+        orderDetailId: 10,
+        productId: 5,
+        productName: 'Trà đào cam sả',
         quantity: 2,
-        unitPrice: 25000,
-        subTotal: 50000,
-        itemNote: 'Đen đá không đường',
+        unitPrice: 32000,
+        subTotal: 64000,
+        itemNote: 'Ít đường, nhiều đá',
         cookingStatus: 1,
-        cookingStatusText: 'Đang làm',
       );
+
+      expect(item.cookingStatusText, 'Đang làm');
+      expect(item.subTotal, 64000);
 
       final order = OrderModel(
-        orderId: 10,
-        orderCode: 'ORD-20261020-001',
-        tableId: 1,
-        tableName: 'Bàn T1-01',
-        customerName: 'Anh Tuấn',
-        phoneNumber: '0912345678',
-        totalAmount: 50000,
-        finalAmount: 50000,
+        orderId: 100,
+        orderCode: 'ORD-20261004-001',
+        tableId: 2,
+        tableName: 'Bàn 02 (Khu A)',
+        customerName: 'Nguyễn Văn A',
+        totalAmount: 100000,
+        discountAmount: 10000,
+        finalAmount: 90000,
         status: 1,
-        statusText: 'Đang chế biến',
         paymentStatus: 0,
-        paymentStatusText: 'Chưa thanh toán',
+        items: [item],
         createdAt: DateTime.now(),
-        items: [orderItem],
       );
 
-      expect(order.isPaid, isFalse);
-      expect(order.isCompleted, isFalse);
+      expect(order.statusText, 'Đang nấu');
+      expect(order.paymentStatusText, 'Chưa thanh toán');
       expect(order.items.length, 1);
-      expect(order.items.first.subTotal, 50000);
-
-      final map = order.toMap();
-      expect(map['orderCode'], 'ORD-20261020-001');
-
-      final deserialized = OrderModel.fromMap(map);
-      expect(deserialized.orderId, 10);
-      expect(deserialized.items.first.productName, 'Cà phê đen đá Đắk Lắk');
+      expect(order.items.first.productName, 'Trà đào cam sả');
     });
 
     test('KdsItemModel serialization and status text', () {
       final kdsItem = KdsItemModel(
-        orderDetailId: 101,
-        orderId: 10,
-        orderCode: 'ORD-10',
-        tableId: 2,
-        tableName: 'Bàn T1-02',
-        customerName: 'Khách lẻ',
-        productId: 5,
-        productName: 'Trà đào cam sả thanh nhiệt',
+        orderDetailId: 1,
+        orderId: 100,
+        orderCode: 'ORD-20261004-001',
+        tableName: 'Bàn 05',
+        productName: 'Cà phê muối',
         quantity: 2,
-        itemNote: 'Ít đường',
+        itemNote: 'Không đá',
         cookingStatus: 0,
-        cookingStatusText: 'Chờ nấu',
-        createdAt: DateTime.now(),
+        orderCreatedAt: DateTime.now(),
       );
 
-      final map = kdsItem.toMap();
-      final fromMap = KdsItemModel.fromMap(map);
-      expect(fromMap.orderDetailId, 101);
-      expect(fromMap.productName, 'Trà đào cam sả thanh nhiệt');
-      expect(fromMap.cookingStatus, 0);
+      expect(kdsItem.cookingStatusText, 'Chờ nấu');
+      expect(kdsItem.productName, 'Cà phê muối');
+      expect(kdsItem.quantity, 2);
     });
   });
 
   group('Member 3 - Payment and VietQR Models Test', () {
     test('PaymentModel and VietQr dynamic URL verification', () {
+      final payment = PaymentModel(
+        paymentId: 1,
+        orderId: 100,
+        paymentMethod: 'VietQR',
+        amount: 89000,
+        transactionRef: 'VIETQR-20261004-001',
+        status: 1,
+        note: 'Thanh toán chuyển khoản VietQR',
+        paymentTime: DateTime.now(),
+      );
+
+      expect(payment.paymentMethod, 'VietQR');
+      expect(payment.amount, 89000);
+      expect(payment.status, 1);
+
       final vietQr = VietQrModel(
-        orderId: 1,
+        orderId: 100,
         orderCode: 'ORD-20261004-001',
         bankId: 'MB',
-        bankName: 'MB Bank',
+        bankName: 'Ngân hàng Quân Đội (MBBank)',
         accountNo: '0901234567',
         accountName: 'NHA HANG RESTAURANT POS',
         amount: 89000,

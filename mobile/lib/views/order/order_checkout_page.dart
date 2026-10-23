@@ -155,7 +155,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
         context,
         MaterialPageRoute(
           builder: (_) => OrderDetailPage(
-            orderId: orderId,
+            orderId: orderId!,
             initialPaymentMethod: _selectedPaymentMethod,
           ),
         ),

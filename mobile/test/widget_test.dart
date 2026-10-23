@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:restaurant_pos_app/main.dart';
@@ -39,9 +42,123 @@ class WidgetTestFakeDatabase implements Database {
   }
 }
 
+class _WidgetTestHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) => _WidgetFakeHttpClient();
+}
+
+class _WidgetFakeHttpClient extends Fake implements HttpClient {
+  @override
+  bool autoUncompress = true;
+  @override
+  Duration? connectionTimeout;
+  @override
+  Duration idleTimeout = const Duration(seconds: 15);
+
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) async {
+    String jsonResp = '[]';
+    final path = url.path;
+    if (path.contains('/api/product/featured')) {
+      jsonResp = '[]';
+    } else if (path.contains('/api/product')) {
+      jsonResp = jsonEncode({
+        'totalItems': 0,
+        'page': 1,
+        'pageSize': 10,
+        'totalPages': 0,
+        'data': [],
+      });
+    } else if (path.contains('/api/category') || path.contains('/api/table')) {
+      jsonResp = '[]';
+    }
+    return _WidgetFakeHttpClientRequest(jsonResp);
+  }
+
+  @override
+  Future<HttpClientRequest> openUrl(String method, Uri url) => getUrl(url);
+  @override
+  void close({bool force = false}) {}
+}
+
+class _WidgetFakeHttpClientRequest extends Fake implements HttpClientRequest {
+  final String responseBody;
+  _WidgetFakeHttpClientRequest(this.responseBody);
+
+  @override
+  bool followRedirects = true;
+  @override
+  int maxRedirects = 5;
+  @override
+  int contentLength = -1;
+  @override
+  bool persistentConnection = false;
+  @override
+  void write(Object? obj) {}
+  @override
+  void add(List<int> data) {}
+  @override
+  Future addStream(Stream<List<int>> stream) async {}
+
+  @override
+  final HttpHeaders headers = _WidgetFakeHttpHeaders();
+
+  @override
+  Future<HttpClientResponse> close() async => _WidgetFakeHttpClientResponse(responseBody);
+}
+
+class _WidgetFakeHttpHeaders extends Fake implements HttpHeaders {
+  final Map<String, List<String>> _headers = {
+    'content-type': ['application/json; charset=utf-8'],
+  };
+  @override
+  List<String>? operator [](String name) => _headers[name.toLowerCase()];
+  @override
+  String? value(String name) => _headers[name.toLowerCase()]?.first;
+  @override
+  void forEach(void Function(String name, List<String> values) action) => _headers.forEach(action);
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) => _headers[name.toLowerCase()] = [value.toString()];
+  @override
+  void add(String name, Object value, {bool preserveHeaderCase = false}) => _headers.putIfAbsent(name.toLowerCase(), () => []).add(value.toString());
+}
+
+class _WidgetFakeHttpClientResponse extends Fake implements HttpClientResponse {
+  final String responseBody;
+  _WidgetFakeHttpClientResponse(this.responseBody);
+
+  @override
+  int get statusCode => 200;
+  @override
+  String get reasonPhrase => 'OK';
+  @override
+  bool get isRedirect => false;
+  @override
+  bool get persistentConnection => false;
+  @override
+  List<RedirectInfo> get redirects => const [];
+  @override
+  HttpClientResponseCompressionState get compressionState =>
+      HttpClientResponseCompressionState.notCompressed;
+  @override
+  int get contentLength => utf8.encode(responseBody).length;
+  @override
+  final HttpHeaders headers = _WidgetFakeHttpHeaders();
+  @override
+  StreamSubscription<List<int>> listen(void Function(List<int> event)? onData,
+      {Function? onError, void Function()? onDone, bool? cancelOnError}) {
+    return Stream.value(utf8.encode(responseBody)).listen(onData, onError: onError, onDone: onDone, cancelOnError: cancelOnError);
+  }
+}
+
 void main() {
   setUpAll(() {
     TableRepository.timeoutDuration = const Duration(milliseconds: 50);
+    HttpOverrides.global = _WidgetTestHttpOverrides();
+  });
+
+  tearDownAll(() {
+    HttpOverrides.global = null;
   });
 
   setUp(() {

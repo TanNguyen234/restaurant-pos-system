@@ -12,6 +12,8 @@ class DatabaseHelper {
   static final List<Map<String, dynamic>> _webOrders = [];
   static int _webCartAutoId = 1;
   static int _webOrderAutoId = 1;
+  static bool isTestingMode = false;
+  static bool get _useInMemory => kIsWeb || isTestingMode;
 
   DatabaseHelper._internal();
 
@@ -77,7 +79,7 @@ class DatabaseHelper {
 
   /// Lưu phiên đăng nhập của người dùng.
   Future<int> saveUserSession(Map<String, dynamic> session) async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       final sessionData = Map<String, dynamic>.from(session);
       sessionData['logged_in_at'] ??= DateTime.now().toIso8601String();
       _webSession = sessionData;
@@ -92,7 +94,7 @@ class DatabaseHelper {
 
   /// Lấy thông tin phiên đăng nhập mới nhất.
   Future<Map<String, dynamic>?> getCurrentSession() async {
-    if (kIsWeb) return _webSession;
+    if (_useInMemory) return _webSession;
     final db = await database;
     final results = await db.query(
       'user_session',
@@ -110,7 +112,7 @@ class DatabaseHelper {
 
   /// Đăng xuất - xóa toàn bộ thông tin phiên làm việc.
   Future<int> clearUserSession() async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       _webSession = null;
       return 1;
     }
@@ -119,7 +121,7 @@ class DatabaseHelper {
   }
 
   Future<int> insertOrUpdateCart(Map<String, dynamic> item) async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       int productId = item['product_id'];
       final idx = _webCart.indexWhere((c) => c['product_id'] == productId);
       if (idx != -1) {
@@ -153,13 +155,13 @@ class DatabaseHelper {
   }
 
   Future<List<Map<String, dynamic>>> getCartItems() async {
-    if (kIsWeb) return List<Map<String, dynamic>>.from(_webCart);
+    if (_useInMemory) return List<Map<String, dynamic>>.from(_webCart);
     final db = await database;
     return await db.query('cart_items');
   }
 
   Future<int> getCartItemCount() async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       return _webCart.fold<int>(0, (sum, item) => sum + (item['quantity'] as int? ?? 0));
     }
     final db = await database;
@@ -169,7 +171,7 @@ class DatabaseHelper {
 
   /// Tính tổng tiền tất cả món ăn trong giỏ hàng ngoại tuyến (SUM(price * quantity)).
   Future<double> getCartTotalAmount() async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       return _webCart.fold<double>(0.0, (sum, item) => sum + ((item['price'] as num? ?? 0) * (item['quantity'] as num? ?? 0)).toDouble());
     }
     final db = await database;
@@ -180,7 +182,7 @@ class DatabaseHelper {
   }
 
   Future<int> updateCartQuantity(int id, int quantity) async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       if (quantity <= 0) {
         _webCart.removeWhere((c) => c['id'] == id);
       } else {
@@ -202,7 +204,7 @@ class DatabaseHelper {
   }
 
   Future<int> deleteCartItem(int id) async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       _webCart.removeWhere((c) => c['id'] == id);
       return 1;
     }
@@ -211,7 +213,7 @@ class DatabaseHelper {
   }
 
   Future<int> clearCart() async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       _webCart.clear();
       return 1;
     }
@@ -221,7 +223,7 @@ class DatabaseHelper {
 
   /// Lưu đơn hàng ngoại tuyến vào hàng đợi (is_synced = 0).
   Future<int> saveOfflineOrder(Map<String, dynamic> order) async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       final orderData = Map<String, dynamic>.from(order);
       orderData['id'] ??= _webOrderAutoId++;
       orderData['is_synced'] = 0;
@@ -238,7 +240,7 @@ class DatabaseHelper {
 
   /// Lấy danh sách các đơn hàng chưa đồng bộ (is_synced = 0).
   Future<List<Map<String, dynamic>>> getUnsyncedOrders() async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       return _webOrders.where((o) => (o['is_synced'] as int? ?? 0) == 0).toList();
     }
     final db = await database;
@@ -251,7 +253,7 @@ class DatabaseHelper {
 
   /// Lấy toàn bộ đơn hàng ngoại tuyến đã lưu (cả đã và chưa đồng bộ).
   Future<List<Map<String, dynamic>>> getAllOfflineOrders() async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       return List<Map<String, dynamic>>.from(_webOrders);
     }
     final db = await database;
@@ -260,7 +262,7 @@ class DatabaseHelper {
 
   /// Đánh dấu đơn hàng đã được đồng bộ thành công lên server backend (is_synced = 1).
   Future<int> markOrderSynced(int id) async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       final idx = _webOrders.indexWhere((o) => o['id'] == id);
       if (idx != -1) _webOrders[idx]['is_synced'] = 1;
       return 1;
@@ -276,7 +278,7 @@ class DatabaseHelper {
 
   /// Xóa đơn hàng khỏi danh sách đơn ngoại tuyến theo ID.
   Future<int> deleteOfflineOrder(int id) async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       _webOrders.removeWhere((o) => o['id'] == id);
       return 1;
     }
@@ -286,7 +288,7 @@ class DatabaseHelper {
 
   /// Đếm số lượng đơn hàng chưa đồng bộ lên máy chủ.
   Future<int> getUnsyncedOrderCount() async {
-    if (kIsWeb) {
+    if (_useInMemory) {
       return _webOrders.where((o) => (o['is_synced'] as int? ?? 0) == 0).length;
     }
     final db = await database;

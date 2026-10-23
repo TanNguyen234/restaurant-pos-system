@@ -1,0 +1,718 @@
+[
+  {
+    "id": "JWT-01",
+    "category": "JWT",
+    "description": "Anonymous request with no auth header returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-02",
+    "category": "JWT",
+    "description": "Empty Bearer header returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-03",
+    "category": "JWT",
+    "description": "Garbage string token returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-04",
+    "category": "JWT",
+    "description": "Basic auth scheme returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-05",
+    "category": "JWT",
+    "description": "Incomplete 2-part JWT returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-06",
+    "category": "JWT",
+    "description": "Truncated valid JWT returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-07",
+    "category": "JWT",
+    "description": "Forged signature (attacker secret) returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-08",
+    "category": "JWT",
+    "description": "Algorithm 'none' token returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-09",
+    "category": "JWT",
+    "description": "Expired token (exp in past) returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-10",
+    "category": "JWT",
+    "description": "Tampered payload with original signature returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-11",
+    "category": "JWT",
+    "description": "Token with invalid Issuer returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "JWT-12",
+    "category": "JWT",
+    "description": "Token with invalid Audience returns 401",
+    "passed": true,
+    "statusCode": 401,
+    "details": ""
+  },
+  {
+    "id": "ROLE-LOGIN-ADMIN",
+    "category": "RBAC",
+    "description": "Login as ADMIN returns role ADMIN",
+    "passed": true,
+    "statusCode": 200,
+    "details": {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjEiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiYWRtaW4iLCJhY2NvdW50SWQiOiIxIiwidXNlcm5hbWUiOiJhZG1pbiIsImZ1bGxOYW1lIjoiTmd1eeG7hW4gVsSDbiBRdeG6o24gVHLhu4siLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJBRE1JTiIsInJvbGUiOiJBRE1JTiIsInJvbGVJZCI6IjEiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9lbWFpbGFkZHJlc3MiOiJhZG1pbkByZXN0YXVyYW50cG9zLnZuIiwicm9sZU5hbWUiOiJRdeG6o24gdHLhu4sgdmnDqm4gaOG7hyB0aOG7kW5nIiwiZXhwIjoxNzkyODQxNjQ1LCJpc3MiOiJSZXN0YXVyYW50UG9zQXBpIiwiYXVkIjoiUmVzdGF1cmFudFBvc0NsaWVudHMifQ.53d4oG8ct3PwNoYCE23cv6-WyvXdwxzv5_laXAENYnY",
+      "accountId": 1,
+      "username": "admin",
+      "fullName": "Nguyễn Văn Quản Trị",
+      "role": "ADMIN",
+      "roleName": "Quản trị viên hệ thống",
+      "email": "admin@restaurantpos.vn",
+      "phoneNumber": "0901234567",
+      "avatar": "admin_avatar.png"
+    }
+  },
+  {
+    "id": "RBAC-MEM-ADMIN",
+    "category": "RBAC",
+    "description": "Access /api/account/members as ADMIN returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-ROLE-ADMIN",
+    "category": "RBAC",
+    "description": "Access /api/account/roles as ADMIN returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-PROF-ADMIN",
+    "category": "RBAC",
+    "description": "Access /api/account/profile as ADMIN returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "ROLE-LOGIN-MANAGER",
+    "category": "RBAC",
+    "description": "Login as MANAGER returns role MANAGER",
+    "passed": true,
+    "statusCode": 200,
+    "details": {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjIiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoibWFuYWdlcjAxIiwiYWNjb3VudElkIjoiMiIsInVzZXJuYW1lIjoibWFuYWdlcjAxIiwiZnVsbE5hbWUiOiJUcuG6p24gVGjhu4sgVGh1IFF14bqjbiBMw70iLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJNQU5BR0VSIiwicm9sZSI6Ik1BTkFHRVIiLCJyb2xlSWQiOiIyIiwiaHR0cDovL3NjaGVtYXMueG1sc29hcC5vcmcvd3MvMjAwNS8wNS9pZGVudGl0eS9jbGFpbXMvZW1haWxhZGRyZXNzIjoibWFuYWdlcjAxQHJlc3RhdXJhbnRwb3Mudm4iLCJyb2xlTmFtZSI6IlF14bqjbiBsw70gY2hpIG5ow6FuaCIsImV4cCI6MTc5Mjg0MTY0NSwiaXNzIjoiUmVzdGF1cmFudFBvc0FwaSIsImF1ZCI6IlJlc3RhdXJhbnRQb3NDbGllbnRzIn0.wUDA_y_5tzddtXHb2sSY3XBPvRjQQts2eOpmpE5Mpdg",
+      "accountId": 2,
+      "username": "manager01",
+      "fullName": "Trần Thị Thu Quản Lý",
+      "role": "MANAGER",
+      "roleName": "Quản lý chi nhánh",
+      "email": "manager01@restaurantpos.vn",
+      "phoneNumber": "0902345678",
+      "avatar": "manager_avatar.png"
+    }
+  },
+  {
+    "id": "RBAC-MEM-MANAGER",
+    "category": "RBAC",
+    "description": "Access /api/account/members as MANAGER returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-ROLE-MANAGER",
+    "category": "RBAC",
+    "description": "Access /api/account/roles as MANAGER returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-PROF-MANAGER",
+    "category": "RBAC",
+    "description": "Access /api/account/profile as MANAGER returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "ROLE-LOGIN-CASHIER",
+    "category": "RBAC",
+    "description": "Login as CASHIER returns role CASHIER",
+    "passed": true,
+    "statusCode": 200,
+    "details": {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjMiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiY2FzaGllcl9tYWkiLCJhY2NvdW50SWQiOiIzIiwidXNlcm5hbWUiOiJjYXNoaWVyX21haSIsImZ1bGxOYW1lIjoiTMOqIFR1eeG6v3QgTWFpIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiQ0FTSElFUiIsInJvbGUiOiJDQVNISUVSIiwicm9sZUlkIjoiMyIsImh0dHA6Ly9zY2hlbWFzLnhtbHNvYXAub3JnL3dzLzIwMDUvMDUvaWRlbnRpdHkvY2xhaW1zL2VtYWlsYWRkcmVzcyI6Im1haS5jYXNoaWVyQHJlc3RhdXJhbnRwb3Mudm4iLCJyb2xlTmFtZSI6IlRodSBuZ8OibiIsImV4cCI6MTc5Mjg0MTY0NSwiaXNzIjoiUmVzdGF1cmFudFBvc0FwaSIsImF1ZCI6IlJlc3RhdXJhbnRQb3NDbGllbnRzIn0._e5n7VtFf1lpVw0Y1PiWCvhWfGebST-dkVSouizpslU",
+      "accountId": 3,
+      "username": "cashier_mai",
+      "fullName": "Lê Tuyết Mai",
+      "role": "CASHIER",
+      "roleName": "Thu ngân",
+      "email": "mai.cashier@restaurantpos.vn",
+      "phoneNumber": "0903456789",
+      "avatar": "mai_avatar.png"
+    }
+  },
+  {
+    "id": "RBAC-MEM-CASHIER",
+    "category": "RBAC",
+    "description": "Access /api/account/members as CASHIER returns 403",
+    "passed": true,
+    "statusCode": 403,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-ROLE-CASHIER",
+    "category": "RBAC",
+    "description": "Access /api/account/roles as CASHIER returns 403",
+    "passed": true,
+    "statusCode": 403,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-PROF-CASHIER",
+    "category": "RBAC",
+    "description": "Access /api/account/profile as CASHIER returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "ROLE-LOGIN-WAITER",
+    "category": "RBAC",
+    "description": "Login as WAITER returns role WAITER",
+    "passed": true,
+    "statusCode": 200,
+    "details": {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoid2FpdGVyX25hbSIsImFjY291bnRJZCI6IjQiLCJ1c2VybmFtZSI6IndhaXRlcl9uYW0iLCJmdWxsTmFtZSI6IlBo4bqhbSBIb8OgbmcgTmFtIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiV0FJVEVSIiwicm9sZSI6IldBSVRFUiIsInJvbGVJZCI6IjQiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9lbWFpbGFkZHJlc3MiOiJuYW0ud2FpdGVyQHJlc3RhdXJhbnRwb3Mudm4iLCJyb2xlTmFtZSI6Ik5ow6JuIHZpw6puIHBo4bulYyB24bulIiwiZXhwIjoxNzkyODQxNjQ1LCJpc3MiOiJSZXN0YXVyYW50UG9zQXBpIiwiYXVkIjoiUmVzdGF1cmFudFBvc0NsaWVudHMifQ.2JQ8SFwsknICx6aWUCuq7GUodjiSrAZWniJ2BTR99-U",
+      "accountId": 4,
+      "username": "waiter_nam",
+      "fullName": "Phạm Hoàng Nam",
+      "role": "WAITER",
+      "roleName": "Nhân viên phục vụ",
+      "email": "nam.waiter@restaurantpos.vn",
+      "phoneNumber": "0904567890",
+      "avatar": "nam_avatar.png"
+    }
+  },
+  {
+    "id": "RBAC-MEM-WAITER",
+    "category": "RBAC",
+    "description": "Access /api/account/members as WAITER returns 403",
+    "passed": true,
+    "statusCode": 403,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-ROLE-WAITER",
+    "category": "RBAC",
+    "description": "Access /api/account/roles as WAITER returns 403",
+    "passed": true,
+    "statusCode": 403,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-PROF-WAITER",
+    "category": "RBAC",
+    "description": "Access /api/account/profile as WAITER returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "ROLE-LOGIN-KITCHEN",
+    "category": "RBAC",
+    "description": "Login as KITCHEN returns role KITCHEN",
+    "passed": true,
+    "statusCode": 200,
+    "details": {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjExIiwiaHR0cDovL3NjaGVtYXMueG1sc29hcC5vcmcvd3MvMjAwNS8wNS9pZGVudGl0eS9jbGFpbXMvbmFtZSI6ImtpdGNoZW4iLCJhY2NvdW50SWQiOiIxMSIsInVzZXJuYW1lIjoia2l0Y2hlbiIsImZ1bGxOYW1lIjoiQsOhwrrCv3AgVHLDhsKww6HCu8W4bmcgS0RTIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiS0lUQ0hFTiIsInJvbGUiOiJLSVRDSEVOIiwicm9sZUlkIjoiMTEiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9lbWFpbGFkZHJlc3MiOiJraXRjaGVuQHJlc3RhdXJhbnRwb3Mudm4iLCJyb2xlTmFtZSI6IkLDocK74oSiIHBow6HCusKtbiBiw6HCusK_cCAmIHBoYSBjaMOhwrrCvyAoS0RTKSIsImV4cCI6MTc5Mjg0MTY0NSwiaXNzIjoiUmVzdGF1cmFudFBvc0FwaSIsImF1ZCI6IlJlc3RhdXJhbnRQb3NDbGllbnRzIn0.uoA0rdLL5A03WugRsYNw_E4hw6VbbZCRI500pNmAyvg",
+      "accountId": 11,
+      "username": "kitchen",
+      "fullName": "Báº¿p TrÆ°á»Ÿng KDS",
+      "role": "KITCHEN",
+      "roleName": "Bá»™ pháº­n báº¿p & pha cháº¿ (KDS)",
+      "email": "kitchen@restaurantpos.vn",
+      "phoneNumber": "0907890123",
+      "avatar": null
+    }
+  },
+  {
+    "id": "RBAC-MEM-KITCHEN",
+    "category": "RBAC",
+    "description": "Access /api/account/members as KITCHEN returns 403",
+    "passed": true,
+    "statusCode": 403,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-ROLE-KITCHEN",
+    "category": "RBAC",
+    "description": "Access /api/account/roles as KITCHEN returns 403",
+    "passed": true,
+    "statusCode": 403,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-PROF-KITCHEN",
+    "category": "RBAC",
+    "description": "Access /api/account/profile as KITCHEN returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "ROLE-LOGIN-MEMBER",
+    "category": "RBAC",
+    "description": "Login as MEMBER returns role MEMBER",
+    "passed": true,
+    "statusCode": 200,
+    "details": {
+      "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjgiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoibWVtYmVyX2toYW5nIiwiYWNjb3VudElkIjoiOCIsInVzZXJuYW1lIjoibWVtYmVyX2toYW5nIiwiZnVsbE5hbWUiOiJCw7lpIFbEqW5oIEtoYW5nIiwiaHR0cDovL3NjaGVtYXMubWljcm9zb2Z0LmNvbS93cy8yMDA4LzA2L2lkZW50aXR5L2NsYWltcy9yb2xlIjoiTUVNQkVSIiwicm9sZSI6Ik1FTUJFUiIsInJvbGVJZCI6IjgiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9lbWFpbGFkZHJlc3MiOiJraGFuZy5idWlAZ21haWwuY29tIiwicm9sZU5hbWUiOiJLaMOhY2ggaMOgbmcgdGjDom4gdGhp4bq_dCIsImV4cCI6MTc5Mjg0MTY0NSwiaXNzIjoiUmVzdGF1cmFudFBvc0FwaSIsImF1ZCI6IlJlc3RhdXJhbnRQb3NDbGllbnRzIn0.dl3HJdTzVotWINCG-IqlXwvuGWH11zVHmASWtAhPKEs",
+      "accountId": 8,
+      "username": "member_khang",
+      "fullName": "Bùi Vĩnh Khang",
+      "role": "MEMBER",
+      "roleName": "Khách hàng thân thiết",
+      "email": "khang.bui@gmail.com",
+      "phoneNumber": "0908901234",
+      "avatar": "khang_avatar.png"
+    }
+  },
+  {
+    "id": "RBAC-MEM-MEMBER",
+    "category": "RBAC",
+    "description": "Access /api/account/members as MEMBER returns 403",
+    "passed": true,
+    "statusCode": 403,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-ROLE-MEMBER",
+    "category": "RBAC",
+    "description": "Access /api/account/roles as MEMBER returns 403",
+    "passed": true,
+    "statusCode": 403,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-PROF-MEMBER",
+    "category": "RBAC",
+    "description": "Access /api/account/profile as MEMBER returns 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": "OK"
+  },
+  {
+    "id": "RBAC-HEADER-SPOOF",
+    "category": "RBAC",
+    "description": "Header spoofing (X-Role: ADMIN) as WAITER still returns 403",
+    "passed": true,
+    "statusCode": 403,
+    "details": ""
+  },
+  {
+    "id": "PWD-01",
+    "category": "PWD",
+    "description": "Incorrect old password with explicit username returns 400",
+    "passed": true,
+    "statusCode": 400,
+    "details": {
+      "statusCode": 400,
+      "success": false,
+      "message": "Mật khẩu hiện tại không chính xác",
+      "error": "Mật khẩu hiện tại không chính xác"
+    }
+  },
+  {
+    "id": "PWD-02",
+    "category": "PWD",
+    "description": "Authenticated JWT with incorrect old password returns 400",
+    "passed": true,
+    "statusCode": 400,
+    "details": {
+      "statusCode": 400,
+      "success": false,
+      "message": "Mật khẩu hiện tại không chính xác",
+      "error": "Mật khẩu hiện tại không chính xác"
+    }
+  },
+  {
+    "id": "PWD-03",
+    "category": "PWD",
+    "description": "Password change for non-existent username returns 400",
+    "passed": true,
+    "statusCode": 400,
+    "details": {
+      "statusCode": 400,
+      "success": false,
+      "message": "Không tìm thấy tài khoản",
+      "error": "Không tìm thấy tài khoản"
+    }
+  },
+  {
+    "id": "PWD-04",
+    "category": "PWD",
+    "description": "Empty change-password request body returns 400",
+    "passed": true,
+    "statusCode": 400,
+    "details": {
+      "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+      "title": "One or more validation errors occurred.",
+      "status": 400,
+      "errors": {
+        "NewPassword": [
+          "Vui lòng nhập mật khẩu mới"
+        ],
+        "OldPassword": [
+          "Vui lòng nhập mật khẩu hiện tại"
+        ]
+      },
+      "traceId": "00-4090692366a7c6148dda86a141319bbe-1904e5658ddddb28-00"
+    }
+  },
+  {
+    "id": "PWD-05",
+    "category": "PWD",
+    "description": "Short new password (<6 chars) returns 400",
+    "passed": true,
+    "statusCode": 400,
+    "details": {
+      "type": "https://tools.ietf.org/html/rfc9110#section-15.5.1",
+      "title": "One or more validation errors occurred.",
+      "status": 400,
+      "errors": {
+        "NewPassword": [
+          "Mật khẩu mới tối thiểu 6 ký tự"
+        ]
+      },
+      "traceId": "00-069d5118ab5764170d0788349ac7c3e4-2e8b721c34a83ee7-00"
+    }
+  },
+  {
+    "id": "SQLI-01-USER",
+    "category": "SQLI",
+    "description": "Tautology payload in login username safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-01-PASS",
+    "category": "SQLI",
+    "description": "Tautology payload in login password safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-02-USER",
+    "category": "SQLI",
+    "description": "String tautology payload in login username safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-02-PASS",
+    "category": "SQLI",
+    "description": "String tautology payload in login password safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-03-USER",
+    "category": "SQLI",
+    "description": "Comment truncation payload in login username safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-03-PASS",
+    "category": "SQLI",
+    "description": "Comment truncation payload in login password safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-04-USER",
+    "category": "SQLI",
+    "description": "Block comment payload in login username safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-04-PASS",
+    "category": "SQLI",
+    "description": "Block comment payload in login password safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-05-USER",
+    "category": "SQLI",
+    "description": "Stacked query / command injection in login username safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-05-PASS",
+    "category": "SQLI",
+    "description": "Stacked query / command injection in login password safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-06-USER",
+    "category": "SQLI",
+    "description": "Stacked query DROP TABLE in login username safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-06-PASS",
+    "category": "SQLI",
+    "description": "Stacked query DROP TABLE in login password safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-07-USER",
+    "category": "SQLI",
+    "description": "UNION SELECT injection in login username safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "SQLI-07-PASS",
+    "category": "SQLI",
+    "description": "UNION SELECT injection in login password safely rejected (no 500/200)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "FUZZ-01",
+    "category": "FUZZ",
+    "description": "10,000 character username payload handled safely (no 500)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "FUZZ-02",
+    "category": "FUZZ",
+    "description": "XSS payload in login username handled safely (no 500)",
+    "passed": true,
+    "statusCode": 401,
+    "details": {
+      "statusCode": 401,
+      "success": false,
+      "message": "Tên đăng nhập hoặc mật khẩu không chính xác",
+      "error": "Tên đăng nhập hoặc mật khẩu không chính xác"
+    }
+  },
+  {
+    "id": "REG-01",
+    "category": "REG",
+    "description": "Register with existing username 'admin' returns 400",
+    "passed": true,
+    "statusCode": 400,
+    "details": {
+      "statusCode": 400,
+      "success": false,
+      "message": "Tên đăng nhập đã tồn tại trong hệ thống",
+      "error": "Tên đăng nhập đã tồn tại trong hệ thống"
+    }
+  },
+  {
+    "id": "REG-02",
+    "category": "REG",
+    "description": "Register with uppercase existing username 'ADMIN' returns 400",
+    "passed": true,
+    "statusCode": 400,
+    "details": {
+      "statusCode": 400,
+      "success": false,
+      "message": "Tên đăng nhập đã tồn tại trong hệ thống",
+      "error": "Tên đăng nhập đã tồn tại trong hệ thống"
+    }
+  },
+  {
+    "id": "REG-03",
+    "category": "REG",
+    "description": "Fresh registration of user 'adv_user_1792755246' succeeds with 200",
+    "passed": true,
+    "statusCode": 200,
+    "details": {
+      "statusCode": 200,
+      "success": true,
+      "message": "Đăng ký tài khoản thành công",
+      "accountId": 28,
+      "username": "adv_user_1792755246"
+    }
+  },
+  {
+    "id": "REG-04",
+    "category": "REG",
+    "description": "Duplicate registration of username 'adv_user_1792755246' returns 400",
+    "passed": true,
+    "statusCode": 400,
+    "details": {
+      "statusCode": 400,
+      "success": false,
+      "message": "Tên đăng nhập đã tồn tại trong hệ thống",
+      "error": "Tên đăng nhập đã tồn tại trong hệ thống"
+    }
+  },
+  {
+    "id": "REG-05",
+    "category": "REG",
+    "description": "Registration with duplicate email returns 400",
+    "passed": true,
+    "statusCode": 400,
+    "details": {
+      "statusCode": 400,
+      "success": false,
+      "message": "Email đã được sử dụng trong hệ thống",
+      "error": "Email đã được sử dụng trong hệ thống"
+    }
+  },
+  {
+    "id": "PROBE-ROLE-MASS-ASSIGNMENT",
+    "category": "SECURITY-AUDIT",
+    "description": "Public registration accepts client-supplied RoleCode/RoleId",
+    "passed": true,
+    "statusCode": 200,
+    "details": "Registered with roleCode='ADMIN' -> Assigned Role=MEMBER, Can Access Admin Members Endpoint=False"
+  }
+]

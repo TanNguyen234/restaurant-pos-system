@@ -35,15 +35,16 @@ class OrderModel {
     this.discountAmount = 0,
     required this.finalAmount,
     required this.status,
-    required this.statusText,
+    String? statusText,
     required this.paymentStatus,
-    required this.paymentStatusText,
+    String? paymentStatusText,
     this.paymentMethod,
     this.totalItems = 0,
     required this.createdAt,
     this.completedAt,
     this.items = const [],
-  });
+  })  : statusText = statusText ?? resolveStatusText(status),
+        paymentStatusText = paymentStatusText ?? ((paymentStatus == 1) ? 'Đã thanh toán' : 'Chưa thanh toán');
 
   bool get isPaid => paymentStatus == 1;
   bool get isCompleted => status == 3;
@@ -117,7 +118,7 @@ class OrderModel {
       case 0:
         return 'Mới tạo';
       case 1:
-        return 'Đang chế biến';
+        return 'Đang nấu';
       case 2:
         return 'Đã phục vụ';
       case 3:
@@ -154,10 +155,10 @@ class OrderItemModel {
     required this.subTotal,
     this.itemNote,
     this.cookingStatus = 0,
-    required this.cookingStatusText,
+    String? cookingStatusText,
     this.startedCookingAt,
     this.finishedCookingAt,
-  });
+  }) : cookingStatusText = cookingStatusText ?? resolveCookingStatusText(cookingStatus);
 
   factory OrderItemModel.fromMap(Map<String, dynamic> map) {
     return OrderItemModel(
@@ -231,24 +232,28 @@ class KdsItemModel {
   final DateTime? startedCookingAt;
   final DateTime? finishedCookingAt;
 
+  DateTime get orderCreatedAt => createdAt;
+
   KdsItemModel({
     required this.orderDetailId,
     required this.orderId,
     required this.orderCode,
     this.tableId,
-    required this.tableName,
-    required this.customerName,
-    required this.productId,
+    this.tableName = '',
+    this.customerName = 'Khách vãng lai',
+    this.productId = 0,
     required this.productName,
     this.productImage = 'default.png',
     required this.quantity,
     this.itemNote,
-    required this.cookingStatus,
-    required this.cookingStatusText,
-    required this.createdAt,
+    this.cookingStatus = 0,
+    String? cookingStatusText,
+    DateTime? createdAt,
+    DateTime? orderCreatedAt,
     this.startedCookingAt,
     this.finishedCookingAt,
-  });
+  })  : cookingStatusText = cookingStatusText ?? OrderItemModel.resolveCookingStatusText(cookingStatus),
+        createdAt = createdAt ?? orderCreatedAt ?? DateTime.now();
 
   factory KdsItemModel.fromMap(Map<String, dynamic> map) {
     return KdsItemModel(

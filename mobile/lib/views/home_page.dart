@@ -363,6 +363,9 @@ class _HomePageState extends State<HomePage> {
   }
 
   Widget _buildFeaturedSection() {
+    if (!_isLoadingFeatured && _featuredProducts.isEmpty) {
+      return const SizedBox.shrink();
+    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
