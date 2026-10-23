@@ -59,26 +59,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
     final tables = await TableRepository.getAllTables();
     final cart = await _dbHelper.getCartItems();
 
-    // Nếu giỏ hàng SQLite trống, thêm 2 món mẫu mặc định để tiện thử nghiệm
-    List<Map<String, dynamic>> activeCart = List.from(cart);
-    if (activeCart.isEmpty) {
-      activeCart = [
-        {
-          'product_id': 1,
-          'product_name': 'Cà phê đen đá Đắk Lắk',
-          'price': 25000.0,
-          'quantity': 2,
-          'image_url': 'cafe_den_da.jpg',
-        },
-        {
-          'product_id': 5,
-          'product_name': 'Trà đào cam sả thanh nhiệt',
-          'price': 42000.0,
-          'quantity': 1,
-          'image_url': 'tra_dao_cam_sa.jpg',
-        },
-      ];
-    }
+    final activeCart = List<Map<String, dynamic>>.from(cart);
 
     if (!mounted) return;
 
@@ -110,12 +91,20 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
       return;
     }
 
+    if (_orderType == 1 && _selectedTableId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn bàn phục vụ')));
+      return;
+    }
+    if (_cartItems.any((item) => (item['product_id'] ?? item['productId']) is! int || ((item['product_id'] ?? item['productId']) as int) <= 0 || (item['quantity'] as num? ?? 0) <= 0)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Giỏ hàng chứa món không hợp lệ, vui lòng cập nhật lại')));
+      return;
+    }
     setState(() => _isSubmitting = true);
 
     // Chuẩn bị payload tạo đơn
     final itemsPayload = _cartItems.map((item) {
       return {
-        'productId': item['product_id'] ?? item['productId'] ?? 1,
+        'productId': item['product_id'] ?? item['productId'],
         'quantity': item['quantity'] ?? 1,
         'unitPrice': (item['price'] as num? ?? 0).toDouble(),
         'itemNote': item['note'],
@@ -136,15 +125,23 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
 
     final result = await _orderRepo.createOrder(orderData);
 
-    // Xóa giỏ hàng SQLite cục bộ
-    await _dbHelper.clearCart();
-
     if (!mounted) return;
     setState(() => _isSubmitting = false);
 
     if (result['success'] == true) {
-      int orderId = result['orderId'] ?? 1;
-      bool isOffline = result['isOffline'] ?? false;
+      final bool isOffline = result['isOffline'] == true;
+      final int? orderId = result['orderId'] as int?;
+      await _dbHelper.clearCart();
+      if (!mounted) return;
+      if (isOffline) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Đơn đã lưu ngoại tuyến, sẽ được đồng bộ khi có kết nối. Chưa thể thanh toán cho đến khi server xác nhận.')));
+        Navigator.pop(context);
+        return;
+      }
+      if (orderId == null || orderId <= 0) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Máy chủ trả về đơn không hợp lệ; vui lòng kiểm tra danh sách đơn.')));
+        return;
+      }
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
