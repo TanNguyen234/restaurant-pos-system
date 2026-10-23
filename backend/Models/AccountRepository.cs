@@ -149,7 +149,7 @@ public class AccountRepository : BaseRepository
             return (false, "Mật khẩu cũ không chính xác");
         }
 
-        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 4)
+        if (string.IsNullOrWhiteSpace(newPassword) || newPassword.Length < 10)
         {
             return (false, "Mật khẩu mới phải chứa ít nhất 10 ký tự");
         }
