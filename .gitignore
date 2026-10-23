@@ -24,3 +24,7 @@ Thumbs.db
 
 # Agent workspaces & scratch
 .agents/
+
+# Python cache
+__pycache__/
+*.pyc
