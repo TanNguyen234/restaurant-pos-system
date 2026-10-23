@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../utils/database_helper.dart';
+import '../config/api_config.dart';
 
 class SyncResult {
   final int total;
@@ -27,8 +28,8 @@ class OfflineSyncService {
   factory OfflineSyncService() => _instance;
   OfflineSyncService._internal();
 
-  static String orderApiUrl = "http://localhost:5138/api/order";
-  static String healthCheckUrl = "http://localhost:5138/api/table/areas";
+  static String orderApiUrl = ApiConfig.baseUrl + '/api/order';
+  static String healthCheckUrl = ApiConfig.baseUrl + '/api/table/areas';
   static const Duration timeoutDuration = Duration(seconds: 4);
 
   Timer? _periodicTimer;

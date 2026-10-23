@@ -17,10 +17,16 @@ class Category {
     this.isActive = true,
   });
 
+  String get fullIconUrl {
+    if (icon.isEmpty) return '';
+    if (icon.startsWith('http://') || icon.startsWith('https://')) return icon;
+    return 'http://localhost:5138/images/categories/$icon';
+  }
+
   factory Category.fromMap(Map<String, dynamic> map) {
     return Category(
-      id: map['id'] ?? 0,
-      name: map['name'] ?? '',
+      id: map['id'] ?? map['categoryId'] ?? 0,
+      name: map['name'] ?? map['categoryName'] ?? '',
       title: map['title'] ?? '',
       description: map['description'] ?? '',
       icon: map['icon'] ?? '',

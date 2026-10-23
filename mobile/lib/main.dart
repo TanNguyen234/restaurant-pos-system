@@ -3,6 +3,14 @@ import 'package:intl/intl.dart';
 import 'services/offline_sync_service.dart';
 import 'utils/database_helper.dart';
 import 'views/category_page.dart';
+import 'views/admin/admin_category_page.dart';
+import 'views/admin/admin_product_page.dart';
+import 'views/admin/admin_order_list_page.dart';
+import 'views/auth/login_page.dart';
+import 'views/kitchen/kitchen_display_page.dart';
+import 'views/order/order_checkout_page.dart';
+import 'views/cart_page.dart';
+import 'views/home_page.dart';
 import 'views/table/floor_table_page.dart';
 
 void main() {
@@ -91,13 +99,59 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
 
   final List<Widget> _pages = const [
     FloorTablePage(),
+    HomePage(),
     CategoryPage(title: 'Thực đơn & Danh mục'),
+    CartPage(),
     OrdersSyncPage(),
   ];
+
+  void _showOperationsMenu() {
+    showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        void go(Widget page) {
+          Navigator.pop(sheetContext);
+          Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
+        }
+
+        return SafeArea(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('Trung tâm vận hành', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 8),
+                  const Text('Quản lý bếp, đơn hàng và thực đơn', style: TextStyle(color: Color(0xFF64748B))),
+                  const SizedBox(height: 12),
+                  ListTile(leading: const Icon(Icons.shopping_cart_checkout_outlined), title: const Text('Tạo đơn hàng'), onTap: () => go(const OrderCheckoutPage())),
+                  ListTile(leading: const Icon(Icons.kitchen_outlined), title: const Text('Màn hình bếp'), onTap: () => go(const KitchenDisplayPage())),
+                  ListTile(leading: const Icon(Icons.receipt_long_outlined), title: const Text('Quản lý đơn hàng'), onTap: () => go(const AdminOrderListPage())),
+                  const Divider(),
+                  ListTile(leading: const Icon(Icons.category_outlined), title: const Text('Quản lý danh mục'), onTap: () => go(const AdminCategoryPage())),
+                  ListTile(leading: const Icon(Icons.inventory_2_outlined), title: const Text('Quản lý sản phẩm'), onTap: () => go(const AdminProductPage())),
+                  ListTile(leading: const Icon(Icons.login_outlined), title: const Text('Đăng nhập / tài khoản'), onTap: () => go(const LoginPage())),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      floatingActionButton: FloatingActionButton.small(
+        heroTag: 'pos_operations',
+        tooltip: 'Trung tâm vận hành',
+        onPressed: _showOperationsMenu,
+        child: const Icon(Icons.tune_rounded),
+      ),
       body: IndexedStack(
         index: _currentIndex,
         children: _pages,
@@ -114,9 +168,19 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
             label: 'Sơ đồ bàn',
           ),
           const NavigationDestination(
+            icon: Icon(Icons.home_outlined),
+            selectedIcon: Icon(Icons.home_rounded),
+            label: 'Trang chủ',
+          ),
+          const NavigationDestination(
             icon: Icon(Icons.restaurant_menu_outlined),
             selectedIcon: Icon(Icons.restaurant_menu_rounded),
             label: 'Thực đơn',
+          ),
+          const NavigationDestination(
+            icon: Icon(Icons.shopping_cart_outlined),
+            selectedIcon: Icon(Icons.shopping_cart_rounded),
+            label: 'Giỏ hàng',
           ),
           NavigationDestination(
             icon: ValueListenableBuilder<int>(
