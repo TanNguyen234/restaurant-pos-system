@@ -7,9 +7,9 @@ import '../config/api_config.dart';
 import '../utils/database_helper.dart';
 
 class OrderRepository {
-  static String baseUrl = ApiConfig.baseUrl + '/api/order';
-  static String paymentBaseUrl = ApiConfig.baseUrl + '/api/payment';
-  static String kdsBaseUrl = ApiConfig.baseUrl + '/api/kds';
+  static String baseUrl = '${ApiConfig.baseUrl}/api/order';
+  static String paymentBaseUrl = '${ApiConfig.baseUrl}/api/payment';
+  static String kdsBaseUrl = '${ApiConfig.baseUrl}/api/kds';
   static Duration timeoutDuration = const Duration(seconds: 4);
 
   final DatabaseHelper _dbHelper = DatabaseHelper();

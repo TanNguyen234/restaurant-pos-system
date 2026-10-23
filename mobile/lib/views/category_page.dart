@@ -224,7 +224,7 @@ class _CategoryPageState extends State<CategoryPage> {
                             width: 48,
                             height: 48,
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0F172A).withOpacity(0.05),
+                              color: const Color(0xFF0F172A).withValues(alpha: 0.05),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: const Icon(

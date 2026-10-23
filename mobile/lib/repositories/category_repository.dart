@@ -6,7 +6,7 @@ import '../models/category.dart';
 import '../config/api_config.dart';
 
 class CategoryRepository {
-  static String baseUrl = ApiConfig.baseUrl + '/api/category';
+  static String baseUrl = '${ApiConfig.baseUrl}/api/category';
   static Duration timeoutDuration = const Duration(seconds: 4);
 
   static Future<List<Category>?> getCategories() async {

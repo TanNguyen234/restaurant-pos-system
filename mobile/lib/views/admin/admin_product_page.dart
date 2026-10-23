@@ -17,42 +17,42 @@ class _AdminProductPageState extends State<AdminProductPage> {
   final TextEditingController _searchController = TextEditingController();
 
   List<Category> _categories = [];
-  int? _selectedCategoryId;
+  int? _selectedFilterCategoryId;
 
   List<Product> _products = [];
   bool _isLoading = true;
 
   int _currentPage = 1;
-  final int _pageSize = 8;
+  final int _pageSize = 10;
   int _totalPages = 1;
   int _totalItems = 0;
 
   @override
   void initState() {
     super.initState();
-    _loadCategories();
-    _loadProducts();
+    _loadInitialData();
   }
 
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
+  Future<void> _loadInitialData() async {
+    setState(() => _isLoading = true);
+    await _loadCategories();
+    await _loadProducts(page: 1);
   }
 
   Future<void> _loadCategories() async {
-    final cats = await CategoryRepository.getCategories();
-    if (!mounted) return;
-    setState(() => _categories = cats ?? []);
+    try {
+      final cats = await CategoryRepository.getCategories();
+      if (mounted && cats != null) setState(() => _categories = cats);
+    } catch (_) {}
   }
 
   Future<void> _loadProducts({int page = 1}) async {
     setState(() => _isLoading = true);
     final result = await ProductRepository.getProducts(
-      categoryId: _selectedCategoryId,
-      search: _searchController.text.trim(),
       page: page,
       pageSize: _pageSize,
+      categoryId: _selectedFilterCategoryId,
+      search: _searchController.text.trim(),
     );
 
     if (!mounted) return;
@@ -71,6 +71,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
     final priceController = TextEditingController(text: product != null ? product.price.toInt().toString() : '');
     final unitController = TextEditingController(text: product?.unit ?? 'Ly');
     final descController = TextEditingController(text: product?.description ?? '');
+    final imageController = TextEditingController(text: product?.imageUrl ?? '');
 
     int selectedCatId = product?.categoryId ?? (_categories.isNotEmpty ? _categories.first.id : 1);
     bool isFeatured = product?.isFeatured ?? false;
@@ -79,7 +80,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (context, setDialogState) => AlertDialog(
+        builder: (dialogContext, setDialogState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(
             isEditing ? 'Chỉnh sửa món ăn' : 'Thêm món ăn mới',
@@ -96,7 +97,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
                 ),
                 const SizedBox(height: 12),
                 DropdownButtonFormField<int>(
-                  value: selectedCatId,
+                  initialValue: selectedCatId,
                   decoration: const InputDecoration(labelText: 'Danh mục thực đơn (*)'),
                   items: _categories.map((c) {
                     return DropdownMenuItem<int>(
@@ -118,7 +119,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
                       child: TextField(
                         controller: priceController,
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(labelText: 'Đơn giá (VND) (*)'),
+                        decoration: const InputDecoration(labelText: 'Đơn giá (VNĐ) (*)'),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -136,6 +137,19 @@ class _AdminProductPageState extends State<AdminProductPage> {
                   controller: descController,
                   maxLines: 2,
                   decoration: const InputDecoration(labelText: 'Mô tả món ăn'),
+                ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: imageController,
+                  decoration: InputDecoration(
+                    labelText: 'Hình ảnh (Tên file hoặc URL)',
+                    hintText: 'Ảnh đơn hoặc nhiều ảnh cách nhau dấu ;',
+                    hintStyle: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.clear, size: 18),
+                      onPressed: () => setDialogState(() => imageController.clear()),
+                    ),
+                  ),
                 ),
                 const SizedBox(height: 12),
                 CheckboxListTile(
@@ -165,7 +179,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          'Upload ảnh: Tự động lưu & xóa ảnh cũ wwwroot/images/products',
+                          'Upload ảnh: Hỗ trợ nhiều ảnh phân cách bằng dấu ;. Tự động lưu & dọn dẹp tại wwwroot/images/products',
                           style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
                         ),
                       ),
@@ -205,6 +219,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
                   'Price': price,
                   'Unit': unitController.text.trim().isNotEmpty ? unitController.text.trim() : 'Ly',
                   'Description': descController.text.trim(),
+                  'ImageUrl': imageController.text.trim().isNotEmpty ? imageController.text.trim() : 'default_product.png',
                   'IsFeatured': isFeatured,
                   'IsAvailable': isAvailable,
                 };
@@ -253,7 +268,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Xác nhận xóa'),
+            child: const Text('Xóa ngay'),
           ),
         ],
       ),
@@ -266,31 +281,28 @@ class _AdminProductPageState extends State<AdminProductPage> {
     await _loadProducts(page: _currentPage);
 
     if (!mounted) return;
-
     if (result['success'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(result['message'] ?? 'Đã xóa món thành công'),
+          content: Text('Đã xóa món "${product.productName}" thành công!'),
           backgroundColor: const Color(0xFF10B981),
         ),
       );
     } else {
-      // Hiển thị dialog cảnh báo bảo toàn kế toán khi món đã phát sinh trong Order
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Row(
             children: [
-              Icon(Icons.shield_outlined, color: Color(0xFFEF4444), size: 28),
+              Icon(Icons.shield_outlined, color: Color(0xFFEF4444)),
               SizedBox(width: 8),
-              Text('Ràng buộc Kế toán', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+              Text('Ràng buộc dữ liệu', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ],
           ),
           content: Text(
-            result['message'] ??
-                'Sản phẩm đã có trong hóa đơn, không được xóa để bảo toàn số liệu kế toán! Hãy chọn ẩn sản phẩm.',
-            style: const TextStyle(height: 1.4),
+            result['message'] ?? 'Không thể xóa món ăn này vì đã gắn liền với các đơn hàng lịch sử.',
+            style: const TextStyle(fontSize: 14, color: Color(0xFF334155)),
           ),
           actions: [
             ElevatedButton(
@@ -348,45 +360,48 @@ class _AdminProductPageState extends State<AdminProductPage> {
                       hintText: 'Tìm kiếm tên món...',
                       hintStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
                       prefixIcon: const Icon(Icons.search, color: Color(0xFF0F172A)),
-                      suffixIcon: IconButton(
-                        icon: const Icon(Icons.arrow_forward, color: Color(0xFF0F172A)),
-                        onPressed: () => _loadProducts(page: 1),
-                      ),
+                      suffixIcon: _searchController.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, color: Color(0xFF64748B)),
+                              onPressed: () {
+                                _searchController.clear();
+                                _loadProducts(page: 1);
+                              },
+                            )
+                          : null,
                       filled: true,
                       fillColor: Colors.white,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide.none,
-                      ),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                     ),
                   ),
                 ),
-                const SizedBox(width: 8),
+                const SizedBox(width: 10),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   decoration: BoxDecoration(
                     color: Colors.white,
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: DropdownButton<int?>(
-                    value: _selectedCategoryId,
-                    underline: const SizedBox.shrink(),
-                    hint: const Text('Tất cả', style: TextStyle(fontSize: 13, color: Color(0xFF0F172A))),
-                    items: [
-                      const DropdownMenuItem<int?>(
-                        value: null,
-                        child: Text('Tất cả', style: TextStyle(fontSize: 13)),
-                      ),
-                      ..._categories.map((c) => DropdownMenuItem<int?>(
-                            value: c.id,
-                            child: Text(c.name, style: const TextStyle(fontSize: 13)),
-                          )),
-                    ],
-                    onChanged: (val) {
-                      setState(() => _selectedCategoryId = val);
-                      _loadProducts(page: 1);
-                    },
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<int?>(
+                      value: _selectedFilterCategoryId,
+                      hint: const Text('Tất cả nhóm', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                      items: [
+                        const DropdownMenuItem<int?>(
+                          value: null,
+                          child: Text('Tất cả nhóm', style: TextStyle(fontSize: 12)),
+                        ),
+                        ..._categories.map((c) => DropdownMenuItem<int?>(
+                              value: c.id,
+                              child: Text(c.name, style: const TextStyle(fontSize: 12)),
+                            )),
+                      ],
+                      onChanged: (val) {
+                        setState(() => _selectedFilterCategoryId = val);
+                        _loadProducts(page: 1);
+                      },
+                    ),
                   ),
                 ),
               ],
@@ -396,7 +411,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
           // Danh sách món ăn
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator(color: Color(0xFF0F172A)))
+                ? const Center(child: CircularProgressIndicator())
                 : _products.isEmpty
                     ? const Center(child: Text('Không tìm thấy món ăn nào'))
                     : RefreshIndicator(
@@ -417,15 +432,25 @@ class _AdminProductPageState extends State<AdminProductPage> {
                               ),
                               child: ListTile(
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                leading: Container(
-                                  width: 48,
-                                  height: 48,
-                                  decoration: BoxDecoration(
+                                leading: ClipRRect(
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: Container(
+                                    width: 48,
+                                    height: 48,
                                     color: const Color(0xFF0F172A),
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  child: const Center(
-                                    child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 24),
+                                    child: item.fullImageUrl.isNotEmpty
+                                        ? Image.network(
+                                            item.fullImageUrl,
+                                            width: 48,
+                                            height: 48,
+                                            fit: BoxFit.cover,
+                                            errorBuilder: (context, error, stackTrace) => const Center(
+                                              child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 24),
+                                            ),
+                                          )
+                                        : const Center(
+                                            child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 24),
+                                          ),
                                   ),
                                 ),
                                 title: Row(
@@ -438,6 +463,19 @@ class _AdminProductPageState extends State<AdminProductPage> {
                                         overflow: TextOverflow.ellipsis,
                                       ),
                                     ),
+                                    if (item.resolvedImages.length > 1)
+                                      Container(
+                                        margin: const EdgeInsets.only(left: 4),
+                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: const Color(0xFFE2E8F0),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          '${item.resolvedImages.length} ảnh',
+                                          style: const TextStyle(color: Color(0xFF475569), fontSize: 9, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
                                     if (item.isFeatured)
                                       Container(
                                         margin: const EdgeInsets.only(left: 6),
@@ -471,13 +509,13 @@ class _AdminProductPageState extends State<AdminProductPage> {
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     IconButton(
-                                      icon: const Icon(Icons.edit_outlined, color: Color(0xFF2563EB), size: 20),
-                                      tooltip: 'Sửa món',
+                                      icon: const Icon(Icons.edit_outlined, color: Color(0xFF0F172A), size: 20),
+                                      tooltip: 'Chỉnh sửa',
                                       onPressed: () => _showProductFormDialog(product: item),
                                     ),
                                     IconButton(
                                       icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444), size: 20),
-                                      tooltip: 'Xóa món',
+                                      tooltip: 'Xóa',
                                       onPressed: () => _deleteProduct(item),
                                     ),
                                   ],
@@ -489,34 +527,47 @@ class _AdminProductPageState extends State<AdminProductPage> {
                       ),
           ),
 
-          // Phân trang
+          // Thanh phân trang
           if (_totalPages > 1)
             Container(
-              padding: const EdgeInsets.symmetric(vertical: 8),
+              padding: const EdgeInsets.symmetric(vertical: 12),
               color: Colors.white,
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  IconButton(
-                    icon: const Icon(Icons.chevron_left),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _currentPage > 1 ? const Color(0xFF0F172A) : const Color(0xFFCBD5E1),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    icon: const Icon(Icons.arrow_back_ios, size: 12),
+                    label: const Text('Trước', style: TextStyle(fontSize: 12)),
                     onPressed: _currentPage > 1 ? () => _loadProducts(page: _currentPage - 1) : null,
                   ),
-                  Text('Trang $_currentPage / $_totalPages (Tổng $_totalItems món)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                  IconButton(
-                    icon: const Icon(Icons.chevron_right),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Text(
+                      'Trang $_currentPage / $_totalPages (Tổng: $_totalItems món)',
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0F172A)),
+                    ),
+                  ),
+                  ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _currentPage < _totalPages ? const Color(0xFF0F172A) : const Color(0xFFCBD5E1),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    label: const Text('Sau', style: TextStyle(fontSize: 12)),
+                    icon: const Icon(Icons.arrow_forward_ios, size: 12),
                     onPressed: _currentPage < _totalPages ? () => _loadProducts(page: _currentPage + 1) : null,
                   ),
                 ],
               ),
             ),
         ],
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        backgroundColor: const Color(0xFF0F172A),
-        foregroundColor: Colors.white,
-        icon: const Icon(Icons.add, color: Color(0xFFF59E0B)),
-        label: const Text('Thêm món', style: TextStyle(fontWeight: FontWeight.bold)),
-        onPressed: () => _showProductFormDialog(),
       ),
     );
   }

@@ -5,8 +5,8 @@ import '../config/api_config.dart';
 import '../utils/database_helper.dart';
 
 class AuthRepository {
-  static String baseUrl = ApiConfig.baseUrl + '/api/auth';
-  static String accountBaseUrl = ApiConfig.baseUrl + '/api/account';
+  static String baseUrl = '${ApiConfig.baseUrl}/api/auth';
+  static String accountBaseUrl = '${ApiConfig.baseUrl}/api/account';
   static Duration timeoutDuration = const Duration(seconds: 4);
 
   final DatabaseHelper _dbHelper = DatabaseHelper();

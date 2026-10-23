@@ -280,7 +280,7 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
                             width: 48,
                             height: 48,
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0F172A).withOpacity(0.06),
+                              color: const Color(0xFF0F172A).withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(12),
                             ),
                             child: const Center(

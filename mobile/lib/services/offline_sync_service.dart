@@ -27,8 +27,8 @@ class OfflineSyncService {
   factory OfflineSyncService() => _instance;
   OfflineSyncService._internal();
 
-  static String orderApiUrl = ApiConfig.baseUrl + '/api/order';
-  static String healthCheckUrl = ApiConfig.baseUrl + '/api/table/areas';
+  static String orderApiUrl = '${ApiConfig.baseUrl}/api/order';
+  static String healthCheckUrl = '${ApiConfig.baseUrl}/api/table/areas';
   static const Duration timeoutDuration = Duration(seconds: 4);
 
   Timer? _periodicTimer;
