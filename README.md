@@ -211,6 +211,36 @@ restaurant_pos_app/
 
 ---
 
+## Danh Sách Tài Khoản Thử Nghiệm Theo Từng Vai Trò (Database Seeded Accounts & RBAC)
+
+Toàn bộ các tài khoản dưới đây được trích xuất trực tiếp và chính xác từ bảng `Accounts` và `Roles` trong cơ sở dữ liệu ([RestaurantPosDb.sql](RestaurantPosDb.sql) và [RestaurantPos_Acceptance.sql](RestaurantPos_Acceptance.sql)), phục vụ kiểm thử phân quyền RBAC (Role-Based Access Control) trên cả Backend API và Mobile Client:
+
+> **Lưu ý về Mật khẩu:** Tất cả tài khoản mẫu ban đầu trong database đều có mật khẩu mặc định là: `admin` (tương ứng chuỗi băm SHA-256 lưu trong cột `PasswordHash`: `8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918`). Hệ thống tự động nhận diện và hỗ trợ nâng cấp sang chuỗi băm muối mật khẩu mới `{salt:32}:{hash:64}` khi thực hiện đổi mật khẩu qua endpoint `/api/auth/change-password`.
+
+| STT | Username | Mật khẩu mặc định | Vai trò (`RoleCode`) | Tên vai trò (`RoleName`) | Họ và tên | Email | Phạm vi quyền hạn kiểm thử |
+| :---: | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | `admin` | `admin` | `ADMIN` | Quản trị viên hệ thống | Nguyễn Văn Quản Trị | `admin@restaurantpos.vn` | Toàn quyền hệ thống: Quản lý danh mục, sản phẩm, nhân sự, tài khoản, sơ đồ bàn, cấu hình và báo cáo doanh thu |
+| 2 | `manager01` | `admin` | `MANAGER` | Quản lý chi nhánh | Trần Thị Thu Quản Lý | `manager01@restaurantpos.vn` | Quản lý chi nhánh: Xem danh sách nhân sự, phân ca, xử lý sự cố vận hành |
+| 3 | `cashier_mai` | `admin` | `CASHIER` | Thu ngân | Lê Tuyết Mai | `mai.cashier@restaurantpos.vn` | Thu ngân: Xem đơn hàng cần thanh toán, in hóa đơn, xác nhận thanh toán VietQR & VNPay, giải phóng bàn |
+| 4 | `waiter_nam` | `admin` | `WAITER` | Nhân viên phục vụ | Phạm Hoàng Nam | `nam.waiter@restaurantpos.vn` | Phục vụ bàn: Mở bàn trên sơ đồ phòng ăn, chọn món, chuyển bàn, gửi order vào bếp KDS |
+| 5 | `waiter_lan` | `admin` | `WAITER` | Nhân viên phục vụ | Đỗ Ngọc Lan | `lan.waiter@restaurantpos.vn` | Phục vụ bàn (Tài khoản nhân viên phục vụ thứ 2 dùng để kiểm thử bàn giao ca / thao tác đồng thời) |
+| 6 | `kitchen` | `admin` | `KITCHEN` | Bộ phận bếp (KDS) | Bếp Trưởng KDS | `kitchen@restaurantpos.vn` | Màn hình KDS: Tiếp nhận order từ nhân viên phục vụ, chuyển trạng thái chế biến (Chờ nấu -> Đang nấu -> Hoàn thành) |
+| 7 | `chef_dung` | `admin` | `HEAD_CHEF` | Đầu bếp chính | Ngô Tiến Dũng | `dung.chef@restaurantpos.vn` | Trưởng bếp: Chế biến món ăn chính, điểm tâm, kiểm soát chất lượng món ra quầy |
+| 8 | `barista_tuan` | `admin` | `BARISTA_LEAD` | Trưởng quầy pha chế | Vũ Anh Tuấn | `tuan.barista@restaurantpos.vn` | Quầy pha chế: Chuyên trách các món cà phê, trà trái cây, đá xay, đồ uống |
+| 9 | `member_khang` | `admin` | `MEMBER` | Khách hàng thân thiết | Bùi Vĩnh Khang | `khang.bui@gmail.com` | Khách hàng: Xem thực đơn, đặt món cá nhân, tích lũy điểm thưởng |
+| 10 | `vip_huong` | `admin` | `VIP_MEMBER` | Khách hàng VIP | Đặng Thu Hương | `huong.dang@fpt.com` | Khách hàng hạng vàng: Hưởng ưu đãi chiết khấu VIP 10% khi lập hóa đơn |
+| 11 | `member_linh` | `admin` | `MEMBER` | Khách hàng thân thiết | Võ Diệu Linh | `linh.vo@outlook.com` | Khách hàng thân thiết đăng ký qua liên kết mạng xã hội |
+
+### Ma Trận Thực Thi Phân Quyền RBAC (RBAC Enforcement Matrix)
+
+- **Quản trị danh mục & sản phẩm (`/api/category`, `/api/product`):** Chỉ `ADMIN` được phép Thêm / Sửa / Xóa. Các role khác gọi POST/PUT/DELETE sẽ nhận lỗi `HTTP 403 Forbidden`.
+- **Xem danh sách tài khoản & phân quyền (`/api/account/members`, `/api/account/roles`):** Chỉ `ADMIN` và `MANAGER` được phép truy cập. Các role khác bị chặn `HTTP 403 Forbidden`.
+- **Sơ đồ bàn ăn (`/api/table`):** Toàn bộ nhân viên (`ADMIN`, `MANAGER`, `CASHIER`, `WAITER`) có quyền xem và cập nhật bàn ăn; `WAITER` thực hiện mở bàn và chuyển bàn.
+- **Thanh toán & Hóa đơn (`/api/payment/confirm`):** Chỉ `CASHIER` và `ADMIN` được phép xác nhận hóa đơn và ghi nhận thanh toán vào sổ quỹ.
+- **Màn hình Bếp KDS (`/api/kds`):** Phân quyền cho `KITCHEN`, `HEAD_CHEF`, `BARISTA_LEAD` và `ADMIN`.
+
+---
+
 ## Hướng Dẫn Cài Đặt & Khởi Chạy (Getting Started)
 
 ### Yêu cầu môi trường
@@ -305,11 +335,15 @@ dotnet build --configuration Release
 cd ../mobile
 flutter analyze
 
-# 3. Chạy toàn bộ 35 bài kiểm thử đơn vị & tích hợp (All Passed)
+# 3. Chạy toàn bộ 81 bài kiểm thử tự động, tích hợp & trực quan (All Passed)
 flutter test
 ```
 
 Kết quả nghiệm thu:
 - **Backend:** `dotnet build` succeeded with 0 Warning(s), 0 Error(s).
 - **Mobile Analysis:** `flutter analyze` reported `No issues found!`.
-- **Unit & Integration Tests:** `35/35 tests passed` (`widget_test`, `database_helper_test`, `table_model_test`, `table_repository_test`, `floor_table_challenge_test`, `empirical_challenge_test`).
+- **Unit, Widget & Visual Acceptance Tests:** `81/81 tests passed (100% GREEN)` bao gồm:
+  - Kiểm thử mô hình CSDL và SQLite: `database_helper_test.dart`, `table_model_test.dart`, `product_model_test.dart`.
+  - Kiểm thử từ chối mạng thật & xử lý ngoại tuyến: `adversarial_table_repo_test.dart`, `table_repository_test.dart`, `empirical_challenge_test.dart`.
+  - Kiểm thử giao diện & giỏ hàng: `catalog_ui_test.dart`, `floor_table_challenge_test.dart`, `widget_test.dart`.
+  - Kiểm thử chụp ảnh màn hình giao diện (Screenshots): `visual_screenshot_test.dart` (lưu tại `docs/acceptance/screenshots/`).
