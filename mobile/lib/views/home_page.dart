@@ -416,14 +416,25 @@ class _HomePageState extends State<HomePage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        height: 75,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF0F172A),
-                          borderRadius: BorderRadius.vertical(top: Radius.circular(14)),
-                        ),
-                        child: const Center(
-                          child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 36),
+                      ClipRRect(
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(14)),
+                        child: Container(
+                          height: 75,
+                          width: double.infinity,
+                          color: const Color(0xFF0F172A),
+                          child: item.fullImageUrl.isNotEmpty
+                              ? Image.network(
+                                  item.fullImageUrl,
+                                  height: 75,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => const Center(
+                                    child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 36),
+                                  ),
+                                )
+                              : const Center(
+                                  child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 36),
+                                ),
                         ),
                       ),
                       Padding(
@@ -567,17 +578,50 @@ class _HomePageState extends State<HomePage> {
             // Ảnh món
             Stack(
               children: [
-                Container(
-                  height: 120,
-                  width: double.infinity,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF0F172A),
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.restaurant, color: Color(0xFFF59E0B), size: 44),
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  child: Container(
+                    height: 120,
+                    width: double.infinity,
+                    color: const Color(0xFF0F172A),
+                    child: product.fullImageUrl.isNotEmpty
+                        ? Image.network(
+                            product.fullImageUrl,
+                            height: 120,
+                            width: double.infinity,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => const Center(
+                              child: Icon(Icons.restaurant, color: Color(0xFFF59E0B), size: 44),
+                            ),
+                          )
+                        : const Center(
+                            child: Icon(Icons.restaurant, color: Color(0xFFF59E0B), size: 44),
+                          ),
                   ),
                 ),
+                if (product.resolvedImages.length > 1)
+                  Positioned(
+                    top: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.photo_library_outlined, size: 10, color: Colors.white),
+                          const SizedBox(width: 3),
+                          Text(
+                            '${product.resolvedImages.length}',
+                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
                 if (product.isFeatured)
                   Positioned(
                     top: 8,

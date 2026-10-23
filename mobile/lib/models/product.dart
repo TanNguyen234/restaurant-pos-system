@@ -1,3 +1,4 @@
+import '../config/api_config.dart';
 class ProductAttribute {
   final int attributeId;
   final int productId;
@@ -47,6 +48,7 @@ class Product {
   final String unit;
   final String? description;
   final String imageUrl;
+  final List<String> images;
   final bool isAvailable;
   final bool isFeatured;
   final DateTime? createdAt;
@@ -62,6 +64,7 @@ class Product {
     this.unit = 'Phần',
     this.description,
     required this.imageUrl,
+    this.images = const [],
     this.isAvailable = true,
     this.isFeatured = false,
     this.createdAt,
@@ -69,10 +72,37 @@ class Product {
     this.attributes = const [],
   });
 
+  List<String> get resolvedImages {
+    if (images.isNotEmpty) return images;
+    if (imageUrl.contains(';')) {
+      return imageUrl.split(';').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    }
+    if (imageUrl.isNotEmpty) return [imageUrl];
+    return [];
+  }
+
+  String get primaryImageUrl {
+    final list = resolvedImages;
+    if (list.isNotEmpty) return list.first;
+    return imageUrl;
+  }
+
   String get fullImageUrl {
-    if (imageUrl.isEmpty) return '';
-    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) return imageUrl;
-    return 'http://localhost:5138/images/products/$imageUrl';
+    final img = primaryImageUrl;
+    if (img.isEmpty) return '';
+    if (img.startsWith('http://') || img.startsWith('https://')) return img;
+    final base = ApiConfig.baseUrl.replaceAll('/api', '');
+    return '$base/images/products/$img';
+  }
+
+  List<String> get allFullImageUrls {
+    final list = resolvedImages;
+    if (list.isEmpty) return [];
+    final base = ApiConfig.baseUrl.replaceAll('/api', '');
+    return list.map((img) {
+      if (img.startsWith('http://') || img.startsWith('https://')) return img;
+      return '$base/images/products/$img';
+    }).toList();
   }
 
   factory Product.fromMap(Map<String, dynamic> map) {
@@ -94,6 +124,11 @@ class Product {
       unit: map['unit'] ?? 'Phần',
       description: map['description'] as String?,
       imageUrl: map['imageUrl'] ?? map['image'] ?? '',
+      images: (map['images'] is List)
+          ? (map['images'] as List).map((e) => e.toString()).toList()
+          : (map['imageUrl'] != null && map['imageUrl'].toString().contains(';'))
+              ? map['imageUrl'].toString().split(';').map((s) => s.trim()).where((s) => s.isNotEmpty).toList()
+              : const [],
       isAvailable: map['isAvailable'] ?? true,
       isFeatured: map['isFeatured'] ?? false,
       createdAt: map['createdAt'] != null ? DateTime.tryParse(map['createdAt'].toString()) : null,
@@ -112,6 +147,7 @@ class Product {
       'unit': unit,
       'description': description,
       'imageUrl': imageUrl,
+      'images': images,
       'isAvailable': isAvailable,
       'isFeatured': isFeatured,
       'createdAt': createdAt?.toIso8601String(),

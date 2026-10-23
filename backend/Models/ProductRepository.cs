@@ -12,6 +12,7 @@ public class ProductDto
     public string Unit { get; set; } = "Phần";
     public string? Description { get; set; }
     public string ImageUrl { get; set; } = string.Empty;
+    public List<string> Images { get; set; } = new();
     public bool IsAvailable { get; set; } = true;
     public bool IsFeatured { get; set; } = false;
     public DateTime CreatedAt { get; set; }
@@ -42,6 +43,20 @@ public class PagedResult<T>
 public class ProductRepository : BaseRepository
 {
     public ProductRepository(RestaurantPosContext context) : base(context) { }
+
+    private static void PopulateImages(ProductDto dto)
+    {
+        if (!string.IsNullOrWhiteSpace(dto.ImageUrl))
+        {
+            dto.Images = dto.ImageUrl
+                .Split(new[] { ';', '|' }, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .ToList();
+        }
+        else
+        {
+            dto.Images = new List<string>();
+        }
+    }
 
     private IQueryable<ProductDto> BaseQuery()
     {
@@ -104,6 +119,7 @@ public class ProductRepository : BaseRepository
         var items = await query.Skip((page - 1) * pageSize)
                                .Take(pageSize)
                                .ToListAsync();
+        items.ForEach(PopulateImages);
 
         return new PagedResult<ProductDto>
         {
@@ -117,11 +133,13 @@ public class ProductRepository : BaseRepository
     public async Task<List<ProductDto>> GetFeaturedProductsAsync(int limit = 10)
     {
         if (limit < 1) limit = 10;
-        return await BaseQuery()
+        var items = await BaseQuery()
             .Where(p => p.IsFeatured && p.IsAvailable)
             .OrderByDescending(p => p.ProductId)
             .Take(limit)
             .ToListAsync();
+        items.ForEach(PopulateImages);
+        return items;
     }
 
     public async Task<PagedResult<ProductDto>> GetLatestProductsAsync(int page = 1, int pageSize = 10)
@@ -132,6 +150,7 @@ public class ProductRepository : BaseRepository
         var query = BaseQuery().OrderByDescending(p => p.CreatedAt).ThenByDescending(p => p.ProductId);
         int totalItems = await query.CountAsync();
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+        items.ForEach(PopulateImages);
 
         return new PagedResult<ProductDto>
         {
@@ -169,6 +188,7 @@ public class ProductRepository : BaseRepository
 
         int totalItems = await query.CountAsync();
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+        items.ForEach(PopulateImages);
 
         return new PagedResult<ProductDto>
         {
@@ -203,6 +223,7 @@ public class ProductRepository : BaseRepository
             .ToListAsync();
 
         dto.Attributes = attrs;
+        PopulateImages(dto);
         return dto;
     }
 

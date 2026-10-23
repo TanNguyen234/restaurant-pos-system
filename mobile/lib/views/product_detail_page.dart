@@ -20,6 +20,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   final TextEditingController _noteController = TextEditingController();
 
   int _quantity = 1;
+  int _currentImageIndex = 0;
   int _cartCount = 0;
   ProductAttribute? _selectedSize;
   String _selectedSugar = '100% đường';
@@ -252,25 +253,68 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   }
 
   Widget _buildHeroImage() {
+    final images = widget.product.allFullImageUrls;
+    final hasMultiple = images.length > 1;
+
     return Container(
       width: double.infinity,
-      height: 240,
+      height: 250,
       decoration: const BoxDecoration(
         color: Color(0xFF0F172A),
       ),
       child: Stack(
         alignment: Alignment.center,
         children: [
-          Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: Colors.white.withOpacity(0.05),
+          if (images.isNotEmpty)
+            PageView.builder(
+              itemCount: images.length,
+              onPageChanged: (index) {
+                setState(() => _currentImageIndex = index);
+              },
+              itemBuilder: (context, index) {
+                return Image.network(
+                  images[index],
+                  width: double.infinity,
+                  height: 250,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) => Container(
+                    color: const Color(0xFF0F172A),
+                    child: const Center(
+                      child: Icon(Icons.restaurant_menu, size: 90, color: Color(0xFFF59E0B)),
+                    ),
+                  ),
+                );
+              },
+            )
+          else
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: Colors.white.withValues(alpha: 0.05),
+              ),
+              child: const Icon(
+                Icons.restaurant_menu,
+                size: 90,
+                color: Color(0xFFF59E0B),
+              ),
             ),
-            child: const Icon(
-              Icons.restaurant_menu,
-              size: 90,
-              color: Color(0xFFF59E0B),
+          Positioned(
+            bottom: 0,
+            left: 0,
+            right: 0,
+            child: Container(
+              height: 60,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.bottomCenter,
+                  end: Alignment.topCenter,
+                  colors: [
+                    Colors.black.withValues(alpha: 0.6),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
             ),
           ),
           if (widget.product.isFeatured)
@@ -296,6 +340,45 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       ),
                     ),
                   ],
+                ),
+              ),
+            ),
+          if (hasMultiple)
+            Positioned(
+              bottom: 12,
+              right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.7),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  '${_currentImageIndex + 1}/${images.length}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
+          if (hasMultiple)
+            Positioned(
+              bottom: 14,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: List.generate(
+                  images.length,
+                  (index) => Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 3),
+                    width: _currentImageIndex == index ? 16 : 6,
+                    height: 6,
+                    decoration: BoxDecoration(
+                      color: _currentImageIndex == index ? const Color(0xFFF59E0B) : Colors.white54,
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -543,14 +626,25 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        height: 90,
-                        decoration: const BoxDecoration(
-                          color: Color(0xFF0F172A),
-                          borderRadius: BorderRadius.vertical(top: Radius.circular(12)),
-                        ),
-                        child: const Center(
-                          child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 36),
+                      ClipRRect(
+                        borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+                        child: Container(
+                          height: 90,
+                          width: double.infinity,
+                          color: const Color(0xFF0F172A),
+                          child: item.fullImageUrl.isNotEmpty
+                              ? Image.network(
+                                  item.fullImageUrl,
+                                  height: 90,
+                                  width: double.infinity,
+                                  fit: BoxFit.cover,
+                                  errorBuilder: (context, error, stackTrace) => const Center(
+                                    child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 36),
+                                  ),
+                                )
+                              : const Center(
+                                  child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 36),
+                                ),
                         ),
                       ),
                       Padding(

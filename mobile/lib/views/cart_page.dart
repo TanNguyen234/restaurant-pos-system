@@ -357,17 +357,27 @@ class _CartPageState extends State<CartPage> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                Container(
-                  width: 60,
-                  height: 60,
-                  decoration: BoxDecoration(
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    width: 60,
+                    height: 60,
                     color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: const Icon(
-                    Icons.coffee,
-                    color: Color(0xFF0F172A),
-                    size: 30,
+                    child: (item['image_url'] != null && item['image_url'].toString().isNotEmpty)
+                        ? Image.network(
+                            item['image_url'].toString().startsWith('http')
+                                ? item['image_url'].toString().split(';').first
+                                : 'http://localhost:5138/images/products/',
+                            width: 60,
+                            height: 60,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => const Center(
+                              child: Icon(Icons.coffee, color: Color(0xFF0F172A), size: 30),
+                            ),
+                          )
+                        : const Center(
+                            child: Icon(Icons.coffee, color: Color(0xFF0F172A), size: 30),
+                          ),
                   ),
                 ),
                 const SizedBox(width: 14),
