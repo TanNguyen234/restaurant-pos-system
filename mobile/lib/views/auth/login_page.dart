@@ -15,7 +15,7 @@ class LoginPage extends StatefulWidget {
 
 class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
-  final _usernameController = TextEditingController(text: 'admin');
+  final _usernameController = TextEditingController();
   final _passwordController = TextEditingController(text: 'admin');
   final _authRepo = AuthRepository();
 
@@ -28,14 +28,6 @@ class _LoginPageState extends State<LoginPage> {
     _usernameController.dispose();
     _passwordController.dispose();
     super.dispose();
-  }
-
-  void _fillQuickRole(String user, String pass) {
-    setState(() {
-      _usernameController.text = user;
-      _passwordController.text = pass;
-      _errorMessage = null;
-    });
   }
 
   Future<void> _handleLogin() async {
@@ -149,55 +141,6 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                       ),
                       const SizedBox(height: 20),
-
-                      // Quick role selection chips for rapid evaluation
-                      Container(
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Đăng nhập nhanh theo vai trò:',
-                              style: TextStyle(
-                                fontSize: 11,
-                                fontWeight: FontWeight.bold,
-                                color: Color(0xFF475569),
-                              ),
-                            ),
-                            const SizedBox(height: 8),
-                            Wrap(
-                              spacing: 6,
-                              runSpacing: 6,
-                              children: [
-                                ActionChip(
-                                  label: const Text('Admin', style: TextStyle(fontSize: 12)),
-                                  avatar: const Icon(Icons.admin_panel_settings, size: 16),
-                                  onPressed: () => _fillQuickRole('admin', 'admin'),
-                                ),
-                                ActionChip(
-                                  label: const Text('Thu ngân', style: TextStyle(fontSize: 12)),
-                                  avatar: const Icon(Icons.payments, size: 16),
-                                  onPressed: () => _fillQuickRole('cashier_mai', 'admin'),
-                                ),
-                                ActionChip(
-                                  label: const Text('Phục vụ', style: TextStyle(fontSize: 12)),
-                                  avatar: const Icon(Icons.person, size: 16),
-                                  onPressed: () => _fillQuickRole('waiter_nam', 'admin'),
-                                ),
-                                ActionChip(
-                                  label: const Text('Đầu bếp', style: TextStyle(fontSize: 12)),
-                                  avatar: const Icon(Icons.restaurant, size: 16),
-                                  onPressed: () => _fillQuickRole('chef_dung', 'admin'),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
 
                       if (_errorMessage != null) ...[
                         const SizedBox(height: 14),
