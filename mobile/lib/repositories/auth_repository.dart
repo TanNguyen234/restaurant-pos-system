@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import '../models/user.dart';
 import '../config/api_config.dart';
 import '../utils/database_helper.dart';
@@ -85,7 +84,7 @@ class AuthRepository {
   /// Cập nhật vai trò tài khoản (Admin)
   Future<bool> updateRole(int accountId, int newRoleId) async {
     try {
-      final response = await http
+      final response = await ApiConfig
           .put(
             Uri.parse('$accountBaseUrl/$accountId/role'),
             headers: {'Content-Type': 'application/json'},
