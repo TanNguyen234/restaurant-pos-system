@@ -131,6 +131,10 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
     if (result['success'] == true) {
       final bool isOffline = result['isOffline'] == true;
       final int? orderId = result['orderId'] as int?;
+      if (!isOffline && (orderId == null || orderId <= 0)) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Máy chủ trả về đơn không hợp lệ; kiểm tra danh sách đơn trước khi đặt lại.')));
+        return;
+      }
       await _dbHelper.clearCart();
       if (!mounted) return;
       if (isOffline) {
@@ -138,11 +142,6 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
         Navigator.pop(context);
         return;
       }
-      if (orderId == null || orderId <= 0) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Máy chủ trả về đơn không hợp lệ; vui lòng kiểm tra danh sách đơn.')));
-        return;
-      }
-
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(result['message'] ?? 'Đặt hàng thành công!'),
