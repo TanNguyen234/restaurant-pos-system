@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show Platform;
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import '../utils/database_helper.dart';
@@ -27,8 +28,12 @@ class OfflineSyncService {
   factory OfflineSyncService() => _instance;
   OfflineSyncService._internal();
 
-  static String orderApiUrl = "http://localhost:5138/api/order";
-  static String healthCheckUrl = "http://localhost:5138/api/table/areas";
+  // Platform-aware default host: 10.0.2.2:5138 for Android emulator, localhost:5138 for Windows/Web/Desktop
+  static String defaultHost =
+      (!kIsWeb && Platform.isAndroid) ? '10.0.2.2:5138' : 'localhost:5138';
+
+  static String orderApiUrl = "http://$defaultHost/api/order";
+  static String healthCheckUrl = "http://$defaultHost/api/table/areas";
   static const Duration timeoutDuration = Duration(seconds: 4);
 
   Timer? _periodicTimer;

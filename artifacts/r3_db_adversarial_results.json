@@ -1,0 +1,293 @@
+﻿{
+    "ReportType":  "Adversarial Database \u0026 Schema Acceptance Verification",
+    "Database":  "RestaurantPos_Acceptance",
+    "ServerInstance":  "localhost\\SQLEXPRESS",
+    "ExecutedAtUtc":  "2026-10-23T11:22:10.1449492Z",
+    "TotalExecuted":  28,
+    "PassedCount":  28,
+    "FailedCount":  0,
+    "PassRate":  100,
+    "DurationSeconds":  4.11,
+    "Results":  [
+                    {
+                        "TestId":  "DB-01",
+                        "Category":  "Isolation",
+                        "Description":  "Acceptance DB is ONLINE in sys.databases",
+                        "Passed":  true,
+                        "Observed":  "State: ONLINE",
+                        "Expected":  "State: ONLINE",
+                        "DurationMs":  1815.93,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-02",
+                        "Category":  "Isolation",
+                        "Description":  "Dedicated physical storage files allocated",
+                        "Passed":  true,
+                        "Observed":  "MDF: C:\\Program Files\\Microsoft SQL Server\\MSSQL16.SQLEXPRESS\\MSSQL\\DATA\\RestaurantPos_Acceptance.mdf",
+                        "Expected":  "Dedicated files containing RestaurantPos_Acceptance",
+                        "DurationMs":  109.6,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-03",
+                        "Category":  "Isolation",
+                        "Description":  "Backend appsettings points to RestaurantPos_Acceptance",
+                        "Passed":  true,
+                        "Observed":  "ConnStr: Server=localhost;Database=RestaurantPos_Acceptance;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true;",
+                        "Expected":  "Database=RestaurantPos_Acceptance",
+                        "DurationMs":  314.43,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-04",
+                        "Category":  "Schema",
+                        "Description":  "All 10 core tables exist",
+                        "Passed":  true,
+                        "Observed":  "Found 10 tables: Accounts, Areas, Categories, DiningTables, OrderDetails, Orders, Payments, ProductAttributes, Products, Roles",
+                        "Expected":  "Expected 10 tables: Accounts, Areas, Categories, DiningTables, OrderDetails, Orders, Payments, ProductAttributes, Products, Roles",
+                        "DurationMs":  148.98,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-05",
+                        "Category":  "Schema",
+                        "Description":  "Accounts schema (Username VARCHAR(64), PasswordHash VARCHAR(256))",
+                        "Passed":  true,
+                        "Observed":  "Username: varchar(64), PasswordHash: varchar(256)",
+                        "Expected":  "VARCHAR(64), VARCHAR(256)",
+                        "DurationMs":  75.16,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-06",
+                        "Category":  "Schema",
+                        "Description":  "DiningTables schema (AreaId INT, Status INT)",
+                        "Passed":  true,
+                        "Observed":  "AreaId: int, Status: int",
+                        "Expected":  "AreaId INT, Status INT",
+                        "DurationMs":  32.49,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-07",
+                        "Category":  "Schema",
+                        "Description":  "Products schema (Price DECIMAL(18,0), CategoryId SMALLINT)",
+                        "Passed":  true,
+                        "Observed":  "Price: decimal(18), CategoryId: smallint",
+                        "Expected":  "DECIMAL(18,0), SMALLINT",
+                        "DurationMs":  35.95,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-08",
+                        "Category":  "Schema",
+                        "Description":  "Orders schema (OrderCode VARCHAR(32))",
+                        "Passed":  true,
+                        "Observed":  "OrderCode: varchar(32)",
+                        "Expected":  "VARCHAR(32)",
+                        "DurationMs":  37.34,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-09",
+                        "Category":  "Schema",
+                        "Description":  "OrderDetails KDS schema (CookingStatus INT)",
+                        "Passed":  true,
+                        "Observed":  "CookingStatus: int",
+                        "Expected":  "INT",
+                        "DurationMs":  36.97,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-10",
+                        "Category":  "Schema",
+                        "Description":  "Payments schema (PaymentMethod VARCHAR(32))",
+                        "Passed":  true,
+                        "Observed":  "PaymentMethod: varchar(32)",
+                        "Expected":  "VARCHAR(32)",
+                        "DurationMs":  36.12,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-11",
+                        "Category":  "Constraints",
+                        "Description":  "Primary keys defined on all 10 tables",
+                        "Passed":  true,
+                        "Observed":  "PK defined on 10 tables",
+                        "Expected":  "All 10 tables have PK",
+                        "DurationMs":  139.21,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-12",
+                        "Category":  "Constraints",
+                        "Description":  "All 9 Foreign Key relationships verified",
+                        "Passed":  true,
+                        "Observed":  "Found 9 FKs: FK_Accounts_Roles, FK_Orders_Accounts, FK_Tables_Areas, FK_Orders_Tables, FK_Products_Categories, FK_Attributes_Products, FK_OrderDetails_Products, FK_OrderDetails_Orders, FK_Payments_Orders",
+                        "Expected":  "Expected 9 FKs",
+                        "DurationMs":  171.52,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-13",
+                        "Category":  "Indexes",
+                        "Description":  "All 6 non-clustered indexes verified",
+                        "Passed":  true,
+                        "Observed":  "Found 6 indexes: IX_DiningTables_AreaId, IX_Products_CategoryId, IX_Products_ProductName, IX_Orders_OrderCode, IX_Orders_CreatedAt, IX_OrderDetails_OrderId",
+                        "Expected":  "Expected 6 indexes",
+                        "DurationMs":  70.46,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-14",
+                        "Category":  "Constraints",
+                        "Description":  "UNIQUE constraint on Accounts.Username",
+                        "Passed":  true,
+                        "Observed":  "Constraint: UQ__Accounts__536C85E457274AB6 on Username",
+                        "Expected":  "UNIQUE on Username",
+                        "DurationMs":  81.01,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-15",
+                        "Category":  "Constraints",
+                        "Description":  "UNIQUE constraint on Orders.OrderCode",
+                        "Passed":  true,
+                        "Observed":  "Constraint: UQ__Orders__999B52292E35AE3E on OrderCode",
+                        "Expected":  "UNIQUE on OrderCode",
+                        "DurationMs":  93.91,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-16",
+                        "Category":  "Constraints",
+                        "Description":  "UNIQUE constraints on Roles(RoleCode, RoleName)",
+                        "Passed":  true,
+                        "Observed":  "Unique columns: RoleCode, RoleName",
+                        "Expected":  "RoleCode and RoleName",
+                        "DurationMs":  90.68,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-17",
+                        "Category":  "Adversarial",
+                        "Description":  "Accounts.Username rejects duplicate insert (\u0027admin\u0027)",
+                        "Passed":  true,
+                        "Observed":  "Blocked with SQL error: Violation of UNIQUE KEY constraint \u0027UQ__Accounts__536C85E457274AB6\u0027. Cannot insert duplicate key in object \u0027dbo.Accounts\u0027. The duplicate key value is (admin).\r\nThe statement has been terminated.",
+                        "Expected":  "SqlException 2627/2601 Violation of UNIQUE KEY constraint",
+                        "DurationMs":  169.78,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-18",
+                        "Category":  "Adversarial",
+                        "Description":  "Roles.RoleCode rejects duplicate insert (\u0027ADMIN\u0027)",
+                        "Passed":  true,
+                        "Observed":  "Blocked with SQL error: Violation of UNIQUE KEY constraint \u0027UQ__Roles__D62CB59CEC8E78B6\u0027. Cannot insert duplicate key in object \u0027dbo.Roles\u0027. The duplicate key value is (ADMIN).\r\nThe statement has been terminated.",
+                        "Expected":  "SqlException 2627/2601 Violation of UNIQUE KEY constraint",
+                        "DurationMs":  10.82,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-19",
+                        "Category":  "Adversarial",
+                        "Description":  "Orders.OrderCode rejects duplicate insert",
+                        "Passed":  true,
+                        "Observed":  "Blocked with SQL error: Violation of UNIQUE KEY constraint \u0027UQ__Orders__999B52292E35AE3E\u0027. Cannot insert duplicate key in object \u0027dbo.Orders\u0027. The duplicate key value is (ORD-20261004-001).\r\nThe statement has been terminated.",
+                        "Expected":  "SqlException 2627/2601 Violation of UNIQUE KEY constraint",
+                        "DurationMs":  22.34,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-20",
+                        "Category":  "Cascade",
+                        "Description":  "Orders -\u003e OrderDetails ON DELETE CASCADE verified",
+                        "Passed":  true,
+                        "Observed":  "Before delete: 2 details, After order delete: 0 details",
+                        "Expected":  "Before: 2, After: 0",
+                        "DurationMs":  77.57,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-21",
+                        "Category":  "Cascade",
+                        "Description":  "Products -\u003e ProductAttributes ON DELETE CASCADE verified",
+                        "Passed":  true,
+                        "Observed":  "Before delete: 2 attributes, After product delete: 0 attributes",
+                        "Expected":  "Before: 2, After: 0",
+                        "DurationMs":  24.46,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-22",
+                        "Category":  "Cascade",
+                        "Description":  "Orders -\u003e Payments RESTRICT (no delete cascade on payments)",
+                        "Passed":  true,
+                        "Observed":  "Delete blocked: The DELETE statement conflicted with the REFERENCE constraint \"FK_Payments_Orders\". The conflict occurred in database \"RestaurantPos_Acceptance\", table \"dbo.Payments\", column \u0027OrderId\u0027.\r\nThe statement has been terminated.",
+                        "Expected":  "SqlException 547 REFERENCE constraint FK_Payments_Orders",
+                        "DurationMs":  34.61,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-23",
+                        "Category":  "Cascade",
+                        "Description":  "Categories -\u003e Products RESTRICT (cannot delete category with products)",
+                        "Passed":  true,
+                        "Observed":  "Delete blocked: The DELETE statement conflicted with the REFERENCE constraint \"FK_Products_Categories\". The conflict occurred in database \"RestaurantPos_Acceptance\", table \"dbo.Products\", column \u0027CategoryId\u0027.\r\nThe statement has been terminated.",
+                        "Expected":  "SqlException 547 REFERENCE constraint FK_Products_Categories",
+                        "DurationMs":  4.14,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-24",
+                        "Category":  "Cascade",
+                        "Description":  "Roles -\u003e Accounts RESTRICT (cannot delete role with active accounts)",
+                        "Passed":  true,
+                        "Observed":  "Delete blocked: The DELETE statement conflicted with the REFERENCE constraint \"FK_Accounts_Roles\". The conflict occurred in database \"RestaurantPos_Acceptance\", table \"dbo.Accounts\", column \u0027RoleId\u0027.\r\nThe statement has been terminated.",
+                        "Expected":  "SqlException 547 REFERENCE constraint FK_Accounts_Roles",
+                        "DurationMs":  6.76,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-25",
+                        "Category":  "Crypto",
+                        "Description":  "Seeded accounts 1..11 match raw SHA-256(\u0027admin\u0027) exactly",
+                        "Passed":  true,
+                        "Observed":  "Verified 11 seeded accounts (length=64, hash=8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918)",
+                        "Expected":  "All 11 seeded accounts have SHA-256 of \u0027admin\u0027",
+                        "DurationMs":  6.65,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-26",
+                        "Category":  "Crypto",
+                        "Description":  "New accounts format is {salt:32}:{hash:64} (97 chars)",
+                        "Passed":  true,
+                        "Observed":  "Verified 5 new registered accounts with 97-char {salt}:{hash}",
+                        "Expected":  "Length 97 chars, 2 parts separated by \u0027:\u0027",
+                        "DurationMs":  2.88,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-27",
+                        "Category":  "Crypto",
+                        "Description":  "Cryptographic random salt is unique per account",
+                        "Passed":  true,
+                        "Observed":  "Found 5 distinct salts across new accounts, max duplication = 1",
+                        "Expected":  "Zero duplicate salts",
+                        "DurationMs":  11.1,
+                        "ErrorMessage":  ""
+                    },
+                    {
+                        "TestId":  "DB-28",
+                        "Category":  "Crypto",
+                        "Description":  "SHA256 algorithm output matches database seed constant",
+                        "Passed":  true,
+                        "Observed":  "Computed: 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+                        "Expected":  "Expected: 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918",
+                        "DurationMs":  50.21,
+                        "ErrorMessage":  ""
+                    }
+                ]
+}

@@ -1,0 +1,273 @@
+﻿{
+    "Harness":  "Restaurant POS Real E2E Business Flow Acceptance",
+    "Target":  "http://localhost:5138",
+    "Database":  "RestaurantPos_Acceptance",
+    "ExecutedAt":  "2026-10-23T18:50:11.8143161+07:00",
+    "TotalTests":  26,
+    "Passed":  26,
+    "Failed":  0,
+    "PassRate":  100,
+    "DurationSeconds":  0.8,
+    "Results":  [
+                    {
+                        "Id":  "CAT-01",
+                        "Category":  "CATALOG",
+                        "Description":  "Get list of categories (API returns array)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  90.8,
+                        "Details":  "Count: 10",
+                        "Timestamp":  "2026-10-23T18:50:11.0993468+07:00"
+                    },
+                    {
+                        "Id":  "CAT-02",
+                        "Category":  "CATALOG",
+                        "Description":  "Delete category with products rejected (HasProducts check)",
+                        "Passed":  true,
+                        "StatusCode":  400,
+                        "DurationMs":  17.24,
+                        "Details":  "Protected successfully",
+                        "Timestamp":  "2026-10-23T18:50:11.1401680+07:00"
+                    },
+                    {
+                        "Id":  "PROD-01",
+                        "Category":  "CATALOG",
+                        "Description":  "Get products with pagination (page 1, pageSize 5)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  11.75,
+                        "Details":  "Items: 5, Total: 10, Pages: 2",
+                        "Timestamp":  "2026-10-23T18:50:11.1629629+07:00"
+                    },
+                    {
+                        "Id":  "PROD-02",
+                        "Category":  "CATALOG",
+                        "Description":  "Pagination boundaries (Page 2 items distinct from Page 1)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  10.9,
+                        "Details":  "P1 first ID: 10, P2 first ID: 5",
+                        "Timestamp":  "2026-10-23T18:50:11.1827176+07:00"
+                    },
+                    {
+                        "Id":  "PROD-03",
+                        "Category":  "CATALOG",
+                        "Description":  "Filter products by CategoryId=1",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  11.06,
+                        "Details":  "Count: 3",
+                        "Timestamp":  "2026-10-23T18:50:11.2000032+07:00"
+                    },
+                    {
+                        "Id":  "PROD-04",
+                        "Category":  "CATALOG",
+                        "Description":  "Search products by keyword (\u0027Matcha\u0027)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  16.07,
+                        "Details":  "Found: 1",
+                        "Timestamp":  "2026-10-23T18:50:11.2194087+07:00"
+                    },
+                    {
+                        "Id":  "PROD-05",
+                        "Category":  "CATALOG",
+                        "Description":  "Get latest products (Sorted DESC)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  9.02,
+                        "Details":  "Count: 3",
+                        "Timestamp":  "2026-10-23T18:50:11.2315953+07:00"
+                    },
+                    {
+                        "Id":  "PROD-06",
+                        "Category":  "CATALOG",
+                        "Description":  "Get related products for ProductId=1",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  16.27,
+                        "Details":  "Found: 2",
+                        "Timestamp":  "2026-10-23T18:50:11.2499471+07:00"
+                    },
+                    {
+                        "Id":  "PROD-07",
+                        "Category":  "CATALOG",
+                        "Description":  "Delete product in historical orders rejected (HasOrders check)",
+                        "Passed":  true,
+                        "StatusCode":  400,
+                        "DurationMs":  7.89,
+                        "Details":  "Protected successfully",
+                        "Timestamp":  "2026-10-23T18:50:11.2596917+07:00"
+                    },
+                    {
+                        "Id":  "ORDER-01",
+                        "Category":  "ORDER_FLOW",
+                        "Description":  "Verify Table 2 exists on floor plan",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  7.44,
+                        "Details":  "Table: Bàn T1-02, Status: 0",
+                        "Timestamp":  "2026-10-23T18:50:11.2890713+07:00"
+                    },
+                    {
+                        "Id":  "ORDER-02",
+                        "Category":  "ORDER_FLOW",
+                        "Description":  "Place real order via POST /api/order with server-calculated total",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  46.24,
+                        "Details":  "OrderCode: ORD-20261023-BE95C9, Total: 79000",
+                        "Timestamp":  "2026-10-23T18:50:11.3529661+07:00"
+                    },
+                    {
+                        "Id":  "ORDER-03",
+                        "Category":  "ORDER_FLOW",
+                        "Description":  "Verify Table 2 status transitioned to Occupied (1) with CurrentOrderId",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  21.72,
+                        "Details":  "Status: 1 1 1 1 2 0 0 1 3 0, CurrentOrderId:  23 21       ",
+                        "Timestamp":  "2026-10-23T18:50:11.3891559+07:00"
+                    },
+                    {
+                        "Id":  "ORDER-04",
+                        "Category":  "ORDER_FLOW",
+                        "Description":  "Reject new order on already occupied table",
+                        "Passed":  true,
+                        "StatusCode":  400,
+                        "DurationMs":  9.78,
+                        "Details":  "Conflict correctly prevented",
+                        "Timestamp":  "2026-10-23T18:50:11.4023165+07:00"
+                    },
+                    {
+                        "Id":  "KDS-01",
+                        "Category":  "KDS_FLOW",
+                        "Description":  "KDS displays new order items in pending cooking queue",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  13.32,
+                        "Details":  "Items in KDS: 2",
+                        "Timestamp":  "2026-10-23T18:50:11.4273220+07:00"
+                    },
+                    {
+                        "Id":  "KDS-02",
+                        "Category":  "KDS_FLOW",
+                        "Description":  "KDS transition dish to \u0027Cooking\u0027 (1)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  25.58,
+                        "Details":  "Item ID 22 Cooking",
+                        "Timestamp":  "2026-10-23T18:50:11.4552059+07:00"
+                    },
+                    {
+                        "Id":  "KDS-03",
+                        "Category":  "KDS_FLOW",
+                        "Description":  "All dishes marked Ready (2) -\u003e Order auto-transitions to \u0027Served\u0027 (2)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  31.19,
+                        "Details":  "Order Status: Đã phục vụ",
+                        "Timestamp":  "2026-10-23T18:50:11.4911004+07:00"
+                    },
+                    {
+                        "Id":  "PAY-01",
+                        "Category":  "PAYMENT",
+                        "Description":  "Confirm Cash payment at cashier desk",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  27.7,
+                        "Details":  "Payment ID: 16, Method: Cash",
+                        "Timestamp":  "2026-10-23T18:50:11.5293427+07:00"
+                    },
+                    {
+                        "Id":  "PAY-02",
+                        "Category":  "PAYMENT",
+                        "Description":  "Verify Order PaymentStatus=1 (Paid) and Status=3 (Completed)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  8.04,
+                        "Details":  "Payment: Đã thanh toán, Status: Hoàn thành",
+                        "Timestamp":  "2026-10-23T18:50:11.5447837+07:00"
+                    },
+                    {
+                        "Id":  "PAY-03",
+                        "Category":  "PAYMENT",
+                        "Description":  "Verify Table 2 is released back to Empty (0)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  14.33,
+                        "Details":  "Status: 1 0 1 1 2 0 0 1 3 0, CurrentOrderId:   21       ",
+                        "Timestamp":  "2026-10-23T18:50:11.5652399+07:00"
+                    },
+                    {
+                        "Id":  "PAY-04",
+                        "Category":  "PAYMENT",
+                        "Description":  "Reject duplicate payment on already settled order",
+                        "Passed":  true,
+                        "StatusCode":  400,
+                        "DurationMs":  5.76,
+                        "Details":  "Duplicate payment blocked",
+                        "Timestamp":  "2026-10-23T18:50:11.5730546+07:00"
+                    },
+                    {
+                        "Id":  "GATEWAY-01",
+                        "Category":  "GATEWAY",
+                        "Description":  "Generate dynamic VietQR image link \u0026 account metadata",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  6.32,
+                        "Details":  "Bank: vietinbank, Acc: 102871234567, URL: https://img.vietqr.io/image/vietinbank-102871...",
+                        "Timestamp":  "2026-10-23T18:50:11.5984071+07:00"
+                    },
+                    {
+                        "Id":  "GATEWAY-02",
+                        "Category":  "GATEWAY",
+                        "Description":  "Generate VNPay Sandbox URL with HMAC-SHA512 checksum",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  5.88,
+                        "Details":  "Label: SANDBOX VERIFIED",
+                        "Timestamp":  "2026-10-23T18:50:11.6112762+07:00"
+                    },
+                    {
+                        "Id":  "GATEWAY-03",
+                        "Category":  "GATEWAY",
+                        "Description":  "Reject VNPay callback with forged HMAC signature",
+                        "Passed":  true,
+                        "StatusCode":  400,
+                        "DurationMs":  4.63,
+                        "Details":  "Tampered callback blocked",
+                        "Timestamp":  "2026-10-23T18:50:11.6176988+07:00"
+                    },
+                    {
+                        "Id":  "OFFLINE-01",
+                        "Category":  "OFFLINE",
+                        "Description":  "Sync offline order (creates ORD-OFF-301916)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  26.03,
+                        "Details":  "OrderCode: ORD-OFF-301916, OrderId: 24",
+                        "Timestamp":  "2026-10-23T18:50:11.6645819+07:00"
+                    },
+                    {
+                        "Id":  "OFFLINE-02",
+                        "Category":  "OFFLINE",
+                        "Description":  "Concurrent retry / re-sync deduplication (Exact same OrderId returned)",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  8.8,
+                        "Details":  "Deduplicated OrderId: 24",
+                        "Timestamp":  "2026-10-23T18:50:11.6765348+07:00"
+                    },
+                    {
+                        "Id":  "OFFLINE-03",
+                        "Category":  "OFFLINE",
+                        "Description":  "Verify database contains strictly ONE order for offline queue item",
+                        "Passed":  true,
+                        "StatusCode":  200,
+                        "DurationMs":  73.58,
+                        "Details":  "SQL Count: 1 (Zero Duplication)",
+                        "Timestamp":  "2026-10-23T18:50:11.7521430+07:00"
+                    }
+                ]
+}

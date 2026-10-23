@@ -21,6 +21,10 @@ public class CategoryController : BaseController
         {
             if (file != null)
             {
+                if (!Helper.ValidateImage(file, out string? imageError))
+                {
+                    return BadRequest(new { statusCode = 400, success = false, message = imageError });
+                }
                 obj.Icon = await Helper.SaveImageAsync(file, "images/categories");
             }
             else if (string.IsNullOrEmpty(obj.Icon))
@@ -47,6 +51,10 @@ public class CategoryController : BaseController
 
         if (file != null)
         {
+            if (!Helper.ValidateImage(file, out string? imageError))
+            {
+                return BadRequest(new { statusCode = 400, success = false, message = imageError });
+            }
             // Xóa ảnh cũ nếu có
             Helper.DeleteImage(existing.Icon, "images/categories");
             // Lưu ảnh mới

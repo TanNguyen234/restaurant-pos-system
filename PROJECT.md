@@ -1,77 +1,122 @@
-# Project: Restaurant & Cafe POS System (Member 1: Team Leader & Fullstack Architect)
+# Project: Restaurant POS Real-World Acceptance & Remediation
 
 ## Architecture
 - **Backend (.NET 10 Web API)**:
+  - Framework: ASP.NET Core Web API (.NET 10.0, C# 14)
   - Pattern: 4-Tier Provider / Facade Pattern (`BaseController` -> `SiteProvider` -> `BaseRepository` -> `RestaurantPosContext`)
-  - ORM: Entity Framework Core 10 (`Microsoft.EntityFrameworkCore.SqlServer` 10.0.12)
-  - Database: SQL Server 2022 (10 normalized relational tables in 3NF)
-  - Key Modules: Area & Table Management, Order/Payment domain models, JSON Serialization cycle mitigation
+  - ORM: EF Core 10 (`Microsoft.EntityFrameworkCore.SqlServer` 10.0.12)
+  - Database: Microsoft SQL Server 2022 Express instance (`localhost`), Dedicated test database: `RestaurantPos_Acceptance`
+  - Modules: Auth & RBAC (JWT Bearer across 6 roles: ADMIN, MANAGER, CASHIER, WAITER, KITCHEN, MEMBER), Table/Area Management, Category/Product Catalog & Media (`wwwroot/images`), Order Management & Idempotent Deduplication, KDS Workflow, Payment Gateways (VietQR, VNPay Sandbox).
 - **Mobile Client (Flutter 3.47 / Dart 3.13)**:
+  - Framework: Flutter 3.47 (Material 3)
   - Pattern: Layered Architecture (Views -> Repositories/Services -> SQLite DatabaseHelper / HTTP Client)
   - Local Storage: SQLite (`sqflite` + `path`) with 3 core tables: `user_session`, `cart_items`, `offline_orders`
-  - Offline-First: `OfflineSyncService` background queue for un-synced orders
-  - UI/UX: F&B Table Floor Plan with TabBar per Area, visual status color codes (Green: Trống, Red: Có khách, Orange: Đặt trước/Chờ), Table Card, and Quick Transfer Dialog
-- **Documentation & Version Control**:
-  - Senior Software Engineer-grade `README.md`
-  - Conventional Commits: 3 atomic commits (`feat(backend)`, `feat(mobile)`, `docs`) pushed to GitHub `origin/main`
+  - Network: Real HTTP communication with backend (align port: 5138/5254; emulator host: `10.0.2.2`). Clean network error handling with NO fake in-memory fallback.
+  - Offline-First: `OfflineSyncService` background queue for un-synced orders with server-side idempotency.
+  - UI/UX: Table Floor Plan, Catalog & Product Detail, SQLite Cart, Checkout, Order Receipt, KDS Kitchen Display, VietQR dialog, VNPay callback.
 
-## Feature Inventory
+## Feature Inventory (48 Granular Features)
 | # | Feature | Description | Milestone | Source |
 |---|---------|-------------|-----------|--------|
-| 1 | 10-Table EF Core Models & Context | Synchronize `RestaurantPosContext.cs` to cover all 10 tables from `RestaurantPosDb.sql` (`Areas`, `DiningTables`, `Categories`, `Products`, `Orders`, `OrderDetails`, `Accounts`, `Roles`, `Payments`, `ProductAttributes`) | M1 | ORIGINAL_REQUEST §R1 |
-| 2 | TableRepository Implementation | Implement `TableRepository.cs` inheriting `BaseRepository` with `GetAreas`, `GetTablesByArea`, `GetAllTables`, `GetById`, `UpdateStatus`, and `TransferTable` (atomic transaction) | M1 | ORIGINAL_REQUEST §R1 |
-| 3 | SiteProvider Integration | Register lazy `TableRepository Table` property in `SiteProvider.cs` | M1 | ORIGINAL_REQUEST §R1 |
-| 4 | TableController Web API | Implement `TableController.cs` inheriting `BaseController` with 5 REST endpoints (`GET /api/table/areas`, `GET /api/table/by-area/{areaId}`, `GET /api/table`, `PUT /api/table/{id}/status`, `POST /api/table/transfer`) | M1 | ORIGINAL_REQUEST §R1 |
-| 5 | Backend Build Verification | Verify `dotnet build` succeeds with 0 errors and 0 warnings | M1 | ORIGINAL_REQUEST §AC |
-| 6 | SQLite DatabaseHelper Expansion | Implement full CRUD in `lib/utils/database_helper.dart` for `user_session`, `cart_items` total calculation, and `offline_orders` queue | M2 | ORIGINAL_REQUEST §R2 |
-| 7 | Floor Table Page UI | Implement `lib/views/table/floor_table_page.dart` with Area TabBar, color-coded GridView, table card metadata, status update & transfer dialog | M2 | ORIGINAL_REQUEST §R2 |
-| 8 | Mobile Models & Repository | Create `Area`, `DiningTable` models and `TableRepository` in mobile client | M2 | ORIGINAL_REQUEST §R2 |
-| 9 | Offline Sync Service | Implement `lib/services/offline_sync_service.dart` with connectivity check, unsynced queue polling, backend API sync, and `is_synced` update | M2 | ORIGINAL_REQUEST §R2 |
-| 10 | Main Shell & Route Navigation | Standardize `lib/main.dart` with F&B theme and smooth navigation across Tables, Categories, and Cart | M2 | ORIGINAL_REQUEST §R2 |
-| 11 | Mobile Static Analysis | Verify `flutter analyze` passes with 0 syntax errors or unresolved imports | M2 | ORIGINAL_REQUEST §AC |
-| 12 | Comprehensive README.md | Write senior software engineer-grade README covering architecture, tech stack, data models, API catalog, setup guide, and 3-member matrix with Member 1 completion evidence | M3 | ORIGINAL_REQUEST §R3 |
-| 13 | Atomic Commits & Git Push | Commit 3 atomic units (`feat(backend)`, `feat(mobile)`, `docs`) and push clean working tree to `origin/main` | M3 | ORIGINAL_REQUEST §R3 |
+| 1 | Master Traceability Matrix | Map 48 features, academic rubrics, and 3-member responsibilities into `docs/acceptance/REQUIREMENTS_TRACEABILITY.md` | R1 | ORIGINAL_REQUEST §R1 |
+| 2 | DOCX Extraction | Extract all text & tables from `docs/TAI_LIEU_HUONG_DAN_COLLABORATOR_FULL.docx` | R1 | ORIGINAL_REQUEST §R1 |
+| 3 | Git Branching & Worktree | Create working branch `test/restaurant-real-acceptance` | R2 | ORIGINAL_REQUEST §R2 |
+| 4 | Clean Backend Build | `dotnet build backend/WebApi.csproj` compiles with 0 errors | R2 | ORIGINAL_REQUEST §R2 |
+| 5 | Clean Mobile Analysis & Test | `flutter analyze` 0 errors, `flutter test` passing | R2 | ORIGINAL_REQUEST §R2 |
+| 6 | Android Cleartext & Permissions | Configure `usesCleartextTraffic` and `INTERNET` permission in AndroidManifest | R2 | ORIGINAL_REQUEST §R2 |
+| 7 | False-Pass Elimination | Remove in-memory fallback masking from `TableRepository.dart` | R2 | ORIGINAL_REQUEST §R2 |
+| 8 | Network Port Alignment | Harmonize backend launch port (5138/5254) and mobile API base URL | R2 | ORIGINAL_REQUEST §R2 |
+| 9 | Dedicated SQL Server Provisioning | Provision `RestaurantPos_Acceptance` with 10 tables & seed data | R3 | ORIGINAL_REQUEST §R3 |
+| 10 | Auth User Registration | `POST /api/auth/register` (SHA-256 + salt password hashing) | R3 | Docs 01 §1.1 |
+| 11 | Auth User Login & Session | `POST /api/auth/login` returning JWT token & role | R3 | Docs 01 §1.2 |
+| 12 | Auth Password Change | `POST /api/auth/change-password` | R3 | Docs 01 §1.3 |
+| 13 | Member Management API | `GET /api/account/members` | R3 | Docs 01 §1.4 |
+| 14 | RBAC 6-Role Authorization | Enforce ADMIN, MANAGER, CASHIER, WAITER, KITCHEN, MEMBER on endpoints | R3 | Docs 01 §1.5 |
+| 15 | Logout & Session Wipe | Invalidate session in SQLite `user_session` | R3 | Docs 01 §1.6 |
+| 16 | Category Display API | `GET /api/category` | R4 | Docs 01 §2.1 |
+| 17 | Category Create & Image Upload | `POST /api/category` multipart form upload to `wwwroot/images/categories` | R4 | Docs 01 §2.2 |
+| 18 | Category Delete | `DELETE /api/category/{id}` | R4 | Docs 01 §2.3 |
+| 19 | Prevent Cascade Category Delete | Reject deletion if category contains products | R4 | Docs 01 §2.4 |
+| 20 | Category Update & Image Overwrite | `PUT /api/category/{id}` with file cleanup of old image | R4 | Docs 01 §2.5 |
+| 21 | Category Image Lifecycle Management | Ensure no orphaned physical image files on delete/update | R4 | Docs 01 §2.6 |
+| 22 | Paginated Product List API | `GET /api/product?page=x&pageSize=y` | R4 | Docs 01 §3.1 |
+| 23 | Product Create & Image Upload | `POST /api/product` multipart form upload | R4 | Docs 01 §3.2 |
+| 24 | Product Delete & Image Cleanup | `DELETE /api/product/{id}` unlinking image from `wwwroot/images/products` | R4 | Docs 01 §3.3 |
+| 25 | Product Update & Image Overwrite | `PUT /api/product/{id}` overwriting image and removing old image | R4 | Docs 01 §3.4 |
+| 26 | Prevent Deletion of Historical Products | Reject deletion if product has historical orders in `OrderDetails` | R4 | Docs 01 §3.5 |
+| 27 | Mobile Catalog & Search UI | Product grid, category filter tabs, search bar | R4 | Docs 01 §4.1-4.4 |
+| 28 | Mobile Product Detail UI | Large image, price, description, Add to Cart action | R4 | Docs 01 §4.5 |
+| 29 | SQLite Cart Persistence | Add to cart, quantity accumulation, badge counter, persist on reboot | R4 | Docs 01 §5.1-5.6 |
+| 30 | Area & Table Floor Map API | `GET /api/table/areas`, `GET /api/table` | R5 | Docs 01 §7.1 |
+| 31 | Table Floor Plan Mobile UI | Visual status colors, capacity, area tabs, quick actions | R5 | Docs 01 §7.1 |
+| 32 | Table Transfer API & Dialog | `POST /api/table/transfer` atomic transaction, occupied target rejection | R5 | Docs 01 §7.2 |
+| 33 | Order Checkout API | `POST /api/order` creating order & details in SQL Server | R5 | Docs 01 §5.7 |
+| 34 | Order Receipt & Detail UI | View order items, status, subtotal, tax | R5 | Docs 01 §5.8 |
+| 35 | Table Occupied Status Update | Update table status to Occupied (1) upon order creation | R5 | ORIGINAL_REQUEST §R5 |
+| 36 | KDS Active Orders API | `GET /api/kds/active-orders` | R5 | Docs 01 §7.3 |
+| 37 | KDS Cooking Status Transition API | `PUT /api/kds/order/{id}/status` (Pending -> Cooking -> Ready) | R5 | Docs 01 §7.3 |
+| 38 | KDS Kitchen Display Screen UI | Visual dish cards with elapsed timer and status action buttons | R5 | Docs 01 §7.3 |
+| 39 | Cashier Settlement & Table Release | `POST /api/order/{id}/settle` releasing table to Empty (0) | R5 | ORIGINAL_REQUEST §R5 |
+| 40 | Offline Order Queuing | Save order to SQLite `offline_orders` (`is_synced = 0`) when offline | R6 | ORIGINAL_REQUEST §R6 |
+| 41 | Offline Sync Recovery Experiment | Restore connectivity, sync queue to backend, verify 1 SQL Server order | R6 | ORIGINAL_REQUEST §R6 |
+| 42 | Server Idempotency & Deduplication | Enforce idempotency key to prevent duplicate orders on timeout/retry | R6 | ORIGINAL_REQUEST §R6 |
+| 43 | VietQR Reference & Generation | Dynamic VietQR NAPAS 247 QR image URL generation | R7 | Docs 01 §5.10 |
+| 44 | Cashier VietQR Verification Flow | Cashier confirms payment reference and marks order paid | R7 | ORIGINAL_REQUEST §R7 |
+| 45 | VNPay Sandbox Gateway Redirect | Generate signed VNPay payment URL with valid query parameters | R7 | Docs 01 §5.10 |
+| 46 | VNPay Callback HMAC Verification | Verify HMAC-SHA512 checksum on return callback and update order status | R7 | ORIGINAL_REQUEST §R7 |
+| 47 | UI/UX Audit & Defect Remediation | Polish UI/UX, eliminate broken placeholders, fix P0/P1/P2 defects | R8 | ORIGINAL_REQUEST §R8 |
+| 48 | Acceptance Sign-off Deliverables | Generate 7 acceptance reports and open PR to main | R8 | ORIGINAL_REQUEST §R8 |
 
 ## Milestones
 | # | Name | Scope | Dependencies | Status |
 |---|------|-------|-------------|--------|
-| M1 | Backend Architecture & Table Management | Features #1, #2, #3, #4, #5 (.NET 10 Web API) | none | DONE |
-| M2 | Mobile Architecture, SQLite & Floor Table UI | Features #6, #7, #8, #9, #10, #11 (Flutter Mobile) | M1 (API Contract) | DONE |
-| M3 | Senior Documentation, Atomic Commits & Push | Features #12, #13 (README, Git Release) | M1, M2 | IN_PROGRESS |
+| R1 | Document-Driven Audit & Traceability Matrix | Features #1, #2 | none | DONE |
+| R2 | Clean Build & Static Verification | Features #3, #4, #5, #6, #7, #8 | none | PLANNED |
+| R3 | Dedicated SQL Server Setup & API RBAC Integration | Features #9, #10, #11, #12, #13, #14, #15 | none | DONE / PASS |
+| R4 | Catalog, Media Management & SQLite Cart Verification | Features #16 through #29 | R3 | PLANNED |
+| R5 | Complete Restaurant Business Flow & KDS Lifecycle | Features #30 through #39 | R4 | PLANNED |
+| R6 | Real Offline & Recovery Synchronization Experiments | Features #40, #41, #42 | R5 | PLANNED |
+| R7 | Payment Gateway Testing (VietQR & VNPay Sandbox) | Features #43, #44, #45, #46 | R5 | PLANNED |
+| R8 | UI/UX Polishing, Root-Cause Remediation & Acceptance Sign-off | Features #47, #48 | R6, R7 | PLANNED |
 
 ## Interface Contracts
-### Backend ↔ Mobile / External Clients
-1. `GET /api/table/areas`:
-   - Response: `200 OK` `[ { "areaId": 1, "areaName": "Tầng trệt - Máy lạnh trong nhà", "description": "...", "sortOrder": 1, "isActive": true } ]`
-2. `GET /api/table/by-area/{areaId}`:
-   - Param: `areaId` (int)
-   - Response: `200 OK` `[ { "tableId": 1, "areaId": 1, "tableName": "Bàn T1-01", "capacity": 4, "status": 1, "currentOrderId": 1, "updatedAt": "..." } ]`
-3. `GET /api/table`:
-   - Response: `200 OK` `[ { "tableId": 1, "areaId": 1, "tableName": "Bàn T1-01", "capacity": 4, "status": 1, "currentOrderId": 1, "updatedAt": "..." } ]`
-4. `PUT /api/table/{id}/status`:
-   - Route Param: `id` (int)
-   - Body: `{ "status": 1 }` (supports 0: Trống, 1: Có khách, 2: Chờ phục vụ / Đã đặt trước)
-   - Response: `200 OK` `{ "tableId": 1, "status": 1, "message": "Cập nhật trạng thái thành công" }`
-5. `POST /api/table/transfer`:
-   - Body: `{ "fromTableId": 1, "toTableId": 2 }` (or `{ "sourceTableId": 1, "targetTableId": 2 }`)
-   - Precondition: `fromTable` exists, `toTable` exists and has `status == 0` (empty)
-   - Response: `200 OK` `{ "success": true, "message": "Chuyển bàn thành công", "fromTableId": 1, "toTableId": 2 }`
+### Auth API (`/api/auth`)
+- `POST /api/auth/register`: `{ username, password, fullName, email, phone, roleId }` -> `200 OK { accountId, username, message }`
+- `POST /api/auth/login`: `{ username, password }` -> `200 OK { token, accountId, username, role, fullName }`
+- `POST /api/auth/change-password`: `{ oldPassword, newPassword }` -> `200 OK { message }`
+
+### Catalog API (`/api/category`, `/api/product`)
+- `GET /api/category`: `200 OK List<Category>`
+- `POST /api/category`: Multipart form (`Name`, `Title`, `file`) -> `200 OK Category`
+- `DELETE /api/category/{id}`: `200 OK` (Rejects if has products)
+- `GET /api/product?page=1&pageSize=10&categoryId=...`: `200 OK { totalItems, page, pageSize, data: [...] }`
+- `POST /api/product`: Multipart form (`CategoryId`, `Name`, `Price`, `Description`, `file`) -> `200 OK Product`
+
+### Order & KDS API (`/api/order`, `/api/kds`)
+- `POST /api/order`: `{ idempotencyKey, tableId, orderType, note, items: [ { productId, quantity, price, note } ] }` -> `200 OK { orderId, orderCode, totalAmount }`
+- `GET /api/kds/active-orders`: `200 OK List<KdsOrderDto>`
+- `PUT /api/kds/order/{id}/status`: `{ cookingStatus }` (1: Pending, 2: Cooking, 3: Ready) -> `200 OK`
+- `POST /api/order/{id}/settle`: `{ paymentMethod, amountPaid }` -> `200 OK { success: true, tableReleased: true }`
+
+### Payment API (`/api/payment`)
+- `GET /api/payment/vietqr/{orderId}`: `200 OK { qrUrl, accountNo, accountName, amount, refCode }`
+- `POST /api/payment/vnpay/create-url`: `{ orderId, returnUrl }` -> `200 OK { paymentUrl }`
+- `GET /api/payment/vnpay/callback`: Verifies HMAC checksum and updates order status.
 
 ## Code Layout
-- Backend files exclusively owned by Member 1:
-  - `backend/Models/RestaurantPosContext.cs`
-  - `backend/Models/TableRepository.cs`
-  - `backend/Models/SiteProvider.cs`
-  - `backend/Api/Controllers/TableController.cs`
-  - *(Do NOT modify CategoryRepository.cs or CategoryController.cs)*
-- Mobile files exclusively owned by Member 1:
-  - `mobile/lib/utils/database_helper.dart`
-  - `mobile/lib/models/area.dart`
-  - `mobile/lib/models/dining_table.dart`
-  - `mobile/lib/repositories/table_repository.dart`
-  - `mobile/lib/views/table/floor_table_page.dart`
-  - `mobile/lib/services/offline_sync_service.dart`
-  - `mobile/lib/main.dart`
-- Documentation & Git release files:
-  - `README.md`
-  - `.gitignore`
+- Acceptance Documentation: `docs/acceptance/`
+  - `REQUIREMENTS_TRACEABILITY.md`
+  - `MEMBER_1_ACCEPTANCE.md`
+  - `MEMBER_2_ACCEPTANCE.md`
+  - `MEMBER_3_ACCEPTANCE.md`
+  - `E2E_EXECUTION_REPORT.md`
+  - `SECURITY_AND_DATA_INTEGRITY.md`
+  - `UNRESOLVED_BLOCKERS.md`
+- Backend (`backend/`):
+  - Controllers: `backend/Api/Controllers/` (`AuthController.cs`, `CategoryController.cs`, `TableController.cs`, `ProductController.cs`, `OrderController.cs`, `PaymentController.cs`, `KdsController.cs`)
+  - Repositories & Models: `backend/Models/`
+  - Uploads: `backend/wwwroot/images/`
+- Mobile (`mobile/`):
+  - Views: `mobile/lib/views/` (`table/`, `catalog/`, `cart/`, `order/`, `kds/`, `auth/`)
+  - Database: `mobile/lib/utils/database_helper.dart`
+  - Services: `mobile/lib/services/offline_sync_service.dart`, `api_service.dart`
