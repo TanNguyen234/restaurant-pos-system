@@ -58,8 +58,7 @@ class OfflineSyncService {
   /// Kiểm tra xem Backend Server có thể truy cập được hay không
   Future<bool> checkNetworkReachability() async {
     try {
-      final response = await http
-          .get(Uri.parse(healthCheckUrl))
+      final response = await ApiConfig.get(Uri.parse(healthCheckUrl))
           .timeout(timeoutDuration);
       return response.statusCode == 200;
     } catch (_) {
@@ -144,8 +143,7 @@ class OfflineSyncService {
             'createdAt': order['created_at'],
           };
 
-          final response = await http
-              .post(
+          final response = await ApiConfig.post(
                 Uri.parse(orderApiUrl),
                 headers: {'Content-Type': 'application/json'},
                 body: jsonEncode(payload),
