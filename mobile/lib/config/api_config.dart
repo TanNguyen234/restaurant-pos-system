@@ -1,11 +1,12 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import '../utils/database_helper.dart';
 
 /// Run: flutter run --dart-define=POS_API_BASE_URL=http://YOUR_LAN_IP:5138
 class ApiConfig {
-  static const String baseUrl = String.fromEnvironment(
-    'POS_API_BASE_URL', defaultValue: 'http://10.0.2.2:5138',
-  );
+  static const String _envUrl = String.fromEnvironment('POS_API_BASE_URL');
+  static String get baseUrl =>
+      _envUrl.isNotEmpty ? _envUrl : (kIsWeb ? 'http://localhost:5138' : 'http://10.0.2.2:5138');
 
   static Future<Map<String, String>> authHeaders() async {
     try {

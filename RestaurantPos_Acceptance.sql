@@ -393,7 +393,7 @@ GO
 IF NOT EXISTS (SELECT 1 FROM Roles WHERE RoleCode = 'KITCHEN')
 BEGIN
     INSERT INTO Roles (RoleName, RoleCode, Description)
-    VALUES (N'Bá»™ pháº­n báº¿p & pha cháº¿ (KDS)', 'KITCHEN', N'MÃ n hÃ¬nh KDS nháº­n order vÃ  cháº¿ biáº¿n mÃ³n Äƒn');
+    VALUES (N'Bộ phận bếp & pha chế (KDS)', 'KITCHEN', N'Màn hình KDS nhận order và chế biến món ăn');
     PRINT 'Inserted KITCHEN role into Roles table.';
 END
 GO
@@ -402,7 +402,7 @@ IF NOT EXISTS (SELECT 1 FROM Accounts WHERE Username = 'kitchen')
 BEGIN
     DECLARE @KitchenRoleId INT = (SELECT RoleId FROM Roles WHERE RoleCode = 'KITCHEN');
     INSERT INTO Accounts (RoleId, Username, PasswordHash, FullName, Email, PhoneNumber, IsActive, IsEmailVerified, OAuthProvider)
-    VALUES (@KitchenRoleId, 'kitchen', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', N'Báº¿p TrÆ°á»Ÿng KDS', 'kitchen@restaurantpos.vn', '0907890123', 1, 1, 'Local');
+    VALUES (@KitchenRoleId, 'kitchen', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918', N'Bếp Trưởng KDS', 'kitchen@restaurantpos.vn', '0907890123', 1, 1, 'Local');
     PRINT 'Inserted kitchen user into Accounts table.';
 END
 GO

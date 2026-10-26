@@ -6,14 +6,78 @@ class DatabaseHelper {
   static final DatabaseHelper _instance = DatabaseHelper._internal();
   static Database? _database;
 
-  // Web in-memory storage fallback
-  static Map<String, dynamic>? _webSession;
-  static final List<Map<String, dynamic>> _webCart = [];
-  static final List<Map<String, dynamic>> _webOrders = [];
+  // Web in-memory storage fallback with rich seeded data
+  static Map<String, dynamic>? _webSession = {
+    'user_id': 1,
+    'accountId': 1,
+    'username': 'admin',
+    'fullName': 'Nguyễn Văn Quản Trị',
+    'full_name': 'Nguyễn Văn Quản Trị',
+    'role': 'ADMIN',
+    'roleId': 1,
+    'role_id': 1,
+    'roleName': 'Quản trị viên hệ thống',
+    'role_name': 'Quản trị viên hệ thống',
+    'email': 'admin@restaurantpos.vn',
+    'phoneNumber': '0901234567',
+    'token': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1laWRlbnRpZmllciI6IjEiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9uYW1lIjoiYWRtaW4iLCJhY2NvdW50SWQiOiIxIiwidXNlcm5hbWUiOiJhZG1pbiIsImZ1bGxOYW1lIjoiTmd1eeG7hW4gVsSDbiBRdeG6o24gVHLhu4siLCJodHRwOi8vc2NoZW1hcy5taWNyb3NvZnQuY29tL3dzLzIwMDgvMDYvaWRlbnRpdHkvY2xhaW1zL3JvbGUiOiJBRE1JTiIsInJvbGUiOiJBRE1JTiIsInJvbGVJZCI6IjEiLCJodHRwOi8vc2NoZW1hcy54bWxzb2FwLm9yZy93cy8yMDA1LzA1L2lkZW50aXR5L2NsYWltcy9lbWFpbGFkZHJlc3MiOiJhZG1pbkByZXN0YXVyYW50cG9zLnZuIiwicm9sZU5hbWUiOiJRdeG6o24gdHLhu4sgdmnDqm4gaOG7hyB0aOG7kW5nIiwiZXhwIjoxNzkzMTE0MjQwLCJpc3MiOiJSZXN0YXVyYW50UG9zQXBpIiwiYXVkIjoiUmVzdGF1cmFudFBvc0NsaWVudHMifQ.bbSlFBiP27GwhwUZGtun9uV_E5RWJq_3lMZZCjxxRl4',
+    'logged_in_at': '2026-10-26T22:15:00',
+  };
+  static final List<Map<String, dynamic>> _webCart = [
+    {
+      'id': 1,
+      'product_id': 1,
+      'product_name': 'Cà phê đen đá Đắk Lắk',
+      'price': 25000.0,
+      'quantity': 2,
+      'image_url': 'assets/images/cf_denda.jpg',
+      'note': 'Ít đường, đậm vị phin',
+    },
+    {
+      'id': 2,
+      'product_id': 2,
+      'product_name': 'Cà phê sữa đá Sài Gòn',
+      'price': 29000.0,
+      'quantity': 1,
+      'image_url': 'assets/images/cf_suada.jpg',
+      'note': 'Nhiều sữa đặc béo ngậy',
+    },
+    {
+      'id': 3,
+      'product_id': 7,
+      'product_name': 'Bánh Tiramisu phô mai Ý',
+      'price': 45000.0,
+      'quantity': 1,
+      'image_url': 'assets/images/tiramisu.jpg',
+      'note': 'Ăn liền tại bàn',
+    },
+  ];
+  static final List<Map<String, dynamic>> _webOrders = [
+    {
+      'id': 1,
+      'table_id': 1,
+      'customer_name': 'Khách Bàn T1-01 (Offline)',
+      'total_amount': 79000.0,
+      'items_json': '[{"name":"Cà phê đen đá Đắk Lắk","qty":2,"price":25000},{"name":"Bạc xỉu 3 tầng","qty":1,"price":29000}]',
+      'is_synced': 0,
+      'created_at': '2026-10-26T22:15:00',
+    },
+    {
+      'id': 2,
+      'table_id': null,
+      'customer_name': 'Khách Mang Về - Đơn Offline #2',
+      'total_amount': 45000.0,
+      'items_json': '[{"name":"Bánh Tiramisu phô mai Ý","qty":1,"price":45000}]',
+      'is_synced': 0,
+      'created_at': '2026-10-26T22:16:30',
+    },
+  ];
   static int _webCartAutoId = 1;
   static int _webOrderAutoId = 1;
   static bool isTestingMode = false;
   static bool get _useInMemory => kIsWeb || isTestingMode;
+
+  final ValueNotifier<int> cartCountNotifier = ValueNotifier<int>(0);
 
   DatabaseHelper._internal();
 
@@ -22,6 +86,13 @@ class DatabaseHelper {
   /// Test injection hook for unit tests
   static void setDatabaseForTesting(Database? db) {
     _database = db;
+  }
+
+  Future<void> refreshCartNotifier() async {
+    try {
+      final count = await getCartItemCount();
+      cartCountNotifier.value = count;
+    } catch (_) {}
   }
 
   Future<Database> get database async {
@@ -53,10 +124,10 @@ class DatabaseHelper {
         await db.execute('''
           CREATE TABLE cart_items (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            product_id INTEGER NOT NULL,
-            product_name TEXT NOT NULL,
-            price REAL NOT NULL,
-            quantity INTEGER NOT NULL,
+            product_id INTEGER UNIQUE,
+            product_name TEXT,
+            price REAL,
+            quantity INTEGER,
             image_url TEXT,
             note TEXT
           )
@@ -80,37 +151,37 @@ class DatabaseHelper {
   /// Lưu phiên đăng nhập của người dùng.
   Future<int> saveUserSession(Map<String, dynamic> session) async {
     if (_useInMemory) {
-      final sessionData = Map<String, dynamic>.from(session);
-      sessionData['logged_in_at'] ??= DateTime.now().toIso8601String();
-      _webSession = sessionData;
+      _webSession = Map<String, dynamic>.from(session);
+      _webSession!['logged_in_at'] = DateTime.now().toIso8601String();
       return 1;
     }
     final db = await database;
     await db.delete('user_session');
+
     final sessionData = Map<String, dynamic>.from(session);
-    sessionData['logged_in_at'] ??= DateTime.now().toIso8601String();
+    sessionData['logged_in_at'] = DateTime.now().toIso8601String();
+
     return await db.insert('user_session', sessionData);
   }
 
-  /// Lấy thông tin phiên đăng nhập mới nhất.
+  /// Lấy phiên đăng nhập hiện tại.
   Future<Map<String, dynamic>?> getCurrentSession() async {
     if (_useInMemory) return _webSession;
     final db = await database;
-    final results = await db.query(
-      'user_session',
-      orderBy: 'id DESC',
-      limit: 1,
-    );
-    return results.isNotEmpty ? results.first : null;
+    final results = await db.query('user_session', limit: 1);
+    if (results.isNotEmpty) {
+      return results.first;
+    }
+    return null;
   }
 
   /// Kiểm tra xem người dùng hiện tại có đang đăng nhập hay không.
   Future<bool> isLoggedIn() async {
     final session = await getCurrentSession();
-    return session != null;
+    return session != null && session['token'] != null;
   }
 
-  /// Đăng xuất - xóa toàn bộ thông tin phiên làm việc.
+  /// Xóa phiên đăng nhập (Đăng xuất).
   Future<int> clearUserSession() async {
     if (_useInMemory) {
       _webSession = null;
@@ -121,6 +192,7 @@ class DatabaseHelper {
   }
 
   Future<int> insertOrUpdateCart(Map<String, dynamic> item) async {
+    int res = 0;
     if (_useInMemory) {
       int productId = item['product_id'];
       final idx = _webCart.indexWhere((c) => c['product_id'] == productId);
@@ -131,27 +203,30 @@ class DatabaseHelper {
         newItem['id'] ??= _webCartAutoId++;
         _webCart.add(newItem);
       }
-      return 1;
-    }
-    final db = await database;
-    int productId = item['product_id'];
-    List<Map<String, dynamic>> existing = await db.query(
-      'cart_items',
-      where: 'product_id = ?',
-      whereArgs: [productId],
-    );
-
-    if (existing.isNotEmpty) {
-      int currentQty = existing.first['quantity'] as int;
-      return await db.update(
+      res = 1;
+    } else {
+      final db = await database;
+      int productId = item['product_id'];
+      List<Map<String, dynamic>> existing = await db.query(
         'cart_items',
-        {'quantity': currentQty + (item['quantity'] as int)},
         where: 'product_id = ?',
         whereArgs: [productId],
       );
-    } else {
-      return await db.insert('cart_items', item);
+
+      if (existing.isNotEmpty) {
+        int currentQty = existing.first['quantity'] as int;
+        res = await db.update(
+          'cart_items',
+          {'quantity': currentQty + (item['quantity'] as int)},
+          where: 'product_id = ?',
+          whereArgs: [productId],
+        );
+      } else {
+        res = await db.insert('cart_items', item);
+      }
     }
+    await refreshCartNotifier();
+    return res;
   }
 
   Future<List<Map<String, dynamic>>> getCartItems() async {
@@ -182,6 +257,7 @@ class DatabaseHelper {
   }
 
   Future<int> updateCartQuantity(int id, int quantity) async {
+    int res = 0;
     if (_useInMemory) {
       if (quantity <= 0) {
         _webCart.removeWhere((c) => c['id'] == id);
@@ -189,36 +265,48 @@ class DatabaseHelper {
         final idx = _webCart.indexWhere((c) => c['id'] == id);
         if (idx != -1) _webCart[idx]['quantity'] = quantity;
       }
-      return 1;
+      res = 1;
+    } else {
+      final db = await database;
+      if (quantity <= 0) {
+        res = await db.delete('cart_items', where: 'id = ?', whereArgs: [id]);
+      } else {
+        res = await db.update(
+          'cart_items',
+          {'quantity': quantity},
+          where: 'id = ?',
+          whereArgs: [id],
+        );
+      }
     }
-    final db = await database;
-    if (quantity <= 0) {
-      return await db.delete('cart_items', where: 'id = ?', whereArgs: [id]);
-    }
-    return await db.update(
-      'cart_items',
-      {'quantity': quantity},
-      where: 'id = ?',
-      whereArgs: [id],
-    );
+    await refreshCartNotifier();
+    return res;
   }
 
   Future<int> deleteCartItem(int id) async {
+    int res = 0;
     if (_useInMemory) {
       _webCart.removeWhere((c) => c['id'] == id);
-      return 1;
+      res = 1;
+    } else {
+      final db = await database;
+      res = await db.delete('cart_items', where: 'id = ?', whereArgs: [id]);
     }
-    final db = await database;
-    return await db.delete('cart_items', where: 'id = ?', whereArgs: [id]);
+    await refreshCartNotifier();
+    return res;
   }
 
   Future<int> clearCart() async {
+    int res = 0;
     if (_useInMemory) {
       _webCart.clear();
-      return 1;
+      res = 1;
+    } else {
+      final db = await database;
+      res = await db.delete('cart_items');
     }
-    final db = await database;
-    return await db.delete('cart_items');
+    await refreshCartNotifier();
+    return res;
   }
 
   /// Lưu đơn hàng ngoại tuyến vào hàng đợi (is_synced = 0).
