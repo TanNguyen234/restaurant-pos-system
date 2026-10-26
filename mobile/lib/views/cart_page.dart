@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../utils/database_helper.dart';
+import 'order/order_checkout_page.dart';
 
 class CartPage extends StatefulWidget {
   const CartPage({super.key});
@@ -17,10 +18,23 @@ class _CartPageState extends State<CartPage> {
   double _totalAmount = 0.0;
   bool _isLoading = true;
 
+  int get _totalQty => _cartItems.fold<int>(0, (sum, item) => sum + ((item['quantity'] as int?) ?? 1));
+
   @override
   void initState() {
     super.initState();
     _loadCart();
+    _dbHelper.cartCountNotifier.addListener(_onCartNotifierChanged);
+  }
+
+  void _onCartNotifierChanged() {
+    if (mounted) _loadCart();
+  }
+
+  @override
+  void dispose() {
+    _dbHelper.cartCountNotifier.removeListener(_onCartNotifierChanged);
+    super.dispose();
   }
 
   Future<void> _loadCart() async {
@@ -106,104 +120,15 @@ class _CartPageState extends State<CartPage> {
     );
   }
 
-  void _proceedToCheckout() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 24,
-          bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Text(
-                  'Xác nhận đặt món F&B',
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
-                ),
-                IconButton(
-                  icon: const Icon(Icons.close),
-                  onPressed: () => Navigator.pop(ctx),
-                ),
-              ],
-            ),
-            const Divider(),
-            const SizedBox(height: 8),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.restaurant, color: Color(0xFF0F172A)),
-              ),
-              title: const Text('Hình thức phục vụ', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: const Text('Dùng tại bàn / Mang về'),
-              trailing: const Chip(
-                label: Text('Dùng tại bàn', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
-                backgroundColor: Color(0xFF0F172A),
-              ),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Icon(Icons.receipt_long, color: Color(0xFF0F172A)),
-              ),
-              title: const Text('Tổng cộng thanh toán', style: TextStyle(fontWeight: FontWeight.w600)),
-              subtitle: Text('${_cartItems.length} loại món ăn'),
-              trailing: Text(
-                _currencyFormat.format(_totalAmount),
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFFEF4444)),
-              ),
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              height: 50,
-              child: ElevatedButton.icon(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F172A),
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  elevation: 2,
-                ),
-                icon: const Icon(Icons.check_circle_outline, color: Color(0xFFF59E0B)),
-                label: const Text(
-                  'GỬI ĐƠN XUỐNG BẾP & THANH TOÁN',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                ),
-                onPressed: () {
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Đơn hàng đã được lưu và gửi tới hệ thống order!'),
-                      backgroundColor: Color(0xFF10B981),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
+  Future<void> _proceedToCheckout() async {
+    if (_cartItems.isEmpty) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const OrderCheckoutPage()),
     );
+    if (mounted) {
+      await _loadCart();
+    }
   }
 
   @override
@@ -289,7 +214,11 @@ class _CartPageState extends State<CartPage> {
               ),
               icon: const Icon(Icons.restaurant_menu, color: Color(0xFFF59E0B)),
               label: const Text('KHÁM PHÁ THỰC ĐƠN', style: TextStyle(fontWeight: FontWeight.bold)),
-              onPressed: () => Navigator.pop(context),
+              onPressed: () {
+                if (Navigator.canPop(context)) {
+                  Navigator.pop(context);
+                }
+              },
             ),
           ],
         ),
@@ -497,13 +426,23 @@ class _CartPageState extends State<CartPage> {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                const Text(
-                  'Tổng thanh toán:',
-                  style: TextStyle(
-                    fontSize: 15,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF64748B),
-                  ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Tổng thanh toán:',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF64748B),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '$_totalQty phần (${_cartItems.length} loại món)',
+                      style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8)),
+                    ),
+                  ],
                 ),
                 Text(
                   _currencyFormat.format(_totalAmount),
@@ -531,7 +470,7 @@ class _CartPageState extends State<CartPage> {
                   'TIẾN HÀNH ĐẶT MÓN',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    fontSize: 15,
+                    fontSize: 14,
                     letterSpacing: 0.5,
                   ),
                 ),

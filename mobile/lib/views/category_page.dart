@@ -218,8 +218,12 @@ class _CategoryPageState extends State<CategoryPage> {
                             ),
                           ],
                         ),
-                        child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        child: Material(
+                          color: Colors.transparent,
+                          borderRadius: BorderRadius.circular(16),
+                          clipBehavior: Clip.antiAlias,
+                          child: ListTile(
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           leading: Container(
                             width: 48,
                             height: 48,
@@ -258,12 +262,13 @@ class _CategoryPageState extends State<CategoryPage> {
                             size: 14,
                             color: Color(0xFF94A3B8),
                           ),
-                          onTap: () {
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(builder: (context) => const HomePage()),
-                            ).then((_) => _loadCartCount());
-                          },
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (context) => const HomePage()),
+                              ).then((_) => _loadCartCount());
+                            },
+                          ),
                         ),
                       );
                     }),

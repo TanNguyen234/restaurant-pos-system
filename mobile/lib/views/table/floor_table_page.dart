@@ -3,6 +3,7 @@ import '../../models/area.dart';
 import '../../models/dining_table.dart';
 import '../../repositories/table_repository.dart';
 import '../../services/offline_sync_service.dart';
+import '../order/order_checkout_page.dart';
 
 class FloorTablePage extends StatefulWidget {
   const FloorTablePage({super.key});
@@ -383,6 +384,25 @@ class _FloorTablePageState extends State<FloorTablePage>
                 const SizedBox(height: 16),
                 const Divider(height: 1, color: Color(0xFFF1F5F9)),
                 const SizedBox(height: 12),
+                _buildActionTile(
+                  icon: Icons.restaurant_menu_rounded,
+                  iconColor: const Color(0xFF059669),
+                  iconBg: const Color(0xFFECFDF5),
+                  title: 'Gọi món / Đặt món cho bàn',
+                  subtitle: 'Tạo đơn hàng F&B cho ${table.name}',
+                  onTap: () {
+                    Navigator.pop(bottomSheetCtx);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => OrderCheckoutPage(
+                          preSelectedTableId: table.id,
+                          preSelectedTableName: table.name,
+                        ),
+                      ),
+                    );
+                  },
+                ),
                 _buildActionTile(
                   icon: Icons.tune_rounded,
                   iconColor: const Color(0xFF0284C7),

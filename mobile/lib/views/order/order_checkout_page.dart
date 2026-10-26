@@ -233,6 +233,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                           if (_orderType == 1) ...[
                             const SizedBox(height: 16),
                             DropdownButtonFormField<int>(
+                              isExpanded: true,
                               initialValue: _selectedTableId,
                               decoration: InputDecoration(
                                 labelText: 'Chọn bàn phục vụ',
@@ -404,9 +405,11 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text(
-                                'Tổng cộng thanh toán:',
-                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                              const Expanded(
+                                child: Text(
+                                  'Tổng cộng thanh toán:',
+                                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                                ),
                               ),
                               Text(
                                 currencyFormatter.format(_finalAmount),

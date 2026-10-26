@@ -1,4 +1,4 @@
-import 'dart:async';
+﻿import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/order.dart';
@@ -15,6 +15,7 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
   final _orderRepo = OrderRepository();
   List<KdsItemModel> _items = [];
   bool _isLoading = true;
+  String? _errorMessage;
   Timer? _refreshTimer;
   int _selectedFilterStatus = 0; // 0: Chờ nấu, 1: Đang nấu, 2: Đã xong, -1: Tất cả
 
@@ -36,16 +37,28 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
 
   Future<void> _loadKdsItems({bool showSpinner = true}) async {
     if (showSpinner) {
-      setState(() => _isLoading = true);
+      setState(() {
+        _isLoading = true;
+        _errorMessage = null;
+      });
     }
 
-    final items = await _orderRepo.getKdsActiveItems();
-    if (!mounted) return;
+    try {
+      final items = await _orderRepo.getKdsActiveItems();
+      if (!mounted) return;
 
-    setState(() {
-      _items = items;
-      _isLoading = false;
-    });
+      setState(() {
+        _items = items;
+        _isLoading = false;
+        _errorMessage = null;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Không thể kết nối máy chủ Bếp KDS ()';
+      });
+    }
   }
 
   Future<void> _updateCookingStatus(int orderDetailId, int newStatus) async {
@@ -86,9 +99,12 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
           children: [
             Icon(Icons.kitchen_rounded, color: Color(0xFFF59E0B)),
             SizedBox(width: 8),
-            Text(
-              'Màn hình Bếp & Pha chế (KDS)',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+            Expanded(
+              child: Text(
+                'Màn hình Bếp & Pha chế (KDS)',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+                overflow: TextOverflow.ellipsis,
+              ),
             ),
           ],
         ),
@@ -143,7 +159,32 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator(color: Color(0xFFF59E0B)))
-                : filtered.isEmpty
+                : (_errorMessage != null && _items.isEmpty)
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.cloud_off_rounded, size: 54, color: Color(0xFFF59E0B)),
+                            const SizedBox(height: 14),
+                            Text(
+                              _errorMessage!,
+                              textAlign: TextAlign.center,
+                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 14),
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFFF59E0B),
+                                foregroundColor: const Color(0xFF0F172A),
+                              ),
+                              onPressed: () => _loadKdsItems(showSpinner: true),
+                              icon: const Icon(Icons.refresh),
+                              label: const Text('Thử lại', style: TextStyle(fontWeight: FontWeight.bold)),
+                            ),
+                          ],
+                        ),
+                      )
+                    : filtered.isEmpty
                     ? Center(
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -167,7 +208,7 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
                         child: GridView.builder(
                           padding: const EdgeInsets.all(16),
                           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                            maxCrossAxisExtent: 380,
+                            maxCrossAxisExtent: 480,
                             mainAxisExtent: 220,
                             crossAxisSpacing: 16,
                             mainAxisSpacing: 16,
@@ -200,19 +241,23 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
                                     Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                       children: [
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                          decoration: BoxDecoration(
-                                            color: const Color(0xFF0F172A),
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: const Color(0xFF475569)),
-                                          ),
-                                          child: Text(
-                                            item.tableName,
-                                            style: const TextStyle(
-                                              color: Colors.white,
-                                              fontWeight: FontWeight.bold,
-                                              fontSize: 13,
+                                        Flexible(
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF0F172A),
+                                              borderRadius: BorderRadius.circular(8),
+                                              border: Border.all(color: const Color(0xFF475569)),
+                                            ),
+                                            child: Text(
+                                              item.tableName,
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 13,
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ),
                                         ),
@@ -398,3 +443,4 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
     );
   }
 }
+

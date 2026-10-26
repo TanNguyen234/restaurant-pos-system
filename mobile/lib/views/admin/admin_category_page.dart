@@ -199,7 +199,6 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
         ),
       );
     } else {
-      // Hiển thị dialog cảnh báo ràng buộc toàn vẹn khi danh mục còn sản phẩm
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
@@ -261,7 +260,7 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
               : RefreshIndicator(
                   onRefresh: _loadCategories,
                   child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 80),
                     itemCount: _categories.length,
                     itemBuilder: (context, index) {
                       final item = _categories[index];
@@ -275,10 +274,10 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
                           ],
                         ),
                         child: ListTile(
-                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                           leading: Container(
-                            width: 48,
-                            height: 48,
+                            width: 44,
+                            height: 44,
                             decoration: BoxDecoration(
                               color: const Color(0xFF0F172A).withValues(alpha: 0.06),
                               borderRadius: BorderRadius.circular(12),
@@ -289,9 +288,13 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
                           ),
                           title: Row(
                             children: [
-                              Text(
-                                item.name,
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                              Expanded(
+                                child: Text(
+                                  item.name,
+                                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
                               const SizedBox(width: 8),
                               Container(
@@ -317,13 +320,18 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               IconButton(
-                                icon: const Icon(Icons.edit_outlined, color: Color(0xFF2563EB)),
+                                icon: const Icon(Icons.edit_outlined, color: Color(0xFF2563EB), size: 20),
                                 tooltip: 'Chỉnh sửa',
+                                padding: const EdgeInsets.all(6),
+                                constraints: const BoxConstraints(),
                                 onPressed: () => _showCategoryFormDialog(category: item),
                               ),
+                              const SizedBox(width: 4),
                               IconButton(
-                                icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444)),
+                                icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444), size: 20),
                                 tooltip: 'Xóa danh mục',
+                                padding: const EdgeInsets.all(6),
+                                constraints: const BoxConstraints(),
                                 onPressed: () => _deleteCategory(item),
                               ),
                             ],
