@@ -95,3 +95,22 @@ public class RoleDto
     public string RoleCode { get; set; } = null!;
     public string? Description { get; set; }
 }
+
+public class RequestOtpDto
+{
+    public string? Email { get; set; }
+    public string? Username { get; set; }
+}
+
+public class ResetPasswordOtpDto
+{
+    [Required]
+    public string Identity { get; set; } = null!;
+
+    [Required]
+    public string Otp { get; set; } = null!;
+
+    [Required]
+    [MinLength(6)]
+    public string NewPassword { get; set; } = null!;
+}

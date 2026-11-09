@@ -180,6 +180,61 @@ CREATE TABLE Payments (
 );
 GO
 
+-- 11. BẢNG CHI TIẾT TÙY CHỌN MÓN ĂN & TOPPING (ORDER DETAIL MODIFIERS)
+CREATE TABLE OrderDetailModifiers (
+    Id INT IDENTITY(1,1) PRIMARY KEY,
+    OrderDetailId INT NOT NULL CONSTRAINT FK_OrderDetailModifiers_OrderDetails REFERENCES OrderDetails(OrderDetailId) ON DELETE CASCADE,
+    ModifierName NVARCHAR(100) NOT NULL,
+    ExtraPrice DECIMAL(18,0) NOT NULL DEFAULT 0
+);
+GO
+
+-- 12. BẢNG QUẢN LÝ CA LÀM VIỆC & KÉT TIỀN (SHIFTS & CASH REGISTER)
+CREATE TABLE Shifts (
+    ShiftId INT IDENTITY(1,1) PRIMARY KEY,
+    AccountId INT NOT NULL CONSTRAINT FK_Shifts_Accounts REFERENCES Accounts(AccountId),
+    StartTime DATETIME NOT NULL DEFAULT GETDATE(),
+    EndTime DATETIME NULL,
+    InitialCash DECIMAL(18,0) NOT NULL DEFAULT 0,
+    TotalCash DECIMAL(18,0) NOT NULL DEFAULT 0,
+    TotalCard DECIMAL(18,0) NOT NULL DEFAULT 0,
+    TotalTransfer DECIMAL(18,0) NOT NULL DEFAULT 0,
+    Discrepancy DECIMAL(18,0) NOT NULL DEFAULT 0,
+    Status INT NOT NULL DEFAULT 1, -- 1: Open, 2: Closed
+    Note NVARCHAR(255) NULL,
+    ZReportJson NVARCHAR(MAX) NULL
+);
+GO
+
+-- 13. BẢNG ĐẶT BÀN TRƯỚC (RESERVATIONS)
+CREATE TABLE Reservations (
+    ReservationId INT IDENTITY(1,1) PRIMARY KEY,
+    TableId INT NOT NULL CONSTRAINT FK_Reservations_DiningTables REFERENCES DiningTables(TableId),
+    CustomerName NVARCHAR(100) NOT NULL,
+    PhoneNumber VARCHAR(20) NOT NULL,
+    GuestCount INT NOT NULL DEFAULT 2,
+    ArrivalTime DATETIME NOT NULL,
+    DepositAmount DECIMAL(18,0) NOT NULL DEFAULT 0,
+    Note NVARCHAR(255) NULL,
+    Status INT NOT NULL DEFAULT 0, -- 0: Pending, 1: Confirmed, 2: CheckedIn, 3: Cancelled
+    CreatedAt DATETIME NOT NULL DEFAULT GETDATE()
+);
+GO
+
+-- 14. BẢNG KHUYẾN MÃI & MÃ GIẢM GIÁ (DISCOUNTS & VOUCHERS)
+CREATE TABLE Discounts (
+    DiscountId INT IDENTITY(1,1) PRIMARY KEY,
+    Code VARCHAR(50) NOT NULL UNIQUE,
+    Title NVARCHAR(100) NOT NULL,
+    DiscountPercent DECIMAL(5,2) NOT NULL DEFAULT 0,
+    DiscountAmount DECIMAL(18,0) NOT NULL DEFAULT 0,
+    MinOrderAmount DECIMAL(18,0) NOT NULL DEFAULT 0,
+    MaxDiscountAmount DECIMAL(18,0) NOT NULL DEFAULT 0,
+    ExpiryDate DATETIME NULL,
+    IsActive BIT NOT NULL DEFAULT 1
+);
+GO
+
 -- TẠO CHỈ MỤC TỐI ƯU HIỆU NĂNG TÌM KIẾM VÀ PHÂN TRANG (INDEXES)
 CREATE NONCLUSTERED INDEX IX_Products_CategoryId ON Products(CategoryId);
 CREATE NONCLUSTERED INDEX IX_Products_ProductName ON Products(ProductName);
@@ -187,6 +242,12 @@ CREATE NONCLUSTERED INDEX IX_Orders_OrderCode ON Orders(OrderCode);
 CREATE NONCLUSTERED INDEX IX_Orders_CreatedAt ON Orders(CreatedAt);
 CREATE NONCLUSTERED INDEX IX_OrderDetails_OrderId ON OrderDetails(OrderId);
 CREATE NONCLUSTERED INDEX IX_DiningTables_AreaId ON DiningTables(AreaId);
+CREATE NONCLUSTERED INDEX IX_OrderDetailModifiers_OrderDetailId ON OrderDetailModifiers(OrderDetailId);
+CREATE NONCLUSTERED INDEX IX_Shifts_AccountId ON Shifts(AccountId);
+CREATE NONCLUSTERED INDEX IX_Shifts_Status ON Shifts(Status);
+CREATE NONCLUSTERED INDEX IX_Reservations_TableId ON Reservations(TableId);
+CREATE NONCLUSTERED INDEX IX_Reservations_ArrivalTime ON Reservations(ArrivalTime);
+CREATE NONCLUSTERED INDEX IX_Discounts_Code ON Discounts(Code);
 GO
 
 -- ======================================================================================

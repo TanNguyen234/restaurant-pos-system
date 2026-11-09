@@ -217,4 +217,21 @@ public class AccountRepository : BaseRepository
             })
             .ToListAsync();
     }
+
+    public async Task<Account?> GetByEmailAsync(string email)
+    {
+        return await context.Accounts
+            .FirstOrDefaultAsync(a => a.Email != null && a.Email.ToLower() == email.ToLower());
+    }
+
+    public async Task<(bool Success, string Message)> ResetPasswordAsync(int accountId, string newPassword)
+    {
+        var account = await context.Accounts.FindAsync(accountId);
+        if (account == null) return (false, "Tài khoản không tồn tại");
+
+        account.PasswordHash = PasswordHasher.HashPassword(newPassword);
+        account.UpdatedAt = DateTime.Now;
+        await context.SaveChangesAsync();
+        return (true, "Đặt lại mật khẩu mới thành công");
+    }
 }

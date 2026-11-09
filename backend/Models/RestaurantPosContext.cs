@@ -18,7 +18,10 @@ public class RestaurantPosContext : DbContext
     public DbSet<Order> Orders { get; set; } = null!;
     public DbSet<OrderDetail> OrderDetails { get; set; } = null!;
     public DbSet<Payment> Payments { get; set; } = null!;
-    public DbSet<OrderDetailModifier>? OrderDetailModifiers { get; set; }
+    public DbSet<OrderDetailModifier> OrderDetailModifiers { get; set; } = null!;
+    public DbSet<Shift> Shifts { get; set; } = null!;
+    public DbSet<Reservation> Reservations { get; set; } = null!;
+    public DbSet<Discount> Discounts { get; set; } = null!;
 }
 
 [Table("Roles")]
@@ -188,3 +191,53 @@ public class OrderDetailModifier
     public string ModifierName { get; set; } = null!;
     public decimal ExtraPrice { get; set; } = 0;
 }
+
+[Table("Shifts")]
+public class Shift
+{
+    [Key]
+    public int ShiftId { get; set; }
+    public int AccountId { get; set; }
+    public DateTime StartTime { get; set; } = DateTime.Now;
+    public DateTime? EndTime { get; set; }
+    public decimal InitialCash { get; set; } = 0;
+    public decimal TotalCash { get; set; } = 0;
+    public decimal TotalCard { get; set; } = 0;
+    public decimal TotalTransfer { get; set; } = 0;
+    public decimal Discrepancy { get; set; } = 0;
+    public int Status { get; set; } = 1; // 1: Open, 2: Closed
+    public string? Note { get; set; }
+    public string? ZReportJson { get; set; }
+}
+
+[Table("Reservations")]
+public class Reservation
+{
+    [Key]
+    public int ReservationId { get; set; }
+    public int TableId { get; set; }
+    public string CustomerName { get; set; } = null!;
+    public string PhoneNumber { get; set; } = null!;
+    public int GuestCount { get; set; } = 2;
+    public DateTime ArrivalTime { get; set; }
+    public decimal DepositAmount { get; set; } = 0;
+    public string? Note { get; set; }
+    public int Status { get; set; } = 0; // 0: Pending, 1: Confirmed, 2: CheckedIn, 3: Cancelled
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+}
+
+[Table("Discounts")]
+public class Discount
+{
+    [Key]
+    public int DiscountId { get; set; }
+    public string Code { get; set; } = null!;
+    public string Title { get; set; } = null!;
+    public decimal DiscountPercent { get; set; } = 0;
+    public decimal DiscountAmount { get; set; } = 0;
+    public decimal MinOrderAmount { get; set; } = 0;
+    public decimal MaxDiscountAmount { get; set; } = 0;
+    public DateTime? ExpiryDate { get; set; }
+    public bool IsActive { get; set; } = true;
+}
+

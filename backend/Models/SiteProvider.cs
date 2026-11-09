@@ -21,4 +21,10 @@ public class SiteProvider : BaseProvider
 
     PaymentRepository? payment;
     public PaymentRepository Payment => payment ??= new PaymentRepository(Context);
+
+    ShiftRepository? shift;
+    public ShiftRepository Shift => shift ??= new ShiftRepository(Context);
+
+    DiscountRepository? discount;
+    public DiscountRepository Discount => discount ??= new DiscountRepository(Context);
 }

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
 
@@ -12,6 +13,7 @@ public class OrderController : BaseController
     /// Creates a new order or processes an offline order sync with server-calculated totals.
     /// </summary>
     [HttpPost]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
     public async Task<IActionResult> CreateOrder([FromBody] CreateOrderDto dto)
     {
         if (dto == null)
@@ -45,6 +47,7 @@ public class OrderController : BaseController
     /// Retrieves order management list for Admin & Cashier with date, status, and search filters.
     /// </summary>
     [HttpGet("admin")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
     public async Task<IActionResult> GetAdminOrders(
         [FromQuery] DateTime? fromDate,
         [FromQuery] DateTime? toDate,
@@ -67,6 +70,7 @@ public class OrderController : BaseController
     /// Retrieves list of orders with optional status, date-range, and keyword filters.
     /// </summary>
     [HttpGet]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public async Task<IActionResult> GetOrders(
         [FromQuery] int? status = null,
         [FromQuery] DateTime? fromDate = null,
@@ -82,6 +86,7 @@ public class OrderController : BaseController
     /// Retrieves single order details including table name and itemized list.
     /// </summary>
     [HttpGet("{id:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
     public async Task<IActionResult> GetOrderById(int id)
     {
         var order = await Provider.Order.GetOrderByIdAsync(id);
@@ -97,6 +102,7 @@ public class OrderController : BaseController
     /// Updates order status (0: New, 1: Cooking, 2: Served, 3: Completed, 4: Cancelled).
     /// </summary>
     [HttpPut("{id:int}/status")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdateStatusDto dto)
     {
         var result = await Provider.Order.UpdateOrderStatusAsync(id, dto.Status);
@@ -127,6 +133,34 @@ public class OrderController : BaseController
 
         var order = await Provider.Order.GetOrderByIdAsync(table.CurrentOrderId.Value);
         return Ok(new { statusCode = 200, hasActiveOrder = true, data = order });
+    }
+
+    /// <summary>
+    /// POST /api/order/{id}/add-items
+    /// Thêm món ăn vào đơn hàng đang phục vụ
+    /// </summary>
+    [HttpPost("{id:int}/add-items")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public async Task<IActionResult> AddItems(int id, [FromBody] List<CreateOrderItemDto> items)
+    {
+        if (items == null || items.Count == 0)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = "Vui lòng chọn ít nhất 1 món để thêm vào đơn" });
+        }
+
+        var result = await Provider.Order.AddItemsToOrderAsync(id, items);
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = result.Message,
+            data = result.Order
+        });
     }
 }
 

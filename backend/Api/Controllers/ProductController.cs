@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
 using WebApi.Services;
@@ -63,6 +64,7 @@ public class ProductController : BaseController
     /// GET /api/product/category/{categoryId}?page=1&pageSize=10
     /// </summary>
     [HttpGet("category/{categoryId:int}")]
+    [HttpGet("by-category/{categoryId:int}")]
     public async Task<IActionResult> GetByCategory(short categoryId, [FromQuery] int page = 1, [FromQuery] int pageSize = 10)
     {
         var result = await Provider.Product.GetByCategoryAsync(categoryId, page, pageSize);
@@ -104,6 +106,7 @@ public class ProductController : BaseController
     /// Creates a new product with support for single or multiple images.
     /// </summary>
     [HttpPost]
+    [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> Post([FromForm] Product obj, IFormFile? file, [FromForm] List<IFormFile>? files)
     {
         if (string.IsNullOrWhiteSpace(obj.ProductName))
@@ -165,6 +168,7 @@ public class ProductController : BaseController
     /// Updates product with support for single or multiple images.
     /// </summary>
     [HttpPut("{id:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> Put(int id, [FromForm] Product obj, IFormFile? file, [FromForm] List<IFormFile>? files)
     {
         var existing = await Provider.Product.GetByIdAsync(id);
@@ -259,6 +263,7 @@ public class ProductController : BaseController
     /// Uploads multiple images and appends them to the product gallery.
     /// </summary>
     [HttpPost("{id:int}/upload-images")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> UploadImages(int id, [FromForm] List<IFormFile> files)
     {
         var existing = await Provider.Product.GetByIdAsync(id);
@@ -312,6 +317,7 @@ public class ProductController : BaseController
     /// Removes a specific image from product gallery and deletes physical file from disk.
     /// </summary>
     [HttpDelete("{id:int}/images")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> DeleteProductImage(int id, [FromQuery] string imageName)
     {
         var existing = await Provider.Product.GetByIdAsync(id);
@@ -359,6 +365,7 @@ public class ProductController : BaseController
     /// Deletes product only if not referenced in any historical order. Cleans up all images from disk.
     /// </summary>
     [HttpDelete("{id:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> Delete(int id)
     {
         bool hasOrders = await Provider.Product.HasOrdersAsync(id);

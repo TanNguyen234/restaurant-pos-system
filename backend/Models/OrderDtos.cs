@@ -1,10 +1,17 @@
 namespace WebApi.Models;
 
+public class OrderItemModifierDto
+{
+    public string ModifierName { get; set; } = string.Empty;
+    public decimal ExtraPrice { get; set; } = 0;
+}
+
 public class CreateOrderItemDto
 {
     public int ProductId { get; set; }
     public int Quantity { get; set; }
     public string? ItemNote { get; set; }
+    public List<OrderItemModifierDto>? Modifiers { get; set; }
 }
 
 public class CreateOrderDto
@@ -17,6 +24,7 @@ public class CreateOrderDto
     public string? PhoneNumber { get; set; }
     public int OrderType { get; set; } = 1; // 1: DineIn, 2: Takeaway, 3: Delivery
     public string? Note { get; set; }
+    public string? DiscountCode { get; set; }
     public decimal? TotalAmount { get; set; }
     public List<CreateOrderItemDto> Items { get; set; } = new();
     public DateTime? CreatedAt { get; set; }
@@ -42,6 +50,7 @@ public class OrderDetailDto
     };
     public DateTime? StartedCookingAt { get; set; }
     public DateTime? FinishedCookingAt { get; set; }
+    public List<OrderItemModifierDto> Modifiers { get; set; } = new();
 }
 
 public class OrderDto

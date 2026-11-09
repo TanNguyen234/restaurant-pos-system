@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
 using WebApi.Services;
@@ -9,12 +10,14 @@ namespace WebApi.Api.Controllers;
 public class CategoryController : BaseController
 {
     [HttpGet]
+    [AllowAnonymous]
     public IEnumerable<Category> GetCategories()
     {
         return Provider.Category.GetCategories();
     }
 
     [HttpGet("{id}")]
+    [AllowAnonymous]
     public IActionResult GetById(short id)
     {
         var item = Provider.Category.GetById(id);
@@ -23,6 +26,7 @@ public class CategoryController : BaseController
     }
 
     [HttpPost]
+    [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> Post([FromForm] Category obj, IFormFile? file)
     {
         if (ModelState.IsValid)
@@ -47,6 +51,7 @@ public class CategoryController : BaseController
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> Put(short id, [FromForm] Category obj, IFormFile? file)
     {
         var existing = Provider.Category.GetById(id);
@@ -74,6 +79,7 @@ public class CategoryController : BaseController
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
     public IActionResult Delete(short id)
     {
         // Kiểm tra ràng buộc: nếu còn sản phẩm thì chặn xóa

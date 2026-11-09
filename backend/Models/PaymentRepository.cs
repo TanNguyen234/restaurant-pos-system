@@ -128,9 +128,9 @@ public class PaymentRepository : BaseRepository
             return (false, "Không tìm thấy đơn hàng", null);
         }
 
-        string bankId = "vietinbank";
-        string accountNo = "102871234567";
-        string accountName = "NHA HANG POS SYSTEM";
+        string bankId = Environment.GetEnvironmentVariable("VIETQR_BANK_ID") ?? "vietinbank";
+        string accountNo = Environment.GetEnvironmentVariable("VIETQR_ACCOUNT_NO") ?? "102871234567";
+        string accountName = Environment.GetEnvironmentVariable("VIETQR_ACCOUNT_NAME") ?? "NHA HANG POS SYSTEM";
         string transferContent = order.OrderCode;
         long amountInt = (long)order.FinalAmount;
 

@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
 
@@ -19,6 +20,7 @@ public class PaymentController : BaseController
     /// Processes cash payment confirmation at cashier desk. Marks order paid and releases table.
     /// </summary>
     [HttpPost("cash")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
     public async Task<IActionResult> ProcessCashPayment([FromBody] CashPaymentRequestDto dto)
     {
         if (dto == null || dto.OrderId <= 0)
@@ -47,6 +49,7 @@ public class PaymentController : BaseController
     /// Confirms payment across all methods (Cash, VietQR, VNPay) for Flutter mobile client.
     /// </summary>
     [HttpPost("confirm")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
     public async Task<IActionResult> ConfirmPayment([FromBody] ConfirmPaymentRequestDto dto)
     {
         if (dto == null || dto.OrderId <= 0)
@@ -75,6 +78,7 @@ public class PaymentController : BaseController
     /// Generates dynamic VietQR image link and payment transfer details for customer scanning.
     /// </summary>
     [HttpGet("vietqr/{orderId:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
     public async Task<IActionResult> GenerateVietQr(int orderId)
     {
         var result = await Provider.Payment.GenerateVietQrAsync(orderId);
@@ -97,12 +101,13 @@ public class PaymentController : BaseController
     /// Creates signed VNPay Sandbox payment redirect URL with HMAC-SHA512 checksum.
     /// </summary>
     [HttpPost("vnpay/create-url")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
     public async Task<IActionResult> CreateVnPayUrl([FromBody] VnPayUrlRequestDto dto)
     {
-        string tmnCode = _configuration["VNPay:TmnCode"] ?? "SANDBOX_TMNCODE";
-        string hashSecret = _configuration["VNPay:HashSecret"] ?? "SANDBOX_HASH_SECRET_KEY_FOR_TESTING_PURPOSES";
-        string vnpUrl = _configuration["VNPay:Url"] ?? "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
-        string returnUrl = _configuration["VNPay:ReturnUrl"] ?? dto.ReturnUrl ?? "http://localhost:5138/api/payment/vnpay/callback";
+        string tmnCode = _configuration["VNPay:TmnCode"] ?? _configuration["VNP_TMN_CODE"] ?? "L5GXH1AU";
+        string hashSecret = _configuration["VNPay:HashSecret"] ?? _configuration["VNP_HASH_SECRET"] ?? "EVCHM01XP0U7PT31IRMOJKC2IXRV2DW7";
+        string vnpUrl = _configuration["VNPay:Url"] ?? _configuration["VNP_URL"] ?? "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
+        string returnUrl = _configuration["VNPay:ReturnUrl"] ?? _configuration["VNP_RETURN_URL"] ?? dto.ReturnUrl ?? "http://localhost:5138/api/payment/vnpay/callback";
 
         string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
 
@@ -139,7 +144,7 @@ public class PaymentController : BaseController
     [HttpGet("vnpay/callback")]
     public async Task<IActionResult> VnPayCallback()
     {
-        string hashSecret = _configuration["VNPay:HashSecret"] ?? "SANDBOX_HASH_SECRET_KEY_FOR_TESTING_PURPOSES";
+        string hashSecret = _configuration["VNPay:HashSecret"] ?? _configuration["VNP_HASH_SECRET"] ?? "EVCHM01XP0U7PT31IRMOJKC2IXRV2DW7";
         var queryParams = Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
 
         var result = await Provider.Payment.ProcessVnPayCallbackAsync(queryParams, hashSecret);

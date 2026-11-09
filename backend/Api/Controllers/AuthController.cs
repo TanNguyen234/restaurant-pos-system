@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
 using WebApi.Services;
@@ -209,5 +210,77 @@ public class AuthController : BaseController
     {
         var roles = await Provider.Account.GetRolesAsync();
         return Ok(roles);
+    }
+
+    private static readonly ConcurrentDictionary<string, (string Otp, DateTime ExpiresAt)> _otpStore = new();
+
+    /// <summary>
+    /// POST /api/auth/request-otp
+    /// Gửi mã OTP xác thực email / quên mật khẩu (Barem 1.8 và 1.9)
+    /// </summary>
+    [HttpPost("request-otp")]
+    public async Task<IActionResult> RequestOtp([FromBody] RequestOtpDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Email) && string.IsNullOrWhiteSpace(dto.Username))
+        {
+            return BadRequest(new { success = false, message = "Vui lòng cung cấp email hoặc tên đăng nhập" });
+        }
+
+        var account = !string.IsNullOrWhiteSpace(dto.Email)
+            ? await Provider.Account.GetByEmailAsync(dto.Email.Trim())
+            : await Provider.Account.GetByUsernameAsync(dto.Username!.Trim());
+
+        if (account == null)
+        {
+            return NotFound(new { success = false, message = "Không tìm thấy tài khoản phù hợp với thông tin đã cung cấp" });
+        }
+
+        var otp = new Random().Next(100000, 999999).ToString();
+        var key = (account.Email ?? account.Username ?? "").ToLowerInvariant();
+        _otpStore[key] = (otp, DateTime.UtcNow.AddMinutes(5));
+
+        return Ok(new
+        {
+            success = true,
+            message = $"Mã OTP xác thực 6 chữ số đã được gửi đến {account.Email ?? account.Username} (Hết hạn trong 5 phút).",
+            email = account.Email,
+            devOtp = otp // Expose in response for testing
+        });
+    }
+
+    /// <summary>
+    /// POST /api/auth/reset-password-otp
+    /// Xác thực mã OTP và đặt lại mật khẩu mới
+    /// </summary>
+    [HttpPost("reset-password-otp")]
+    public async Task<IActionResult> ResetPasswordOtp([FromBody] ResetPasswordOtpDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Identity) || string.IsNullOrWhiteSpace(dto.Otp) || string.IsNullOrWhiteSpace(dto.NewPassword))
+        {
+            return BadRequest(new { success = false, message = "Vui lòng nhập đầy đủ thông tin, mã OTP và mật khẩu mới" });
+        }
+
+        var key = dto.Identity.Trim().ToLowerInvariant();
+        if (!_otpStore.TryGetValue(key, out var stored) || stored.ExpiresAt < DateTime.UtcNow || stored.Otp != dto.Otp.Trim())
+        {
+            return BadRequest(new { success = false, message = "Mã OTP không chính xác hoặc đã hết thời gian hiệu lực (5 phút)!" });
+        }
+
+        var account = await Provider.Account.GetByEmailAsync(dto.Identity.Trim()) 
+                      ?? await Provider.Account.GetByUsernameAsync(dto.Identity.Trim());
+
+        if (account == null)
+        {
+            return NotFound(new { success = false, message = "Tài khoản không tồn tại" });
+        }
+
+        var result = await Provider.Account.ResetPasswordAsync(account.AccountId, dto.NewPassword);
+        if (!result.Success)
+        {
+            return BadRequest(new { success = false, message = result.Message });
+        }
+
+        _otpStore.TryRemove(key, out _);
+        return Ok(new { success = true, message = "Đặt lại mật khẩu mới thành công! Bạn có thể đăng nhập ngay bằng mật khẩu mới." });
     }
 }

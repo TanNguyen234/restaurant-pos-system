@@ -70,7 +70,7 @@ public class OrderRepository : BaseRepository
             .ToDictionaryAsync(p => p.ProductId);
 
         decimal serverTotal = 0;
-        var orderDetailsToCreate = new List<OrderDetail>();
+        var orderDetailsToCreate = new List<(OrderDetail Detail, List<OrderItemModifierDto>? Modifiers)>();
 
         foreach (var item in dto.Items)
         {
@@ -89,11 +89,14 @@ public class OrderRepository : BaseRepository
                 return (false, $"Món '{product.ProductName}' hiện đang tạm hết, không thể đặt", null);
             }
 
-            decimal unitPrice = product.Price;
+            decimal modifierExtra = item.Modifiers != null && item.Modifiers.Count > 0
+                ? item.Modifiers.Sum(m => m.ExtraPrice)
+                : 0;
+            decimal unitPrice = product.Price + modifierExtra;
             decimal subTotal = unitPrice * item.Quantity;
             serverTotal += subTotal;
 
-            orderDetailsToCreate.Add(new OrderDetail
+            var detail = new OrderDetail
             {
                 ProductId = item.ProductId,
                 Quantity = item.Quantity,
@@ -101,7 +104,8 @@ public class OrderRepository : BaseRepository
                 SubTotal = subTotal,
                 ItemNote = item.ItemNote,
                 CookingStatus = 0 // Pending
-            });
+            };
+            orderDetailsToCreate.Add((detail, item.Modifiers));
         }
 
         string orderCode = GenerateOrderCode(dto.OfflineOrderId, dto.TableId);
@@ -109,6 +113,30 @@ public class OrderRepository : BaseRepository
         using var transaction = await context.Database.BeginTransactionAsync();
         try
         {
+            decimal discountAmount = 0;
+            if (!string.IsNullOrWhiteSpace(dto.DiscountCode))
+            {
+                var disc = await context.Discounts
+                    .FirstOrDefaultAsync(d => d.Code.ToUpper() == dto.DiscountCode.Trim().ToUpper() && d.IsActive && (d.ExpiryDate == null || d.ExpiryDate >= DateTime.Now));
+                if (disc != null && serverTotal >= disc.MinOrderAmount)
+                {
+                    if (disc.DiscountAmount > 0)
+                    {
+                        discountAmount = disc.DiscountAmount;
+                    }
+                    else if (disc.DiscountPercent > 0)
+                    {
+                        discountAmount = serverTotal * (disc.DiscountPercent / 100m);
+                        if (disc.MaxDiscountAmount > 0 && discountAmount > disc.MaxDiscountAmount)
+                        {
+                            discountAmount = disc.MaxDiscountAmount;
+                        }
+                    }
+                    discountAmount = Math.Min(discountAmount, serverTotal);
+                }
+            }
+            decimal finalAmount = Math.Max(0, serverTotal - discountAmount);
+
             var order = new Order
             {
                 OrderCode = orderCode,
@@ -119,8 +147,8 @@ public class OrderRepository : BaseRepository
                 OrderType = dto.OrderType,
                 Note = dto.Note,
                 TotalAmount = serverTotal,
-                DiscountAmount = 0,
-                FinalAmount = serverTotal,
+                DiscountAmount = discountAmount,
+                FinalAmount = finalAmount,
                 Status = 0, // New
                 PaymentStatus = 0, // Unpaid
                 CreatedAt = dto.CreatedAt ?? DateTime.Now
@@ -129,12 +157,26 @@ public class OrderRepository : BaseRepository
             context.Orders.Add(order);
             await context.SaveChangesAsync();
 
-            foreach (var detail in orderDetailsToCreate)
+            foreach (var (detail, modifiers) in orderDetailsToCreate)
             {
                 detail.OrderId = order.OrderId;
                 context.OrderDetails.Add(detail);
+                await context.SaveChangesAsync();
+
+                if (modifiers != null && modifiers.Count > 0)
+                {
+                    foreach (var mod in modifiers)
+                    {
+                        context.OrderDetailModifiers.Add(new OrderDetailModifier
+                        {
+                            OrderDetailId = detail.OrderDetailId,
+                            ModifierName = mod.ModifierName,
+                            ExtraPrice = mod.ExtraPrice
+                        });
+                    }
+                    await context.SaveChangesAsync();
+                }
             }
-            await context.SaveChangesAsync();
 
             // Update table status to Occupied (1) if applicable
             if (table != null)
@@ -265,6 +307,23 @@ public class OrderRepository : BaseRepository
                                  StartedCookingAt = d.StartedCookingAt,
                                  FinishedCookingAt = d.FinishedCookingAt
                              }).ToListAsync();
+
+        var detailIds = details.Select(d => d.OrderDetailId).ToList();
+        var allModifiers = await context.OrderDetailModifiers
+            .Where(m => detailIds.Contains(m.OrderDetailId))
+            .ToListAsync();
+
+        foreach (var d in details)
+        {
+            d.Modifiers = allModifiers
+                .Where(m => m.OrderDetailId == d.OrderDetailId)
+                .Select(m => new OrderItemModifierDto
+                {
+                    ModifierName = m.ModifierName,
+                    ExtraPrice = m.ExtraPrice
+                })
+                .ToList();
+        }
 
         return new OrderDto
         {
@@ -402,5 +461,97 @@ public class OrderRepository : BaseRepository
         }
 
         return (true, "Cập nhật trạng thái chế biến món ăn thành công");
+    }
+
+    public async Task<(bool Success, string Message, OrderDto? Order)> AddItemsToOrderAsync(int orderId, List<CreateOrderItemDto> newItems)
+    {
+        if (newItems == null || newItems.Count == 0)
+        {
+            return (false, "Vui lòng chọn ít nhất một món để thêm vào đơn hàng", null);
+        }
+
+        var order = await context.Orders.FindAsync(orderId);
+        if (order == null || order.Status == 3 || order.Status == 4)
+        {
+            return (false, "Không tìm thấy đơn hàng hoặc đơn hàng đã hoàn tất/đã hủy", null);
+        }
+
+        var productIds = newItems.Select(i => i.ProductId).Distinct().ToList();
+        var products = await context.Products
+            .Where(p => productIds.Contains(p.ProductId))
+            .ToDictionaryAsync(p => p.ProductId);
+
+        decimal addedTotal = 0;
+        var detailsToAdd = new List<(OrderDetail Detail, List<OrderItemModifierDto>? Modifiers)>();
+
+        foreach (var item in newItems)
+        {
+            if (item.Quantity <= 0) continue;
+            if (!products.TryGetValue(item.ProductId, out var product))
+            {
+                return (false, $"Món ăn #{item.ProductId} không tồn tại trong thực đơn", null);
+            }
+            if (!product.IsAvailable)
+            {
+                return (false, $"Món '{product.ProductName}' hiện đang tạm hết", null);
+            }
+
+            decimal modExtra = item.Modifiers != null && item.Modifiers.Count > 0 ? item.Modifiers.Sum(m => m.ExtraPrice) : 0;
+            decimal unitPrice = product.Price + modExtra;
+            decimal subTotal = unitPrice * item.Quantity;
+            addedTotal += subTotal;
+
+            var detail = new OrderDetail
+            {
+                OrderId = order.OrderId,
+                ProductId = item.ProductId,
+                Quantity = item.Quantity,
+                UnitPrice = unitPrice,
+                SubTotal = subTotal,
+                ItemNote = string.IsNullOrWhiteSpace(item.ItemNote) ? "[GỌI THÊM]" : $"[GỌI THÊM] {item.ItemNote}",
+                CookingStatus = 0
+            };
+            detailsToAdd.Add((detail, item.Modifiers));
+        }
+
+        using var tx = await context.Database.BeginTransactionAsync();
+        try
+        {
+            foreach (var (detail, modifiers) in detailsToAdd)
+            {
+                context.OrderDetails.Add(detail);
+                await context.SaveChangesAsync();
+
+                if (modifiers != null && modifiers.Count > 0)
+                {
+                    foreach (var mod in modifiers)
+                    {
+                        context.OrderDetailModifiers.Add(new OrderDetailModifier
+                        {
+                            OrderDetailId = detail.OrderDetailId,
+                            ModifierName = mod.ModifierName,
+                            ExtraPrice = mod.ExtraPrice
+                        });
+                    }
+                    await context.SaveChangesAsync();
+                }
+            }
+
+            order.TotalAmount += addedTotal;
+            order.FinalAmount = Math.Max(0, order.TotalAmount - order.DiscountAmount);
+            if (order.Status == 2) order.Status = 1; // Back to cooking because of new items
+
+            context.Orders.Update(order);
+            await context.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            var updatedDto = await GetOrderByIdAsync(orderId);
+            return (true, $"Đã thêm thành công {detailsToAdd.Count} món vào đơn #{order.OrderCode}", updatedDto);
+        }
+        catch (Exception ex)
+        {
+            await tx.RollbackAsync();
+            return (false, $"Lỗi khi thêm món vào đơn hàng: {ex.Message}", null);
+        }
     }
 }

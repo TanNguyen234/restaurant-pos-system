@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
 
@@ -61,6 +62,7 @@ public class TableController : BaseController
     /// Hỗ trợ cả Request Body JSON { "status": 1 } và Query Param ?status=1
     /// </summary>
     [HttpPut("{id:int}/status")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public IActionResult UpdateStatus(int id, [FromBody] UpdateTableStatusRequest? body = null, [FromQuery] int? status = null)
     {
         int? resolvedStatus = body?.Status ?? status;
@@ -97,6 +99,7 @@ public class TableController : BaseController
     /// Body hỗ trợ: { "fromTableId": 1, "toTableId": 2 } hoặc { "sourceTableId": 1, "targetTableId": 2 }
     /// </summary>
     [HttpPost("transfer")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public IActionResult Transfer([FromBody] TransferTableRequest request)
     {
         if (request == null)
@@ -132,7 +135,121 @@ public class TableController : BaseController
             toTableId = result.ToTableId
         });
     }
+
+    /// <summary>
+    /// POST /api/table/merge
+    /// Gộp hóa đơn từ bàn nguồn vào bàn đích
+    /// </summary>
+    [HttpPost("merge")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public IActionResult Merge([FromBody] TransferTableRequest request)
+    {
+        if (request == null) return BadRequest(new { success = false, message = "Dữ liệu yêu cầu gộp bàn không hợp lệ" });
+        int fromId = request.FromTableId ?? request.SourceTableId ?? 0;
+        int toId = request.ToTableId ?? request.TargetTableId ?? 0;
+
+        if (fromId <= 0 || toId <= 0) return BadRequest(new { success = false, message = "Vui lòng cung cấp ID bàn nguồn và bàn đích" });
+
+        var result = Provider.Table.MergeTables(fromId, toId);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message, fromTableId = result.FromTableId, toTableId = result.ToTableId });
+    }
+
+    /// <summary>
+    /// POST /api/table/split
+    /// Tách một số món sang bàn trống mới
+    /// </summary>
+    [HttpPost("split")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public IActionResult Split([FromBody] SplitTableRequest request)
+    {
+        if (request == null) return BadRequest(new { success = false, message = "Dữ liệu yêu cầu tách bàn không hợp lệ" });
+        if (request.FromTableId <= 0 || request.ToTableId <= 0) return BadRequest(new { success = false, message = "Vui lòng chọn bàn nguồn và bàn đích" });
+        if (request.OrderDetailIds == null || request.OrderDetailIds.Count == 0) return BadRequest(new { success = false, message = "Vui lòng chọn ít nhất 1 món để tách" });
+
+        var result = Provider.Table.SplitTable(request.FromTableId, request.ToTableId, request.OrderDetailIds);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message, newOrderId = result.NewOrderId });
+    }
+
+    /// <summary>
+    /// POST /api/table/reserve
+    /// Đặt bàn trước cho khách hàng
+    /// </summary>
+    [HttpPost("reserve")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
+    public IActionResult Reserve([FromBody] ReserveTableRequest request)
+    {
+        if (request == null || request.TableId <= 0) return BadRequest(new { success = false, message = "Vui lòng chọn bàn cần đặt" });
+        if (string.IsNullOrWhiteSpace(request.CustomerName) || string.IsNullOrWhiteSpace(request.PhoneNumber))
+            return BadRequest(new { success = false, message = "Vui lòng cung cấp họ tên và số điện thoại khách hàng" });
+
+        var arrivalTime = request.ArrivalTime ?? DateTime.Now.AddHours(2);
+        var result = Provider.Table.ReserveTable(request.TableId, request.CustomerName, request.PhoneNumber, request.GuestCount, arrivalTime, request.DepositAmount, request.Note);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+
+        return Ok(new { success = true, message = result.Message, data = result.Reservation });
+    }
+
+    /// <summary>
+    /// GET /api/table/reservations
+    /// Lấy danh sách đặt bàn
+    /// </summary>
+    [HttpGet("reservations")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public IActionResult GetReservations([FromQuery] DateTime? fromDate)
+    {
+        var list = Provider.Table.GetReservations(fromDate);
+        return Ok(new { success = true, total = list.Count, data = list });
+    }
+
+    /// <summary>
+    /// PUT /api/table/reservation/{id}/check-in
+    /// Khách đến nhận bàn đã đặt
+    /// </summary>
+    [HttpPut("reservation/{id:int}/check-in")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public IActionResult CheckInReservation(int id)
+    {
+        var result = Provider.Table.CheckInReservation(id);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
+    /// DELETE /api/table/reservation/{id}
+    /// Hủy yêu cầu đặt bàn
+    /// </summary>
+    [HttpDelete("reservation/{id:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public IActionResult CancelReservation(int id)
+    {
+        var result = Provider.Table.CancelReservation(id);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+        return Ok(new { success = true, message = result.Message });
+    }
 }
+
+public class SplitTableRequest
+{
+    public int FromTableId { get; set; }
+    public int ToTableId { get; set; }
+    public List<int> OrderDetailIds { get; set; } = new();
+}
+
+public class ReserveTableRequest
+{
+    public int TableId { get; set; }
+    public string CustomerName { get; set; } = string.Empty;
+    public string PhoneNumber { get; set; } = string.Empty;
+    public int GuestCount { get; set; } = 2;
+    public DateTime? ArrivalTime { get; set; }
+    public decimal DepositAmount { get; set; } = 0;
+    public string? Note { get; set; }
+}
+
 
 public class UpdateTableStatusRequest
 {
