@@ -9,6 +9,7 @@ class ReceiptPrinterService {
     required BuildContext context,
     required Map<String, dynamic> order,
     bool isPreCheckBill = false,
+    bool isDuplicate = false,
   }) {
     showModalBottomSheet(
       context: context,
@@ -17,6 +18,7 @@ class ReceiptPrinterService {
       builder: (ctx) => _ReceiptPreviewSheet(
         order: order,
         isPreCheckBill: isPreCheckBill,
+        isDuplicate: isDuplicate,
       ),
     );
   }
@@ -25,10 +27,12 @@ class ReceiptPrinterService {
 class _ReceiptPreviewSheet extends StatefulWidget {
   final Map<String, dynamic> order;
   final bool isPreCheckBill;
+  final bool isDuplicate;
 
   const _ReceiptPreviewSheet({
     required this.order,
     required this.isPreCheckBill,
+    this.isDuplicate = false,
   });
 
   @override
@@ -175,6 +179,25 @@ class _ReceiptPreviewSheetState extends State<_ReceiptPreviewSheet> {
                               color: widget.isPreCheckBill ? const Color(0xFFD97706) : Colors.black,
                             ),
                           ),
+                          if (widget.isDuplicate) ...[
+                            const SizedBox(height: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                              decoration: BoxDecoration(
+                                border: Border.all(color: const Color(0xFFDC2626), width: 1.5),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: const Text(
+                                '[BẢN IN LẠI / DUPLICATE]',
+                                style: TextStyle(
+                                  fontFamily: 'Courier',
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFDC2626),
+                                ),
+                              ),
+                            ),
+                          ],
                           const SizedBox(height: 10),
 
                           // Meta Info

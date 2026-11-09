@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/order.dart';
 import '../../repositories/order_repository.dart';
+import '../../widgets/skeleton_loading.dart';
 import '../order/order_detail_page.dart';
 
 class AdminOrderListPage extends StatefulWidget {
@@ -100,75 +101,180 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
       ),
       body: Column(
         children: [
-          // KPI Bar (Total Revenue & Order Count)
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFEFF6FF),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFBFDBFE)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Tổng đơn hàng',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF1E40AF)),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          '$_totalOrders đơn',
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF1E3A8A),
+          // 4 KPI Cards & Top Best Sellers Dashboard
+          Builder(builder: (context) {
+            final paidCount = _orders.where((o) => o.paymentStatus == 1).length;
+            final aov = paidCount > 0 ? _totalRevenue / paidCount : 0.0;
+            final completedCount = _orders.where((o) => o.status == 3).length;
+            final completionRate = _totalOrders > 0 ? (completedCount / _totalOrders * 100).toStringAsFixed(0) : '0';
+
+            final Map<String, int> itemQuantities = {};
+            for (final o in _orders) {
+              for (final item in o.items) {
+                itemQuantities[item.productName] = (itemQuantities[item.productName] ?? 0) + item.quantity;
+              }
+            }
+            final topItems = itemQuantities.entries.toList()..sort((a, b) => b.value.compareTo(a.value));
+            final top5 = topItems.take(5).toList();
+            final maxQty = top5.isNotEmpty ? top5.first.value : 1;
+
+            return Container(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+              ),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      // Card 1: Tổng đơn
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFEFF6FF),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFBFDBFE)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Tổng đơn hàng', style: TextStyle(fontSize: 11, color: Color(0xFF1E40AF))),
+                              const SizedBox(height: 2),
+                              Text('$_totalOrders đơn', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF1E3A8A))),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFA7F3D0)),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Doanh thu đơn',
-                          style: TextStyle(fontSize: 12, color: Color(0xFF065F46)),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          currencyFormatter.format(_totalRevenue),
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF047857),
+                      ),
+                      const SizedBox(width: 8),
+                      // Card 2: Doanh thu
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFECFDF5),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFA7F3D0)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Doanh thu thực thu', style: TextStyle(fontSize: 11, color: Color(0xFF065F46))),
+                              const SizedBox(height: 2),
+                              Text(currencyFormatter.format(_totalRevenue), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF047857))),
+                            ],
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ),
-              ],
-            ),
-          ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      // Card 3: AOV
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFFFBEB),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFFDE68A)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('TB/Đơn (AOV)', style: TextStyle(fontSize: 11, color: Color(0xFF92400E))),
+                              const SizedBox(height: 2),
+                              Text(currencyFormatter.format(aov), style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Card 4: Tỷ lệ hoàn thành
+                      Expanded(
+                        child: Container(
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFAF5FF),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFFE9D5FF)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Tỷ lệ hoàn thành', style: TextStyle(fontSize: 11, color: Color(0xFF6B21A8))),
+                              const SizedBox(height: 2),
+                              Text('$completionRate%', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF7E22CE))),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (top5.isNotEmpty) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Row(
+                            children: [
+                              Icon(Icons.local_fire_department_rounded, size: 16, color: Color(0xFFEF4444)),
+                              SizedBox(width: 4),
+                              Text('Top 5 Món Bán Chạy Nhất', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0F172A))),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          ...top5.map((entry) {
+                            final fraction = maxQty > 0 ? (entry.value / maxQty) : 0.0;
+                            return Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 2),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    flex: 3,
+                                    child: Text(
+                                      entry.key,
+                                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    flex: 4,
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(4),
+                                      child: LinearProgressIndicator(
+                                        value: fraction,
+                                        minHeight: 6,
+                                        backgroundColor: const Color(0xFFE2E8F0),
+                                        valueColor: const AlwaysStoppedAnimation(Color(0xFFF59E0B)),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text('${entry.value} ly', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569))),
+                                ],
+                              ),
+                            );
+                          }),
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            );
+          }),
 
           // Filters Row (Search & Date Range & Status Chips)
           Container(
@@ -309,7 +415,7 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
           // Orders List
           Expanded(
             child: _isLoading
-                ? const Center(child: CircularProgressIndicator())
+                ? const SkeletonListPlaceholder(itemCount: 6)
                 : _orders.isEmpty
                     ? Center(
                         child: Column(

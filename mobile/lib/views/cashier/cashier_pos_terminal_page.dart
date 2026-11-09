@@ -10,6 +10,7 @@ import '../../repositories/order_repository.dart';
 import '../../repositories/product_repository.dart';
 import '../../repositories/table_repository.dart';
 import '../../services/receipt_printer_service.dart';
+import '../../widgets/skeleton_loading.dart';
 
 class CashierPosTerminalPage extends StatefulWidget {
   final int? initialTableId;
@@ -41,7 +42,8 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
   // Cash Numpad & Quick Payment State
   double _customerCashTendered = 0.0;
   String _numpadBuffer = '';
-  final double _discountAmount = 0.0;
+  double _discountAmount = 0.0;
+  double _discountPercent = 0.0;
 
   @override
   void initState() {
@@ -170,6 +172,247 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
       _customerCashTendered = amount;
       _numpadBuffer = amount.toInt().toString();
     });
+  }
+
+
+  void _showManualDiscountDialog() {
+    double tempPercent = _discountPercent;
+    final customAmountController = TextEditingController(
+      text: _discountAmount > 0 ? _discountAmount.toInt().toString() : '',
+    );
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1E293B),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: const Row(
+              children: [
+                Icon(Icons.discount_outlined, color: Color(0xFFF59E0B), size: 22),
+                SizedBox(width: 8),
+                Text('Chiết Khấu Thủ Công (POS)', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Chọn mức chiết khấu phần trăm:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+                const SizedBox(height: 10),
+                Row(
+                  children: [0, 5, 10, 15, 20].map((pct) {
+                    final isSel = tempPercent == pct.toDouble() && customAmountController.text.isEmpty;
+                    return Expanded(
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 2),
+                        child: ChoiceChip(
+                          label: Text('$pct%', style: TextStyle(color: isSel ? const Color(0xFF0F172A) : Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                          selected: isSel,
+                          selectedColor: const Color(0xFFF59E0B),
+                          backgroundColor: const Color(0xFF0F172A),
+                          onSelected: (_) {
+                            setDialogState(() {
+                              tempPercent = pct.toDouble();
+                              customAmountController.clear();
+                            });
+                          },
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+                const SizedBox(height: 14),
+                const Text('Hoặc nhập số tiền giảm giá trực tiếp (VNĐ):', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: customAmountController,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: InputDecoration(
+                    hintText: 'Ví dụ: 30000',
+                    hintStyle: const TextStyle(color: Color(0xFF64748B)),
+                    filled: true,
+                    fillColor: const Color(0xFF0F172A),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    isDense: true,
+                  ),
+                  onChanged: (val) {
+                    if (val.isNotEmpty) {
+                      setDialogState(() => tempPercent = 0.0);
+                    }
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Hủy', style: TextStyle(color: Color(0xFF94A3B8))),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFFF59E0B),
+                  foregroundColor: const Color(0xFF0F172A),
+                ),
+                onPressed: () {
+                  final customAmt = double.tryParse(customAmountController.text.trim()) ?? 0.0;
+                  setState(() {
+                    if (customAmt > 0) {
+                      _discountAmount = customAmt;
+                      _discountPercent = 0.0;
+                    } else if (tempPercent > 0) {
+                      _discountPercent = tempPercent;
+                      _discountAmount = _subtotal * (_discountPercent / 100);
+                    } else {
+                      _discountAmount = 0.0;
+                      _discountPercent = 0.0;
+                    }
+                    _customerCashTendered = _finalAmount;
+                  });
+                  Navigator.pop(ctx);
+                },
+                child: const Text('Áp dụng', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _handleReprintReceipt() {
+    if (_billItems.isEmpty) return;
+    ReceiptPrinterService.showReceiptPreview(
+      context: context,
+      isPreCheckBill: false,
+      isDuplicate: true,
+      order: {
+        'orderCode': _activeOrder?['orderCode'] ?? 'ORD-REPRINT',
+        'tableName': _selectedTable?.name ?? 'Mang về',
+        'customerName': 'Khách in lại HĐ',
+        'totalAmount': _subtotal,
+        'discountAmount': _discountAmount,
+        'finalAmount': _finalAmount,
+        'details': _billItems.map((i) => {
+          'productName': i['name'],
+          'quantity': i['quantity'],
+          'price': i['price'],
+          'subTotal': (i['price'] as double) * (i['quantity'] as int),
+        }).toList(),
+      },
+    );
+  }
+
+  void _showSplitPaymentModal() {
+    if (_billItems.isEmpty) return;
+    double cashPortion = _finalAmount > 50000 ? 50000.0 : _finalAmount / 2;
+    double qrPortion = _finalAmount - cashPortion;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E293B),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      isScrollControlled: true,
+      builder: (ctx) => StatefulBuilder(
+        builder: (modalCtx, setModalState) {
+          final qrUrl = 'https://img.vietqr.io/image/970422-0901234567-compact2.png?amount=${qrPortion.toInt()}&addInfo=SPLIT-${_selectedTable?.name ?? "POS"}&accountName=RESTAURANT_POS';
+
+          return Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.call_split_rounded, color: Color(0xFF38BDF8), size: 22),
+                        SizedBox(width: 8),
+                        Text('Thanh Toán Hỗn Hợp (Split Pay)', style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                    IconButton(icon: const Icon(Icons.close, color: Colors.white70), onPressed: () => Navigator.pop(ctx)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text('Tổng cần thanh toán: ${_currencyFormat.format(_finalAmount)}',
+                    style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 15, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(10)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('1. Tiền mặt:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                            const SizedBox(height: 4),
+                            Text(_currencyFormat.format(cashPortion), style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 16)),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(color: const Color(0xFF0F172A), borderRadius: BorderRadius.circular(10)),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('2. Chuyển khoản VietQR:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                            const SizedBox(height: 4),
+                            Text(_currencyFormat.format(qrPortion), style: const TextStyle(color: Color(0xFF38BDF8), fontWeight: FontWeight.bold, fontSize: 16)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Center(
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: Image.network(
+                      qrUrl,
+                      width: 160,
+                      height: 160,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) => const Icon(Icons.qr_code_2, size: 80, color: Colors.white70),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF059669),
+                    foregroundColor: Colors.white,
+                    minimumSize: const Size(double.infinity, 48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () async {
+                    Navigator.pop(ctx);
+                    await _settleCashPayment();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Đã xác nhận thanh toán hỗn hợp thành công!'), backgroundColor: Color(0xFF059669)),
+                      );
+                    }
+                  },
+                  child: const Text('XÁC NHẬN THU ĐỦ TIỀN MẶT & VIETQR', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
   }
 
   Future<void> _submitNewItemsToTable() async {
@@ -387,7 +630,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                   // Products Grid
                   Expanded(
                     child: _isLoadingCatalog
-                        ? const Center(child: CircularProgressIndicator(color: Color(0xFFF59E0B)))
+                        ? const SkeletonGridPlaceholder(itemCount: 8)
                         : GridView.builder(
                             padding: const EdgeInsets.all(12),
                             gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -548,6 +791,38 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                     color: const Color(0xFF0F172A),
                     child: Column(
                       children: [
+                        // Subtotal & Discount Row
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                const Text('Chiết khấu:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                                const SizedBox(width: 4),
+                                InkWell(
+                                  onTap: _showManualDiscountDialog,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF1E293B),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: Border.all(color: const Color(0xFFF59E0B)),
+                                    ),
+                                    child: Text(
+                                      _discountAmount > 0 ? '-${_currencyFormat.format(_discountAmount)}' : '+ Thêm CK',
+                                      style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 11, fontWeight: FontWeight.bold),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            Text(
+                              _discountAmount > 0 ? '-${_currencyFormat.format(_discountAmount)}' : '0đ',
+                              style: const TextStyle(color: Color(0xFFF43F5E), fontWeight: FontWeight.bold, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
                         // Totals Row
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -588,6 +863,35 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                         _buildCompactNumpad(),
                         const SizedBox(height: 8),
 
+                        // Extra quick buttons: In lại HĐ, Split Pay
+                        Row(
+                          children: [
+                            Expanded(
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF94A3B8),
+                                  side: const BorderSide(color: Color(0xFF334155)),
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                ),
+                                onPressed: _handleReprintReceipt,
+                                child: const Text('In lại HĐ (Duplicate)', style: TextStyle(fontSize: 11)),
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: OutlinedButton(
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF38BDF8),
+                                  side: const BorderSide(color: Color(0xFF0284C7)),
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                ),
+                                onPressed: _showSplitPaymentModal,
+                                child: const Text('Tách TT (Hỗn hợp)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
                         // Action Buttons: Send items, Precheck, Settle
                         Row(
                           children: [
