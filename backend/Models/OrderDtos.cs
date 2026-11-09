@@ -105,3 +105,10 @@ public class KdsItemDto
     public DateTime? StartedCookingAt { get; set; }
     public DateTime? FinishedCookingAt { get; set; }
 }
+
+public class VoidItemDto
+{
+    public int OrderDetailId { get; set; }
+    public string Reason { get; set; } = "Khách đổi ý / Không dùng nữa";
+    public int VoidQuantity { get; set; } = 1;
+}

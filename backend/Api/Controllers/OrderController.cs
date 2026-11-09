@@ -162,6 +162,35 @@ public class OrderController : BaseController
             data = result.Order
         });
     }
+
+    /// <summary>
+    /// POST /api/order/{id}/void-item
+    /// Hủy món / trả món có lý do xác thực
+    /// </summary>
+    [HttpPost("{id:int}/void-item")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public async Task<IActionResult> VoidItem(int id, [FromBody] VoidItemDto dto)
+    {
+        if (dto == null || dto.OrderDetailId <= 0)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = "Thông tin món cần hủy không hợp lệ" });
+        }
+
+        string reason = string.IsNullOrWhiteSpace(dto.Reason) ? "Khách đổi ý / Không dùng nữa" : dto.Reason.Trim();
+        var result = await Provider.Order.VoidOrderItemAsync(id, dto.OrderDetailId, reason, dto.VoidQuantity);
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = result.Message,
+            data = result.Order
+        });
+    }
 }
 
 public class UpdateStatusDto

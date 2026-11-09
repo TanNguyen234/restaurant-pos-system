@@ -554,4 +554,52 @@ public class OrderRepository : BaseRepository
             return (false, $"Lỗi khi thêm món vào đơn hàng: {ex.Message}", null);
         }
     }
+
+    public async Task<(bool Success, string Message, OrderDto? Order)> VoidOrderItemAsync(int orderId, int orderDetailId, string reason, int voidQuantity)
+    {
+        var order = await context.Orders.FindAsync(orderId);
+        if (order == null) return (false, "Không tìm thấy đơn hàng", null);
+
+        if (order.Status == 3 || order.PaymentStatus == 1)
+        {
+            return (false, "Không thể hủy món trong đơn hàng đã hoàn tất hoặc đã thanh toán!", null);
+        }
+
+        var detail = await context.OrderDetails.FirstOrDefaultAsync(d => d.OrderDetailId == orderDetailId && d.OrderId == orderId);
+        if (detail == null) return (false, "Không tìm thấy món ăn trong đơn hàng này", null);
+
+        if (detail.CookingStatus == 3)
+        {
+            return (false, "Món ăn này đã được hủy trước đó rồi!", null);
+        }
+
+        if (voidQuantity <= 0 || voidQuantity >= detail.Quantity)
+        {
+            detail.CookingStatus = 3; // 3: Voided / Cancelled
+            detail.ItemNote = string.IsNullOrEmpty(detail.ItemNote)
+                ? $"[ĐÃ HỦY: {reason}]"
+                : $"{detail.ItemNote} [ĐÃ HỦY: {reason}]";
+        }
+        else
+        {
+            decimal unitPrice = detail.Quantity > 0 ? (detail.SubTotal / detail.Quantity) : detail.UnitPrice;
+            detail.Quantity -= voidQuantity;
+            detail.SubTotal = Math.Max(0, detail.Quantity * unitPrice);
+            detail.ItemNote = string.IsNullOrEmpty(detail.ItemNote)
+                ? $"[HỦY {voidQuantity}x: {reason}]"
+                : $"{detail.ItemNote} [HỦY {voidQuantity}x: {reason}]";
+        }
+
+        decimal activeTotal = await context.OrderDetails
+            .Where(d => d.OrderId == orderId && d.CookingStatus != 3)
+            .SumAsync(d => d.SubTotal);
+
+        order.TotalAmount = activeTotal;
+        order.FinalAmount = Math.Max(0, order.TotalAmount - order.DiscountAmount);
+
+        await context.SaveChangesAsync();
+
+        var updatedOrder = await GetOrderByIdAsync(orderId);
+        return (true, "Đã hủy món thành công", updatedOrder);
+    }
 }

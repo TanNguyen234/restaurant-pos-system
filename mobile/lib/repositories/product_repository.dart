@@ -215,4 +215,24 @@ class ProductRepository {
       return {'success': false, 'message': 'Không thể xóa sản phẩm: $e'};
     }
   }
+
+  /// Bật/tắt trạng thái hết món 1-chạm (PUT /api/product/{id}/toggle-availability)
+  static Future<Map<String, dynamic>> toggleAvailability(int productId) async {
+    try {
+      final headers = await ApiConfig.authHeaders();
+      final res = await http.put(
+        Uri.parse('$baseUrl/$productId/toggle-availability'),
+        headers: headers,
+      ).timeout(timeoutDuration);
+
+      final data = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      return {
+        'success': res.statusCode == 200 && data['success'] == true,
+        'message': data['message'] ?? (res.statusCode == 200 ? 'Thành công' : 'Thất bại'),
+        'isAvailable': data['isAvailable'] as bool?,
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không thể cập nhật trạng thái món: $e'};
+    }
+  }
 }

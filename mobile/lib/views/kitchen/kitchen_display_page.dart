@@ -1,3 +1,6 @@
+import 'package:flutter/services.dart';
+import '../../models/product.dart';
+import '../../repositories/product_repository.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -87,6 +90,8 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
       });
 
       if (hasNew) {
+        HapticFeedback.vibrate();
+        SystemSound.play(SystemSoundType.alert);
         Future.delayed(const Duration(seconds: 5), () {
           if (mounted) setState(() => _hasNewOrderAlert = false);
         });
@@ -182,6 +187,11 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
             ),
             tooltip: _isBatchPrepMode ? 'Chuyển sang xem theo đơn' : 'Bật chế độ Gom món (Batch Prep)',
             onPressed: () => setState(() => _isBatchPrepMode = !_isBatchPrepMode),
+          ),
+          IconButton(
+            icon: const Icon(Icons.remove_shopping_cart_outlined),
+            tooltip: '1-Chạm Báo hết món',
+            onPressed: _showSoldOutModal,
           ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -733,6 +743,118 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
           ),
         ),
       ),
+    );
+  }
+
+  Future<void> _showSoldOutModal() async {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            return FutureBuilder<PagedProductResult>(
+              future: ProductRepository.getProducts(page: 1, pageSize: 100),
+              builder: (context, snapshot) {
+                if (!snapshot.hasData) {
+                  return const SizedBox(
+                    height: 300,
+                    child: Center(child: CircularProgressIndicator()),
+                  );
+                }
+
+                final products = snapshot.data!.data;
+                return SizedBox(
+                  height: MediaQuery.of(context).size.height * 0.75,
+                  child: Column(
+                    children: [
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFEF2F2),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.inventory_2_outlined, color: Color(0xFFDC2626), size: 22),
+                            ),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Bếp Báo Hết Món (1-Chạm)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                  Text('Tắt công tắc để báo tạm hết món trên toàn hệ thống', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                                ],
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close_rounded),
+                              onPressed: () => Navigator.pop(ctx),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const Divider(height: 1),
+                      Expanded(
+                        child: ListView.separated(
+                          itemCount: products.length,
+                          separatorBuilder: (itemCtx, index) => const Divider(height: 1),
+                          itemBuilder: (itemCtx, index) {
+                            final p = products[index];
+                            return SwitchListTile(
+                              title: Text(
+                                p.productName,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  decoration: !p.isAvailable ? TextDecoration.lineThrough : null,
+                                  color: !p.isAvailable ? const Color(0xFF94A3B8) : const Color(0xFF0F172A),
+                                ),
+                              ),
+                              subtitle: Text(
+                                p.isAvailable ? 'Đang phục vụ bình thường' : 'TẠM HẾT HÀNG (Khách không thể gọi)',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: p.isAvailable ? const Color(0xFF10B981) : const Color(0xFFDC2626),
+                                  fontWeight: !p.isAvailable ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                              value: p.isAvailable,
+                              activeThumbColor: const Color(0xFF10B981),
+                              inactiveThumbColor: const Color(0xFFDC2626),
+                              onChanged: (val) async {
+                                final res = await ProductRepository.toggleAvailability(p.productId);
+                                if (res['success'] == true) {
+                                  setModalState(() {});
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(this.context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(res['message'] ?? 'Đã cập nhật trạng thái món'),
+                                        backgroundColor: val ? const Color(0xFF10B981) : const Color(0xFFDC2626),
+                                        duration: const Duration(seconds: 1),
+                                      ),
+                                    );
+                                  }
+                                }
+                              },
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
     );
   }
 }

@@ -101,4 +101,33 @@ class OrderRepository {
     if(res.statusCode!=200)throw StateError('VNPay không khả dụng (HTTP ${res.statusCode})');
     final d=jsonDecode(res.body) as Map<String,dynamic>;return d['paymentUrl'] as String?;
   }
+
+  /// Hủy món ăn trong đơn hàng có lý do (POST /api/order/{id}/void-item)
+  Future<Map<String, dynamic>> voidOrderItem({
+    required int orderId,
+    required int orderDetailId,
+    required String reason,
+    int voidQuantity = 1,
+  }) async {
+    try {
+      final res = await ApiConfig.post(
+        Uri.parse('$baseUrl/$orderId/void-item'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'orderDetailId': orderDetailId,
+          'reason': reason,
+          'voidQuantity': voidQuantity,
+        }),
+      ).timeout(timeoutDuration);
+
+      final d = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
+      return {
+        'success': res.statusCode == 200 && d['success'] == true,
+        'message': d['message'] ?? (res.statusCode == 200 ? 'Hủy món thành công' : 'Thất bại'),
+        'data': d['data'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Lỗi khi hủy món: $e'};
+    }
+  }
 }

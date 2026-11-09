@@ -400,4 +400,33 @@ public class ProductController : BaseController
         await Provider.Product.DeleteAsync(id);
         return Ok(new { statusCode = 200, success = true, message = "Đã xóa món ăn thành công" });
     }
+
+    /// <summary>
+    /// PUT /api/product/{id}/toggle-availability
+    /// 1-Chạm bật/tắt trạng thái hết hàng của món ăn
+    /// </summary>
+    [HttpPut("{id:int}/toggle-availability")]
+    [Authorize(Roles = "ADMIN,MANAGER,KITCHEN,CASHIER,WAITER")]
+    public async Task<IActionResult> ToggleAvailability(int id)
+    {
+        var product = await Provider.Product.GetByIdAsync(id);
+        if (product == null)
+        {
+            return NotFound(new { statusCode = 404, success = false, message = "Không tìm thấy món ăn" });
+        }
+
+        product.IsAvailable = !product.IsAvailable;
+        product.UpdatedAt = DateTime.Now;
+        await Provider.Product.UpdateAsync(product);
+
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = product.IsAvailable ? $"Đã mở bán lại món '{product.ProductName}'" : $"Đã đánh dấu tạm hết món '{product.ProductName}'",
+            productId = product.ProductId,
+            isAvailable = product.IsAvailable,
+            data = product
+        });
+    }
 }
