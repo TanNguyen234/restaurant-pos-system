@@ -65,6 +65,46 @@ function Record-Result {
 # -------------------------------------------------------------
 # 1. CATALOG & IMAGE VERIFICATION
 # -------------------------------------------------------------
+
+# Authenticate as ADMIN to acquire JWT token for protected business endpoints
+$adminToken = ""
+try {
+    $loginBody = @{ username = "admin"; password = "Password123@" } | ConvertTo-Json
+    $loginResp = Invoke-RestMethod -Uri "$BaseUrl/api/auth/login" -Method Post -ContentType "application/json" -Body $loginBody
+    $adminToken = $loginResp.token
+} catch {
+    try {
+        $loginBody = @{ username = "admin"; password = "admin" } | ConvertTo-Json
+        $loginResp = Invoke-RestMethod -Uri "$BaseUrl/api/auth/login" -Method Post -ContentType "application/json" -Body $loginBody
+        $adminToken = $loginResp.token
+    } catch {}
+}
+$authHeaders = if ($adminToken) { @{ Authorization = "Bearer $adminToken" } } else { @{} }
+
+# Pre-test fixture setup: Ensure test tables (Table 2, Table 6) are in clean unoccupied state
+try {
+    $cleanupConn = New-Object System.Data.SqlClient.SqlConnection("Server=$ServerInstance;Database=$Database;Integrated Security=True;TrustServerCertificate=True;")
+    $cleanupConn.Open()
+    $cmd = $cleanupConn.CreateCommand()
+    $cmd.CommandText = @"
+        UPDATE DiningTables SET Status = 0, CurrentOrderId = NULL WHERE TableId IN (2, 6);
+        DELETE FROM OrderDetailModifiers WHERE OrderDetailId IN (
+            SELECT OrderDetailId FROM OrderDetails WHERE OrderId IN (
+                SELECT OrderId FROM Orders WHERE CustomerName LIKE '%E2E%' OR CustomerName LIKE '%Offline%'
+            )
+        );
+        DELETE FROM OrderDetails WHERE OrderId IN (
+            SELECT OrderId FROM Orders WHERE CustomerName LIKE '%E2E%' OR CustomerName LIKE '%Offline%'
+        );
+        DELETE FROM Payments WHERE OrderId IN (
+            SELECT OrderId FROM Orders WHERE CustomerName LIKE '%E2E%' OR CustomerName LIKE '%Offline%'
+        );
+        DELETE FROM Orders WHERE CustomerName LIKE '%E2E%' OR CustomerName LIKE '%Offline%';
+"@
+    $cmd.ExecuteNonQuery() | Out-Null
+    $cleanupConn.Close()
+} catch {}
+
 Write-Host "`n--- Phase 1: Category & Product CRUD + Image Management ---" -ForegroundColor Yellow
 
 # Test 1.1: Get Categories
@@ -82,7 +122,7 @@ try {
 # Test 1.2: Check Category Delete Protection when products exist (CategoryId = 1)
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    $resp = Invoke-WebRequest -Uri "$BaseUrl/api/category/1" -Method Delete
+    $resp = Invoke-WebRequest -Uri "$BaseUrl/api/category/1" -Method Delete -Headers $authHeaders
     $sw.Stop()
     Record-Result "CAT-02" "CATALOG" "Delete category with products rejected (Expected 400)" $false $resp.StatusCode "Should have rejected" $sw.Elapsed.TotalMilliseconds
 } catch {
@@ -173,7 +213,7 @@ try {
 # Test 1.9: Prevent deleting product referenced in historical order (ProductId = 1)
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    $resp = Invoke-WebRequest -Uri "$BaseUrl/api/product/1" -Method Delete
+    $resp = Invoke-WebRequest -Uri "$BaseUrl/api/product/1" -Method Delete -Headers $authHeaders
     $sw.Stop()
     Record-Result "PROD-07" "CATALOG" "Delete product referenced in orders rejected (Expected 400)" $false $resp.StatusCode "Should have rejected" $sw.Elapsed.TotalMilliseconds
 } catch {
@@ -216,7 +256,7 @@ $orderPayload = @{
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $createdOrder = $null
 try {
-    $createResp = Invoke-RestMethod -Uri "$BaseUrl/api/order" -Method Post -Body $orderPayload -ContentType "application/json; charset=utf-8"
+    $createResp = Invoke-RestMethod -Uri "$BaseUrl/api/order" -Method Post -Headers $authHeaders -Body $orderPayload -ContentType "application/json; charset=utf-8"
     $sw.Stop()
     $createdOrder = $createResp.data
     $pass = ($createResp.success -eq $true -and $createdOrder -ne $null -and $createdOrder.finalAmount -gt 0)
@@ -241,7 +281,7 @@ try {
 # Step 2.4: Reject placing new order on currently Occupied table
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    $dupOrderResp = Invoke-WebRequest -Uri "$BaseUrl/api/order" -Method Post -Body $orderPayload -ContentType "application/json; charset=utf-8"
+    $dupOrderResp = Invoke-WebRequest -Uri "$BaseUrl/api/order" -Method Post -Headers $authHeaders -Body $orderPayload -ContentType "application/json; charset=utf-8"
     $sw.Stop()
     Record-Result "ORDER-04" "ORDER_FLOW" "Reject new order on occupied table (Expected 400)" $false $dupOrderResp.StatusCode "Should have rejected" $sw.Elapsed.TotalMilliseconds
 } catch {
@@ -256,7 +296,7 @@ $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $kdsItem1 = $null
 $kdsItem2 = $null
 try {
-    $kdsResp = Invoke-RestMethod -Uri "$BaseUrl/api/kds" -Method Get
+    $kdsResp = Invoke-RestMethod -Uri "$BaseUrl/api/kds" -Method Get -Headers $authHeaders
     $sw.Stop()
     $ourItems = $kdsResp.data | Where-Object { $_.orderId -eq $createdOrder.orderId }
     $pass = ($ourItems.Count -eq 2)
@@ -274,7 +314,7 @@ try {
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
     $statusBody = @{ cookingStatus = 1 } | ConvertTo-Json
-    $kdsUpd1 = Invoke-RestMethod -Uri "$BaseUrl/api/kds/$($kdsItem1.orderDetailId)/status" -Method Put -Body $statusBody -ContentType "application/json"
+    $kdsUpd1 = Invoke-RestMethod -Uri "$BaseUrl/api/kds/$($kdsItem1.orderDetailId)/status" -Method Put -Headers $authHeaders -Body $statusBody -ContentType "application/json"
     $sw.Stop()
     $pass = ($kdsUpd1.success -eq $true)
     Record-Result "KDS-02" "KDS_FLOW" "KDS transition dish to 'Cooking' (1)" $pass 200 "Item ID $($kdsItem1.orderDetailId) Cooking" $sw.Elapsed.TotalMilliseconds
@@ -287,11 +327,11 @@ try {
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
     $statusBodyReady = @{ cookingStatus = 2 } | ConvertTo-Json
-    $null = Invoke-RestMethod -Uri "$BaseUrl/api/kds/$($kdsItem1.orderDetailId)/status" -Method Put -Body $statusBodyReady -ContentType "application/json"
-    $null = Invoke-RestMethod -Uri "$BaseUrl/api/kds/$($kdsItem2.orderDetailId)/status" -Method Put -Body $statusBodyReady -ContentType "application/json"
+    $null = Invoke-RestMethod -Uri "$BaseUrl/api/kds/$($kdsItem1.orderDetailId)/status" -Method Put -Headers $authHeaders -Body $statusBodyReady -ContentType "application/json"
+    $null = Invoke-RestMethod -Uri "$BaseUrl/api/kds/$($kdsItem2.orderDetailId)/status" -Method Put -Headers $authHeaders -Body $statusBodyReady -ContentType "application/json"
     
     # Check order status
-    $checkOrd = Invoke-RestMethod -Uri "$BaseUrl/api/order/$($createdOrder.orderId)" -Method Get
+    $checkOrd = Invoke-RestMethod -Uri "$BaseUrl/api/order/$($createdOrder.orderId)" -Method Get -Headers $authHeaders
     $sw.Stop()
     $pass = ($checkOrd.status -eq 2) # Served
     Record-Result "KDS-03" "KDS_FLOW" "All dishes marked Ready (2) -> Order auto-transitions to 'Served' (2)" $pass 200 "Order Status: $($checkOrd.statusText)" $sw.Elapsed.TotalMilliseconds
@@ -313,7 +353,7 @@ $cashPayload = @{
 
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    $payResp = Invoke-RestMethod -Uri "$BaseUrl/api/payment/cash" -Method Post -Body $cashPayload -ContentType "application/json; charset=utf-8"
+    $payResp = Invoke-RestMethod -Uri "$BaseUrl/api/payment/cash" -Method Post -Headers $authHeaders -Body $cashPayload -ContentType "application/json; charset=utf-8"
     $sw.Stop()
     $pass = ($payResp.success -eq $true -and $payResp.data.paymentMethod -eq "Cash" -and $payResp.data.status -eq 1)
     Record-Result "PAY-01" "PAYMENT" "Confirm Cash payment at cashier desk" $pass 200 "Payment ID: $($payResp.data.paymentId), Method: $($payResp.data.paymentMethod)" $sw.Elapsed.TotalMilliseconds
@@ -325,7 +365,7 @@ try {
 # Step 3.2: Verify Order is Settled and Completed in SQL Server
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    $settledOrder = Invoke-RestMethod -Uri "$BaseUrl/api/order/$($createdOrder.orderId)" -Method Get
+    $settledOrder = Invoke-RestMethod -Uri "$BaseUrl/api/order/$($createdOrder.orderId)" -Method Get -Headers $authHeaders
     $sw.Stop()
     $pass = ($settledOrder.paymentStatus -eq 1 -and $settledOrder.status -eq 3)
     Record-Result "PAY-02" "PAYMENT" "Verify Order PaymentStatus=1 (Paid) and Status=3 (Completed)" $pass 200 "Payment: $($settledOrder.paymentStatusText), Status: $($settledOrder.statusText)" $sw.Elapsed.TotalMilliseconds
@@ -349,7 +389,7 @@ try {
 # Step 3.4: Reject Duplicate Payment on already paid order
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    $dupPayResp = Invoke-WebRequest -Uri "$BaseUrl/api/payment/cash" -Method Post -Body $cashPayload -ContentType "application/json"
+    $dupPayResp = Invoke-WebRequest -Uri "$BaseUrl/api/payment/cash" -Method Post -Headers $authHeaders -Body $cashPayload -ContentType "application/json"
     $sw.Stop()
     Record-Result "PAY-04" "PAYMENT" "Reject duplicate payment on settled order (Expected 400)" $false $dupPayResp.StatusCode "Should have rejected" $sw.Elapsed.TotalMilliseconds
 } catch {
@@ -367,7 +407,7 @@ Write-Host "`n--- Phase 4: VietQR & VNPay Sandbox Payment Gateways ---" -Foregro
 # Step 4.1: Generate VietQR for Order 1
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    $qrResp = Invoke-RestMethod -Uri "$BaseUrl/api/payment/vietqr/1" -Method Get
+    $qrResp = Invoke-RestMethod -Uri "$BaseUrl/api/payment/vietqr/1" -Method Get -Headers $authHeaders
     $sw.Stop()
     $qr = $qrResp.data
     $pass = ($qrResp.success -eq $true -and $qr.qrCodeUrl.StartsWith("https://img.vietqr.io") -and $qr.accountNo -eq "102871234567")
@@ -386,7 +426,7 @@ $vnpPayload = @{
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $vnpUrl = ""
 try {
-    $vnpResp = Invoke-RestMethod -Uri "$BaseUrl/api/payment/vnpay/create-url" -Method Post -Body $vnpPayload -ContentType "application/json"
+    $vnpResp = Invoke-RestMethod -Uri "$BaseUrl/api/payment/vnpay/create-url" -Method Post -Headers $authHeaders -Body $vnpPayload -ContentType "application/json"
     $sw.Stop()
     $vnpUrl = $vnpResp.paymentUrl
     $pass = ($vnpResp.success -eq $true -and $vnpUrl.Contains("vnp_SecureHash=") -and $vnpResp.status -eq "SANDBOX VERIFIED")
@@ -431,7 +471,7 @@ $offlinePayload = @{
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 $firstSyncOrder = $null
 try {
-    $syncResp1 = Invoke-RestMethod -Uri "$BaseUrl/api/order" -Method Post -Body $offlinePayload -ContentType "application/json; charset=utf-8"
+    $syncResp1 = Invoke-RestMethod -Uri "$BaseUrl/api/order" -Method Post -Headers $authHeaders -Body $offlinePayload -ContentType "application/json; charset=utf-8"
     $sw.Stop()
     $firstSyncOrder = $syncResp1.data
     $pass = ($syncResp1.success -eq $true -and $firstSyncOrder.orderCode -eq $expectedOfflineCode)
@@ -444,7 +484,7 @@ try {
 # Step 5.2: Re-send identical offline order (Simulating network timeout retry / concurrent resend)
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    $syncResp2 = Invoke-RestMethod -Uri "$BaseUrl/api/order" -Method Post -Body $offlinePayload -ContentType "application/json; charset=utf-8"
+    $syncResp2 = Invoke-RestMethod -Uri "$BaseUrl/api/order" -Method Post -Headers $authHeaders -Body $offlinePayload -ContentType "application/json; charset=utf-8"
     $sw.Stop()
     $secondSyncOrder = $syncResp2.data
     # Idempotent deduplication must return the SAME orderId without creating duplicate rows

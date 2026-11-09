@@ -1,14 +1,14 @@
 ﻿{
     "TargetUrl":  "http://localhost:5138",
-    "Timestamp":  "2026-10-23T18:34:16.7773147+07:00",
+    "Timestamp":  "2026-11-09T18:29:06.3490025+07:00",
     "Summary":  {
                     "Passed":  25,
-                    "MinDurationMs":  5.66,
+                    "MinDurationMs":  5.15,
                     "Failed":  0,
-                    "AvgDurationMs":  38.53,
+                    "AvgDurationMs":  38.39,
                     "Total":  25,
                     "Blocked":  0,
-                    "MaxDurationMs":  187.26
+                    "MaxDurationMs":  150.03
                 },
     "Tests":  [
                   {
@@ -19,7 +19,7 @@
                       "Uri":  "http://localhost:5138/api/table/areas",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  187.26,
+                      "DurationMs":  143.88,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "",
@@ -28,16 +28,16 @@
                   {
                       "TestId":  "REG-01",
                       "Category":  "Registration",
-                      "Description":  "Register new account (test_member_1792755254)",
+                      "Description":  "Register new account (test_member_1794223744)",
                       "Method":  "POST",
                       "Uri":  "http://localhost:5138/api/auth/register",
                       "ExpectedStatus":  "200,201",
                       "ActualStatus":  200,
-                      "DurationMs":  93.84,
+                      "DurationMs":  150.03,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
-                      "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"fullName\":\"Acceptance Test Member\",\"username\":\"test_member_1792755254\",\"email\":\"member_1792755254@restaurantpos.vn\",\"roleCode\":\"MEMBER\",\"phoneNumber\":\"0987654321\"}",
-                      "SanitizedResponse":  "{\"statusCode\":200,\"success\":true,\"message\":\"Đăng ký tài khoản thành công\",\"accountId\":30,\"username\":\"test_member_1792755254\"}"
+                      "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"fullName\":\"Acceptance Test Member\",\"username\":\"test_member_1794223744\",\"email\":\"member_1794223744@restaurantpos.vn\",\"roleCode\":\"MEMBER\",\"phoneNumber\":\"0987654321\"}",
+                      "SanitizedResponse":  "{\"statusCode\":200,\"success\":true,\"message\":\"Đăng ký tài khoản thành công\",\"accountId\":34,\"username\":\"test_member_1794223744\"}"
                   },
                   {
                       "TestId":  "REG-02",
@@ -47,10 +47,10 @@
                       "Uri":  "http://localhost:5138/api/auth/register",
                       "ExpectedStatus":  "400",
                       "ActualStatus":  400,
-                      "DurationMs":  80.95,
+                      "DurationMs":  18.87,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
-                      "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"fullName\":\"Acceptance Test Member\",\"username\":\"test_member_1792755254\",\"email\":\"member_1792755254@restaurantpos.vn\",\"roleCode\":\"MEMBER\",\"phoneNumber\":\"0987654321\"}",
+                      "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"fullName\":\"Acceptance Test Member\",\"username\":\"test_member_1794223744\",\"email\":\"member_1794223744@restaurantpos.vn\",\"roleCode\":\"MEMBER\",\"phoneNumber\":\"0987654321\"}",
                       "SanitizedResponse":  "{\"statusCode\":400,\"success\":false,\"message\":\"Tên đăng nhập đã tồn tại trong hệ thống\",\"error\":\"Tên đăng nhập đã tồn tại trong hệ thống\"}"
                   },
                   {
@@ -61,11 +61,11 @@
                       "Uri":  "http://localhost:5138/api/auth/register",
                       "ExpectedStatus":  "400",
                       "ActualStatus":  400,
-                      "DurationMs":  6.54,
+                      "DurationMs":  5.15,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"username\":\"\"}",
-                      "SanitizedResponse":  "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"FullName\":[\"Họ tên không được để trống\"],\"Password\":[\"Mật khẩu không được để trống\"],\"Username\":[\"Tên đăng nhập không được để trống\",\"Tên đăng nhập từ 3 đến 64 ký tự\"]},\"traceId\":\"00-7c6527b904ebe3b4d7db6a8679e237f4-997587d134bfb35e-00\"}"
+                      "SanitizedResponse":  "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"FullName\":[\"Họ tên không được để trống\"],\"Password\":[\"Mật khẩu không được để trống\"],\"Username\":[\"Tên đăng nhập không được để trống\",\"Tên đăng nhập từ 3 đến 64 ký tự\"]},\"traceId\":\"00-a62d475c2859fd7856226ec660f9acbe-c9751deee002e0e0-00\"}"
                   },
                   {
                       "TestId":  "AUTH-01",
@@ -75,11 +75,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  45.12,
+                      "DurationMs":  41.94,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"admin\"}",
-                      "SanitizedResponse":  "{\"token\":\"[REDACTED_JWT]\",\"accountId\":1,\"username\":\"admin\",\"fullName\":\"Nguyễn Văn Quản Trị\",\"role\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"email\":\"admin@restaurantpos.vn\",\"phoneNumber\":\"0901234567\",\"avatar\":\"admin_avatar.png\"}"
+                      "SanitizedResponse":  "{\"statusCode\":200,\"success\":true,\"message\":\"Đăng nhập thành công\",\"token\":\"[REDACTED_JWT]\",\"accountId\":1,\"username\":\"admin\",\"fullName\":\"Nguyễn Văn Quản Trị\",\"role\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"email\":\"admin@restaurantpos.vn\",\"phoneNumber\":\"0901234567\",\"avatar\":\"admin_avatar.png\"}"
                   },
                   {
                       "TestId":  "AUTH-02",
@@ -89,11 +89,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  36.02,
+                      "DurationMs":  40.14,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"manager01\"}",
-                      "SanitizedResponse":  "{\"token\":\"[REDACTED_JWT]\",\"accountId\":2,\"username\":\"manager01\",\"fullName\":\"Trần Thị Thu Quản Lý\",\"role\":\"MANAGER\",\"roleName\":\"Quản lý chi nhánh\",\"email\":\"manager01@restaurantpos.vn\",\"phoneNumber\":\"0902345678\",\"avatar\":\"manager_avatar.png\"}"
+                      "SanitizedResponse":  "{\"statusCode\":200,\"success\":true,\"message\":\"Đăng nhập thành công\",\"token\":\"[REDACTED_JWT]\",\"accountId\":2,\"username\":\"manager01\",\"fullName\":\"Trần Thị Thu Quản Lý\",\"role\":\"MANAGER\",\"roleName\":\"Quản lý chi nhánh\",\"email\":\"manager01@restaurantpos.vn\",\"phoneNumber\":\"0902345678\",\"avatar\":\"manager_avatar.png\"}"
                   },
                   {
                       "TestId":  "AUTH-03",
@@ -103,11 +103,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  52.07,
+                      "DurationMs":  35.72,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"cashier_mai\"}",
-                      "SanitizedResponse":  "{\"token\":\"[REDACTED_JWT]\",\"accountId\":3,\"username\":\"cashier_mai\",\"fullName\":\"Lê Tuyết Mai\",\"role\":\"CASHIER\",\"roleName\":\"Thu ngân\",\"email\":\"mai.cashier@restaurantpos.vn\",\"phoneNumber\":\"0903456789\",\"avatar\":\"mai_avatar.png\"}"
+                      "SanitizedResponse":  "{\"statusCode\":200,\"success\":true,\"message\":\"Đăng nhập thành công\",\"token\":\"[REDACTED_JWT]\",\"accountId\":3,\"username\":\"cashier_mai\",\"fullName\":\"Lê Tuyết Mai\",\"role\":\"CASHIER\",\"roleName\":\"Thu ngân\",\"email\":\"mai.cashier@restaurantpos.vn\",\"phoneNumber\":\"0903456789\",\"avatar\":\"mai_avatar.png\"}"
                   },
                   {
                       "TestId":  "AUTH-04",
@@ -117,11 +117,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  45.9,
+                      "DurationMs":  36.14,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"waiter_nam\"}",
-                      "SanitizedResponse":  "{\"token\":\"[REDACTED_JWT]\",\"accountId\":4,\"username\":\"waiter_nam\",\"fullName\":\"Phạm Hoàng Nam\",\"role\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"email\":\"nam.waiter@restaurantpos.vn\",\"phoneNumber\":\"0904567890\",\"avatar\":\"nam_avatar.png\"}"
+                      "SanitizedResponse":  "{\"statusCode\":200,\"success\":true,\"message\":\"Đăng nhập thành công\",\"token\":\"[REDACTED_JWT]\",\"accountId\":4,\"username\":\"waiter_nam\",\"fullName\":\"Phạm Hoàng Nam\",\"role\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"email\":\"nam.waiter@restaurantpos.vn\",\"phoneNumber\":\"0904567890\",\"avatar\":\"nam_avatar.png\"}"
                   },
                   {
                       "TestId":  "AUTH-05",
@@ -131,11 +131,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  36.42,
+                      "DurationMs":  45.08,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"kitchen\"}",
-                      "SanitizedResponse":  "{\"token\":\"[REDACTED_JWT]\",\"accountId\":11,\"username\":\"kitchen\",\"fullName\":\"Báº¿p TrÆ°á»Ÿng KDS\",\"role\":\"KITCHEN\",\"roleName\":\"Bá»™ pháº­n báº¿p \u0026 pha cháº¿ (KDS)\",\"email\":\"kitchen@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":null}"
+                      "SanitizedResponse":  "{\"statusCode\":200,\"success\":true,\"message\":\"Đăng nhập thành công\",\"token\":\"[REDACTED_JWT]\",\"accountId\":11,\"username\":\"kitchen\",\"fullName\":\"Báº¿p TrÆ°á»Ÿng KDS\",\"role\":\"KITCHEN\",\"roleName\":\"Bá»™ pháº­n báº¿p \u0026 pha cháº¿ (KDS)\",\"email\":\"kitchen@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":null}"
                   },
                   {
                       "TestId":  "AUTH-06",
@@ -145,11 +145,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  38.41,
+                      "DurationMs":  36.03,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"member_khang\"}",
-                      "SanitizedResponse":  "{\"token\":\"[REDACTED_JWT]\",\"accountId\":8,\"username\":\"member_khang\",\"fullName\":\"Bùi Vĩnh Khang\",\"role\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"email\":\"khang.bui@gmail.com\",\"phoneNumber\":\"0908901234\",\"avatar\":\"khang_avatar.png\"}"
+                      "SanitizedResponse":  "{\"statusCode\":200,\"success\":true,\"message\":\"Đăng nhập thành công\",\"token\":\"[REDACTED_JWT]\",\"accountId\":8,\"username\":\"member_khang\",\"fullName\":\"Bùi Vĩnh Khang\",\"role\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"email\":\"khang.bui@gmail.com\",\"phoneNumber\":\"0908901234\",\"avatar\":\"khang_avatar.png\"}"
                   },
                   {
                       "TestId":  "AUTH-07",
@@ -159,11 +159,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "401",
                       "ActualStatus":  401,
-                      "DurationMs":  13.43,
+                      "DurationMs":  9.68,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"admin\"}",
-                      "SanitizedResponse":  "{\"statusCode\":401,\"success\":false,\"message\":\"Tên đăng nhập hoặc mật khẩu không chính xác\",\"error\":\"Tên đăng nhập hoặc mật khẩu không chính xác\"}"
+                      "SanitizedResponse":  "{\"statusCode\":401,\"success\":false,\"message\":\"Tên đăng nhập hoặc mật khẩu không chính xác\"}"
                   },
                   {
                       "TestId":  "AUTH-08",
@@ -173,11 +173,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "401",
                       "ActualStatus":  401,
-                      "DurationMs":  11.48,
+                      "DurationMs":  8.7,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"ghost_user_non_existent\"}",
-                      "SanitizedResponse":  "{\"statusCode\":401,\"success\":false,\"message\":\"Tên đăng nhập hoặc mật khẩu không chính xác\",\"error\":\"Tên đăng nhập hoặc mật khẩu không chính xác\"}"
+                      "SanitizedResponse":  "{\"statusCode\":401,\"success\":false,\"message\":\"Tên đăng nhập hoặc mật khẩu không chính xác\"}"
                   },
                   {
                       "TestId":  "AUTH-09",
@@ -187,11 +187,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "400",
                       "ActualStatus":  400,
-                      "DurationMs":  5.66,
+                      "DurationMs":  5.57,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{}",
-                      "SanitizedResponse":  "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"Password\":[\"Vui lòng nhập mật khẩu\"],\"Username\":[\"Vui lòng nhập tên đăng nhập\"]},\"traceId\":\"00-6d315dff2c02808cbd4832d92d5c5798-7301297a8cc79c12-00\"}"
+                      "SanitizedResponse":  "{\"type\":\"https://tools.ietf.org/html/rfc9110#section-15.5.1\",\"title\":\"One or more validation errors occurred.\",\"status\":400,\"errors\":{\"Password\":[\"Vui lòng nhập mật khẩu\"],\"Username\":[\"Vui lòng nhập tên đăng nhập\"]},\"traceId\":\"00-c835e68611aee8e9e65c3445ec287392-ed57afe215eddc0d-00\"}"
                   },
                   {
                       "TestId":  "PWD-01",
@@ -201,7 +201,7 @@
                       "Uri":  "http://localhost:5138/api/auth/change-password",
                       "ExpectedStatus":  "400,401",
                       "ActualStatus":  400,
-                      "DurationMs":  11.03,
+                      "DurationMs":  22.72,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"oldPassword\":\"[REDACTED]\",\"newPassword\":\"[REDACTED]\"}",
@@ -215,7 +215,7 @@
                       "Uri":  "http://localhost:5138/api/auth/change-password",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  72.78,
+                      "DurationMs":  40.83,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "{\"oldPassword\":\"[REDACTED]\",\"newPassword\":\"[REDACTED]\"}",
@@ -229,11 +229,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "401",
                       "ActualStatus":  401,
-                      "DurationMs":  10.07,
+                      "DurationMs":  7.67,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
-                      "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"test_member_1792755254\"}",
-                      "SanitizedResponse":  "{\"statusCode\":401,\"success\":false,\"message\":\"Tên đăng nhập hoặc mật khẩu không chính xác\",\"error\":\"Tên đăng nhập hoặc mật khẩu không chính xác\"}"
+                      "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"test_member_1794223744\"}",
+                      "SanitizedResponse":  "{\"statusCode\":401,\"success\":false,\"message\":\"Tên đăng nhập hoặc mật khẩu không chính xác\"}"
                   },
                   {
                       "TestId":  "PWD-04",
@@ -243,11 +243,11 @@
                       "Uri":  "http://localhost:5138/api/auth/login",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  42.05,
+                      "DurationMs":  43.63,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
-                      "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"test_member_1792755254\"}",
-                      "SanitizedResponse":  "{\"token\":\"[REDACTED_JWT]\",\"accountId\":30,\"username\":\"test_member_1792755254\",\"fullName\":\"Acceptance Test Member\",\"role\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"email\":\"member_1792755254@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null}"
+                      "SanitizedRequest":  "{\"password\":\"[REDACTED]\",\"username\":\"test_member_1794223744\"}",
+                      "SanitizedResponse":  "{\"statusCode\":200,\"success\":true,\"message\":\"Đăng nhập thành công\",\"token\":\"[REDACTED_JWT]\",\"accountId\":34,\"username\":\"test_member_1794223744\",\"fullName\":\"Acceptance Test Member\",\"role\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"email\":\"member_1794223744@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null}"
                   },
                   {
                       "TestId":  "RBAC-01",
@@ -257,7 +257,7 @@
                       "Uri":  "http://localhost:5138/api/account/members",
                       "ExpectedStatus":  "401",
                       "ActualStatus":  401,
-                      "DurationMs":  10,
+                      "DurationMs":  18.9,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "",
@@ -271,7 +271,7 @@
                       "Uri":  "http://localhost:5138/api/account/members",
                       "ExpectedStatus":  "401",
                       "ActualStatus":  401,
-                      "DurationMs":  10,
+                      "DurationMs":  16.72,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "",
@@ -285,11 +285,11 @@
                       "Uri":  "http://localhost:5138/api/account/members",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  64.37,
+                      "DurationMs":  119.28,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "",
-                      "SanitizedResponse":  "[{\"accountId\":1,\"roleId\":1,\"roleCode\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"username\":\"admin\",\"fullName\":\"Nguyễn Văn Quản Trị\",\"email\":\"admin@restaurantpos.vn\",\"phoneNumber\":\"0901234567\",\"avatar\":\"admin_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":2,\"roleId\":2,\"roleCode\":\"MANAGER\",\"roleName\":\"Quản lý chi nhánh\",\"username\":\"manager01\",\"fullName\":\"Trần Thị Thu Quản Lý\",\"email\":\"manager01@restaurantpos.vn\",\"phoneNumber\":\"0902345678\",\"avatar\":\"manager_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":3,\"roleId\":3,\"roleCode\":\"CASHIER\",\"roleName\":\"Thu ngân\",\"username\":\"cashier_mai\",\"fullName\":\"Lê Tuyết Mai\",\"email\":\"mai.cashier@restaurantpos.vn\",\"phoneNumber\":\"0903456789\",\"avatar\":\"mai_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":4,\"roleId\":4,\"roleCode\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"username\":\"waiter_nam\",\"fullName\":\"Phạm Hoàng Nam\",\"email\":\"nam.waiter@restaurantpos.vn\",\"phoneNumber\":\"0904567890\",\"avatar\":\"nam_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":5,\"roleId\":4,\"roleCode\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"username\":\"waiter_lan\",\"fullName\":\"Đỗ Ngọc Lan\",\"email\":\"lan.waiter@restaurantpos.vn\",\"phoneNumber\":\"0905678901\",\"avatar\":\"lan_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":6,\"roleId\":5,\"roleCode\":\"BARISTA_LEAD\",\"roleName\":\"Trưởng quầy pha chế\",\"username\":\"barista_tuan\",\"fullName\":\"Vũ Anh Tuấn\",\"email\":\"tuan.barista@restaurantpos.vn\",\"phoneNumber\":\"0906789012\",\"avatar\":\"tuan_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":7,\"roleId\":6,\"roleCode\":\"HEAD_CHEF\",\"roleName\":\"Đầu bếp chính\",\"username\":\"chef_dung\",\"fullName\":\"Ngô Tiến Dũng\",\"email\":\"dung.chef@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":\"chef_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":8,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"member_khang\",\"fullName\":\"Bùi Vĩnh Khang\",\"email\":\"khang.bui@gmail.com\",\"phoneNumber\":\"0908901234\",\"avatar\":\"khang_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Google\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":9,\"roleId\":9,\"roleCode\":\"VIP_MEMBER\",\"roleName\":\"Khách hàng VIP\",\"username\":\"vip_huong\",\"fullName\":\"Đặng Thu Hương\",\"email\":\"huong.dang@fpt.com\",\"phoneNumber\":\"0909012345\",\"avatar\":\"huong_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Zalo\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":10,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"member_linh\",\"fullName\":\"Võ Diệu Linh\",\"email\":\"linh.vo@outlook.com\",\"phoneNumber\":\"0910123456\",\"avatar\":\"linh_avatar.png\",\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Facebook\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":11,\"roleId\":11,\"roleCode\":\"KITCHEN\",\"roleName\":\"Bá»™ pháº­n báº¿p \u0026 pha cháº¿ (KDS)\",\"username\":\"kitchen\",\"fullName\":\"Báº¿p TrÆ°á»Ÿng KDS\",\"email\":\"kitchen@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.79\",\"updatedAt\":null},{\"accountId\":12,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792732887\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792732887@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:21:29.1\",\"updatedAt\":\"2026-10-23T12:21:30.113\"},{\"accountId\":13,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792732896\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792732896@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:21:37.36\",\"updatedAt\":\"2026-10-23T12:21:38.25\"},{\"accountId\":14,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733331\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733331@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:28:54.107\",\"updatedAt\":\"2026-10-23T12:28:56.257\"},{\"accountId\":15,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733344\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733344@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:29:05.233\",\"updatedAt\":\"2026-10-23T12:29:06.613\"},{\"accountId\":22,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733510\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733510@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:31:52.133\",\"updatedAt\":\"2026-10-23T12:31:53.183\"},{\"accountId\":25,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792754758\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792754758@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:05.81\",\"updatedAt\":\"2026-10-23T18:26:08.083\"},{\"accountId\":26,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"adv_user_1792754782\",\"fullName\":\"Adversarial Test User\",\"email\":\"adv_user_1792754782@example.com\",\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:22.573\",\"updatedAt\":null},{\"accountId\":27,\"roleId\":1,\"roleCode\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"username\":\"evil_admin_1792754782\",\"fullName\":\"Self Made Admin\",\"email\":null,\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:22.653\",\"updatedAt\":null},{\"accountId\":28,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"adv_user_1792755246\",\"fullName\":\"Adversarial Test User\",\"email\":\"adv_user_1792755246@example.com\",\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:06.3\",\"updatedAt\":null},{\"accountId\":29,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"evil_admin_1792755246\",\"fullName\":\"Self Made Admin\",\"email\":null,\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:06.683\",\"updatedAt\":null},{\"accountId\":30,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792755254\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792755254@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:15.257\",\"updatedAt\":\"2026-10-23T18:34:16.16\"}]"
+                      "SanitizedResponse":  "[{\"accountId\":1,\"roleId\":1,\"roleCode\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"username\":\"admin\",\"fullName\":\"Nguyễn Văn Quản Trị\",\"email\":\"admin@restaurantpos.vn\",\"phoneNumber\":\"0901234567\",\"avatar\":\"admin_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":2,\"roleId\":2,\"roleCode\":\"MANAGER\",\"roleName\":\"Quản lý chi nhánh\",\"username\":\"manager01\",\"fullName\":\"Trần Thị Thu Quản Lý\",\"email\":\"manager01@restaurantpos.vn\",\"phoneNumber\":\"0902345678\",\"avatar\":\"manager_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":3,\"roleId\":3,\"roleCode\":\"CASHIER\",\"roleName\":\"Thu ngân\",\"username\":\"cashier_mai\",\"fullName\":\"Lê Tuyết Mai\",\"email\":\"mai.cashier@restaurantpos.vn\",\"phoneNumber\":\"0903456789\",\"avatar\":\"mai_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":4,\"roleId\":4,\"roleCode\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"username\":\"waiter_nam\",\"fullName\":\"Phạm Hoàng Nam\",\"email\":\"nam.waiter@restaurantpos.vn\",\"phoneNumber\":\"0904567890\",\"avatar\":\"nam_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":5,\"roleId\":4,\"roleCode\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"username\":\"waiter_lan\",\"fullName\":\"Đỗ Ngọc Lan\",\"email\":\"lan.waiter@restaurantpos.vn\",\"phoneNumber\":\"0905678901\",\"avatar\":\"lan_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":6,\"roleId\":5,\"roleCode\":\"BARISTA_LEAD\",\"roleName\":\"Trưởng quầy pha chế\",\"username\":\"barista_tuan\",\"fullName\":\"Vũ Anh Tuấn\",\"email\":\"tuan.barista@restaurantpos.vn\",\"phoneNumber\":\"0906789012\",\"avatar\":\"tuan_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":7,\"roleId\":6,\"roleCode\":\"HEAD_CHEF\",\"roleName\":\"Đầu bếp chính\",\"username\":\"chef_dung\",\"fullName\":\"Ngô Tiến Dũng\",\"email\":\"dung.chef@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":\"chef_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":8,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"member_khang\",\"fullName\":\"Bùi Vĩnh Khang\",\"email\":\"khang.bui@gmail.com\",\"phoneNumber\":\"0908901234\",\"avatar\":\"khang_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Google\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":9,\"roleId\":9,\"roleCode\":\"VIP_MEMBER\",\"roleName\":\"Khách hàng VIP\",\"username\":\"vip_huong\",\"fullName\":\"Đặng Thu Hương\",\"email\":\"huong.dang@fpt.com\",\"phoneNumber\":\"0909012345\",\"avatar\":\"huong_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Zalo\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":10,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"member_linh\",\"fullName\":\"Võ Diệu Linh\",\"email\":\"linh.vo@outlook.com\",\"phoneNumber\":\"0910123456\",\"avatar\":\"linh_avatar.png\",\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Facebook\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":11,\"roleId\":11,\"roleCode\":\"KITCHEN\",\"roleName\":\"Bá»™ pháº­n báº¿p \u0026 pha cháº¿ (KDS)\",\"username\":\"kitchen\",\"fullName\":\"Báº¿p TrÆ°á»Ÿng KDS\",\"email\":\"kitchen@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.79\",\"updatedAt\":null},{\"accountId\":12,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792732887\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792732887@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:21:29.1\",\"updatedAt\":\"2026-10-23T12:21:30.113\"},{\"accountId\":13,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792732896\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792732896@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:21:37.36\",\"updatedAt\":\"2026-10-23T12:21:38.25\"},{\"accountId\":14,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733331\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733331@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:28:54.107\",\"updatedAt\":\"2026-10-23T12:28:56.257\"},{\"accountId\":15,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733344\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733344@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:29:05.233\",\"updatedAt\":\"2026-10-23T12:29:06.613\"},{\"accountId\":22,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733510\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733510@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:31:52.133\",\"updatedAt\":\"2026-10-23T12:31:53.183\"},{\"accountId\":25,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792754758\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792754758@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:05.81\",\"updatedAt\":\"2026-10-23T18:26:08.083\"},{\"accountId\":26,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"adv_user_1792754782\",\"fullName\":\"Adversarial Test User\",\"email\":\"adv_user_1792754782@example.com\",\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:22.573\",\"updatedAt\":null},{\"accountId\":27,\"roleId\":1,\"roleCode\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"username\":\"evil_admin_1792754782\",\"fullName\":\"Self Made Admin\",\"email\":null,\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:22.653\",\"updatedAt\":null},{\"accountId\":28,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"adv_user_1792755246\",\"fullName\":\"Adversarial Test User\",\"email\":\"adv_user_1792755246@example.com\",\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:06.3\",\"updatedAt\":null},{\"accountId\":29,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"evil_admin_1792755246\",\"fullName\":\"Self Made Admin\",\"email\":null,\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:06.683\",\"updatedAt\":null},{\"accountId\":30,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792755254\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792755254@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:15.257\",\"updatedAt\":\"2026-10-23T18:34:16.16\"},{\"accountId\":31,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"user_25492\",\"fullName\":\"Khách Hàng Thân Thiết\",\"email\":\"user_25492@pos.vn\",\"phoneNumber\":\"0912345678\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-26T21:38:12.97\",\"updatedAt\":\"2026-10-26T21:38:13.117\"},{\"accountId\":32,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"user_25837\",\"fullName\":\"Khách Hàng Thân Thiết\",\"email\":\"user_25837@pos.vn\",\"phoneNumber\":\"0912345678\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-26T21:43:57.933\",\"updatedAt\":\"2026-10-26T21:43:57.973\"},{\"accountId\":33,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"user_25964\",\"fullName\":\"Khách Hàng Thân Thiết\",\"email\":\"user_25964@pos.vn\",\"phoneNumber\":\"0912345678\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-26T21:46:05.017\",\"updatedAt\":\"2026-10-26T21:46:05.077\"},{\"accountId\":34,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1794223744\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1794223744@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-11-09T18:29:05.097\",\"updatedAt\":\"2026-11-09T18:29:05.8\"}]"
                   },
                   {
                       "TestId":  "RBAC-04",
@@ -299,11 +299,11 @@
                       "Uri":  "http://localhost:5138/api/account/members",
                       "ExpectedStatus":  "200",
                       "ActualStatus":  200,
-                      "DurationMs":  55.32,
+                      "DurationMs":  69.25,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "",
-                      "SanitizedResponse":  "[{\"accountId\":1,\"roleId\":1,\"roleCode\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"username\":\"admin\",\"fullName\":\"Nguyễn Văn Quản Trị\",\"email\":\"admin@restaurantpos.vn\",\"phoneNumber\":\"0901234567\",\"avatar\":\"admin_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":2,\"roleId\":2,\"roleCode\":\"MANAGER\",\"roleName\":\"Quản lý chi nhánh\",\"username\":\"manager01\",\"fullName\":\"Trần Thị Thu Quản Lý\",\"email\":\"manager01@restaurantpos.vn\",\"phoneNumber\":\"0902345678\",\"avatar\":\"manager_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":3,\"roleId\":3,\"roleCode\":\"CASHIER\",\"roleName\":\"Thu ngân\",\"username\":\"cashier_mai\",\"fullName\":\"Lê Tuyết Mai\",\"email\":\"mai.cashier@restaurantpos.vn\",\"phoneNumber\":\"0903456789\",\"avatar\":\"mai_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":4,\"roleId\":4,\"roleCode\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"username\":\"waiter_nam\",\"fullName\":\"Phạm Hoàng Nam\",\"email\":\"nam.waiter@restaurantpos.vn\",\"phoneNumber\":\"0904567890\",\"avatar\":\"nam_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":5,\"roleId\":4,\"roleCode\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"username\":\"waiter_lan\",\"fullName\":\"Đỗ Ngọc Lan\",\"email\":\"lan.waiter@restaurantpos.vn\",\"phoneNumber\":\"0905678901\",\"avatar\":\"lan_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":6,\"roleId\":5,\"roleCode\":\"BARISTA_LEAD\",\"roleName\":\"Trưởng quầy pha chế\",\"username\":\"barista_tuan\",\"fullName\":\"Vũ Anh Tuấn\",\"email\":\"tuan.barista@restaurantpos.vn\",\"phoneNumber\":\"0906789012\",\"avatar\":\"tuan_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":7,\"roleId\":6,\"roleCode\":\"HEAD_CHEF\",\"roleName\":\"Đầu bếp chính\",\"username\":\"chef_dung\",\"fullName\":\"Ngô Tiến Dũng\",\"email\":\"dung.chef@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":\"chef_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":8,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"member_khang\",\"fullName\":\"Bùi Vĩnh Khang\",\"email\":\"khang.bui@gmail.com\",\"phoneNumber\":\"0908901234\",\"avatar\":\"khang_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Google\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":9,\"roleId\":9,\"roleCode\":\"VIP_MEMBER\",\"roleName\":\"Khách hàng VIP\",\"username\":\"vip_huong\",\"fullName\":\"Đặng Thu Hương\",\"email\":\"huong.dang@fpt.com\",\"phoneNumber\":\"0909012345\",\"avatar\":\"huong_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Zalo\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":10,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"member_linh\",\"fullName\":\"Võ Diệu Linh\",\"email\":\"linh.vo@outlook.com\",\"phoneNumber\":\"0910123456\",\"avatar\":\"linh_avatar.png\",\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Facebook\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":11,\"roleId\":11,\"roleCode\":\"KITCHEN\",\"roleName\":\"Bá»™ pháº­n báº¿p \u0026 pha cháº¿ (KDS)\",\"username\":\"kitchen\",\"fullName\":\"Báº¿p TrÆ°á»Ÿng KDS\",\"email\":\"kitchen@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.79\",\"updatedAt\":null},{\"accountId\":12,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792732887\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792732887@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:21:29.1\",\"updatedAt\":\"2026-10-23T12:21:30.113\"},{\"accountId\":13,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792732896\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792732896@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:21:37.36\",\"updatedAt\":\"2026-10-23T12:21:38.25\"},{\"accountId\":14,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733331\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733331@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:28:54.107\",\"updatedAt\":\"2026-10-23T12:28:56.257\"},{\"accountId\":15,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733344\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733344@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:29:05.233\",\"updatedAt\":\"2026-10-23T12:29:06.613\"},{\"accountId\":22,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733510\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733510@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:31:52.133\",\"updatedAt\":\"2026-10-23T12:31:53.183\"},{\"accountId\":25,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792754758\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792754758@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:05.81\",\"updatedAt\":\"2026-10-23T18:26:08.083\"},{\"accountId\":26,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"adv_user_1792754782\",\"fullName\":\"Adversarial Test User\",\"email\":\"adv_user_1792754782@example.com\",\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:22.573\",\"updatedAt\":null},{\"accountId\":27,\"roleId\":1,\"roleCode\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"username\":\"evil_admin_1792754782\",\"fullName\":\"Self Made Admin\",\"email\":null,\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:22.653\",\"updatedAt\":null},{\"accountId\":28,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"adv_user_1792755246\",\"fullName\":\"Adversarial Test User\",\"email\":\"adv_user_1792755246@example.com\",\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:06.3\",\"updatedAt\":null},{\"accountId\":29,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"evil_admin_1792755246\",\"fullName\":\"Self Made Admin\",\"email\":null,\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:06.683\",\"updatedAt\":null},{\"accountId\":30,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792755254\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792755254@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:15.257\",\"updatedAt\":\"2026-10-23T18:34:16.16\"}]"
+                      "SanitizedResponse":  "[{\"accountId\":1,\"roleId\":1,\"roleCode\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"username\":\"admin\",\"fullName\":\"Nguyễn Văn Quản Trị\",\"email\":\"admin@restaurantpos.vn\",\"phoneNumber\":\"0901234567\",\"avatar\":\"admin_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":2,\"roleId\":2,\"roleCode\":\"MANAGER\",\"roleName\":\"Quản lý chi nhánh\",\"username\":\"manager01\",\"fullName\":\"Trần Thị Thu Quản Lý\",\"email\":\"manager01@restaurantpos.vn\",\"phoneNumber\":\"0902345678\",\"avatar\":\"manager_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":3,\"roleId\":3,\"roleCode\":\"CASHIER\",\"roleName\":\"Thu ngân\",\"username\":\"cashier_mai\",\"fullName\":\"Lê Tuyết Mai\",\"email\":\"mai.cashier@restaurantpos.vn\",\"phoneNumber\":\"0903456789\",\"avatar\":\"mai_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":4,\"roleId\":4,\"roleCode\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"username\":\"waiter_nam\",\"fullName\":\"Phạm Hoàng Nam\",\"email\":\"nam.waiter@restaurantpos.vn\",\"phoneNumber\":\"0904567890\",\"avatar\":\"nam_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":5,\"roleId\":4,\"roleCode\":\"WAITER\",\"roleName\":\"Nhân viên phục vụ\",\"username\":\"waiter_lan\",\"fullName\":\"Đỗ Ngọc Lan\",\"email\":\"lan.waiter@restaurantpos.vn\",\"phoneNumber\":\"0905678901\",\"avatar\":\"lan_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":6,\"roleId\":5,\"roleCode\":\"BARISTA_LEAD\",\"roleName\":\"Trưởng quầy pha chế\",\"username\":\"barista_tuan\",\"fullName\":\"Vũ Anh Tuấn\",\"email\":\"tuan.barista@restaurantpos.vn\",\"phoneNumber\":\"0906789012\",\"avatar\":\"tuan_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":7,\"roleId\":6,\"roleCode\":\"HEAD_CHEF\",\"roleName\":\"Đầu bếp chính\",\"username\":\"chef_dung\",\"fullName\":\"Ngô Tiến Dũng\",\"email\":\"dung.chef@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":\"chef_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":8,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"member_khang\",\"fullName\":\"Bùi Vĩnh Khang\",\"email\":\"khang.bui@gmail.com\",\"phoneNumber\":\"0908901234\",\"avatar\":\"khang_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Google\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":9,\"roleId\":9,\"roleCode\":\"VIP_MEMBER\",\"roleName\":\"Khách hàng VIP\",\"username\":\"vip_huong\",\"fullName\":\"Đặng Thu Hương\",\"email\":\"huong.dang@fpt.com\",\"phoneNumber\":\"0909012345\",\"avatar\":\"huong_avatar.png\",\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Zalo\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":10,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"member_linh\",\"fullName\":\"Võ Diệu Linh\",\"email\":\"linh.vo@outlook.com\",\"phoneNumber\":\"0910123456\",\"avatar\":\"linh_avatar.png\",\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Facebook\",\"createdAt\":\"2026-10-23T12:14:16.667\",\"updatedAt\":null},{\"accountId\":11,\"roleId\":11,\"roleCode\":\"KITCHEN\",\"roleName\":\"Bá»™ pháº­n báº¿p \u0026 pha cháº¿ (KDS)\",\"username\":\"kitchen\",\"fullName\":\"Báº¿p TrÆ°á»Ÿng KDS\",\"email\":\"kitchen@restaurantpos.vn\",\"phoneNumber\":\"0907890123\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":true,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:14:16.79\",\"updatedAt\":null},{\"accountId\":12,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792732887\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792732887@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:21:29.1\",\"updatedAt\":\"2026-10-23T12:21:30.113\"},{\"accountId\":13,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792732896\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792732896@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:21:37.36\",\"updatedAt\":\"2026-10-23T12:21:38.25\"},{\"accountId\":14,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733331\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733331@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:28:54.107\",\"updatedAt\":\"2026-10-23T12:28:56.257\"},{\"accountId\":15,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733344\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733344@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:29:05.233\",\"updatedAt\":\"2026-10-23T12:29:06.613\"},{\"accountId\":22,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792733510\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792733510@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T12:31:52.133\",\"updatedAt\":\"2026-10-23T12:31:53.183\"},{\"accountId\":25,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792754758\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792754758@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:05.81\",\"updatedAt\":\"2026-10-23T18:26:08.083\"},{\"accountId\":26,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"adv_user_1792754782\",\"fullName\":\"Adversarial Test User\",\"email\":\"adv_user_1792754782@example.com\",\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:22.573\",\"updatedAt\":null},{\"accountId\":27,\"roleId\":1,\"roleCode\":\"ADMIN\",\"roleName\":\"Quản trị viên hệ thống\",\"username\":\"evil_admin_1792754782\",\"fullName\":\"Self Made Admin\",\"email\":null,\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:26:22.653\",\"updatedAt\":null},{\"accountId\":28,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"adv_user_1792755246\",\"fullName\":\"Adversarial Test User\",\"email\":\"adv_user_1792755246@example.com\",\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:06.3\",\"updatedAt\":null},{\"accountId\":29,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"evil_admin_1792755246\",\"fullName\":\"Self Made Admin\",\"email\":null,\"phoneNumber\":null,\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:06.683\",\"updatedAt\":null},{\"accountId\":30,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1792755254\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1792755254@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-23T18:34:15.257\",\"updatedAt\":\"2026-10-23T18:34:16.16\"},{\"accountId\":31,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"user_25492\",\"fullName\":\"Khách Hàng Thân Thiết\",\"email\":\"user_25492@pos.vn\",\"phoneNumber\":\"0912345678\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-26T21:38:12.97\",\"updatedAt\":\"2026-10-26T21:38:13.117\"},{\"accountId\":32,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"user_25837\",\"fullName\":\"Khách Hàng Thân Thiết\",\"email\":\"user_25837@pos.vn\",\"phoneNumber\":\"0912345678\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-26T21:43:57.933\",\"updatedAt\":\"2026-10-26T21:43:57.973\"},{\"accountId\":33,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"user_25964\",\"fullName\":\"Khách Hàng Thân Thiết\",\"email\":\"user_25964@pos.vn\",\"phoneNumber\":\"0912345678\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-10-26T21:46:05.017\",\"updatedAt\":\"2026-10-26T21:46:05.077\"},{\"accountId\":34,\"roleId\":8,\"roleCode\":\"MEMBER\",\"roleName\":\"Khách hàng thân thiết\",\"username\":\"test_member_1794223744\",\"fullName\":\"Acceptance Test Member\",\"email\":\"member_1794223744@restaurantpos.vn\",\"phoneNumber\":\"0987654321\",\"avatar\":null,\"isActive\":true,\"isEmailVerified\":false,\"oAuthProvider\":\"Local\",\"createdAt\":\"2026-11-09T18:29:05.097\",\"updatedAt\":\"2026-11-09T18:29:05.8\"}]"
                   },
                   {
                       "TestId":  "RBAC-05",
@@ -313,7 +313,7 @@
                       "Uri":  "http://localhost:5138/api/account/members",
                       "ExpectedStatus":  "403",
                       "ActualStatus":  403,
-                      "DurationMs":  10.05,
+                      "DurationMs":  14.37,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "",
@@ -327,7 +327,7 @@
                       "Uri":  "http://localhost:5138/api/account/members",
                       "ExpectedStatus":  "403",
                       "ActualStatus":  403,
-                      "DurationMs":  8.5,
+                      "DurationMs":  8.45,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "",
@@ -341,7 +341,7 @@
                       "Uri":  "http://localhost:5138/api/account/members",
                       "ExpectedStatus":  "403",
                       "ActualStatus":  403,
-                      "DurationMs":  7.41,
+                      "DurationMs":  7.2,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "",
@@ -355,7 +355,7 @@
                       "Uri":  "http://localhost:5138/api/account/members",
                       "ExpectedStatus":  "403",
                       "ActualStatus":  403,
-                      "DurationMs":  8.46,
+                      "DurationMs":  13.87,
                       "Verdict":  "PASS",
                       "FailureNote":  "",
                       "SanitizedRequest":  "",
