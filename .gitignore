@@ -28,3 +28,11 @@ Thumbs.db
 # Python cache
 __pycache__/
 *.pyc
+
+# Environment variables (Never commit real secrets)
+.env
+.env.*
+!.env.example
+*.env
+*.env.*
+!*.env.example
