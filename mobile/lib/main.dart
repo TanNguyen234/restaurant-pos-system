@@ -1,3 +1,6 @@
+import 'views/cashier/cashier_pos_terminal_page.dart';
+import 'views/cashier/shift_management_page.dart';
+import 'views/member/member_home_page.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'services/offline_sync_service.dart';
@@ -92,6 +95,9 @@ class RestaurantPosApp extends StatelessWidget {
         '/admin/users': (_) => const AdminUserPage(),
         '/product-detail': (_) => const _SampleProductDetailPage(),
         '/order-detail': (_) => const _SampleOrderDetailPage(),
+        '/cashier/pos': (_) => const CashierPosTerminalPage(),
+        '/cashier/shift': (_) => const ShiftManagementPage(),
+        '/member': (_) => const MemberHomePage(),
       },
     );
   }
@@ -376,6 +382,24 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
                         title: const Text('Tạo đơn hàng'),
                         subtitle: const Text('Lập order & thanh toán cho khách'),
                         onTap: () => go(const OrderCheckoutPage()),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.point_of_sale_rounded, color: Color(0xFF059669)),
+                        title: const Text('POS Thu Ngân (Split-Screen)'),
+                        subtitle: const Text('Giao diện bán hàng tablet & numpad tiền mặt'),
+                        onTap: () => go(const CashierPosTerminalPage()),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.lock_clock_outlined, color: Color(0xFFD97706)),
+                        title: const Text('Quản lý Ca làm việc (Shift)'),
+                        subtitle: const Text('Mở ca nhập float, đóng ca in Z-Report'),
+                        onTap: () => go(const ShiftManagementPage()),
+                      ),
+                      ListTile(
+                        leading: const Icon(Icons.card_membership_rounded, color: Color(0xFF7C3AED)),
+                        title: const Text('Cổng Khách hàng (Member Portal)'),
+                        subtitle: const Text('Quét QR bàn, tra cứu đơn, tích điểm & voucher'),
+                        onTap: () => go(const MemberHomePage()),
                       ),
                       if (canAccessKitchen)
                         ListTile(

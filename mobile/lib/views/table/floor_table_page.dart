@@ -1,3 +1,4 @@
+import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import '../../models/area.dart';
 import '../../models/dining_table.dart';
@@ -295,6 +296,424 @@ class _FloorTablePageState extends State<FloorTablePage>
     }
   }
 
+  Future<void> _handleTableMerge(DiningTable sourceTable) async {
+    final targetCandidates = _allTables
+        .where((t) => t.status == 1 && t.id != sourceTable.id)
+        .toList();
+
+    if (targetCandidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Không có bàn đang có khách nào khác để gộp vào!'),
+          backgroundColor: const Color(0xFFD97706),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    DiningTable? selectedTarget = targetCandidates.first;
+
+    final targetTable = await showDialog<DiningTable>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF3E8FF),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.merge_type_rounded, color: Color(0xFF7C3AED), size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text('Gộp bàn ăn', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Gộp tất cả món ăn & hóa đơn từ "${sourceTable.name}" vào bàn đích:',
+                      style: const TextStyle(fontSize: 14, color: Color(0xFF64748B))),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<DiningTable>(
+                        value: selectedTarget,
+                        isExpanded: true,
+                        items: targetCandidates.map((t) {
+                          return DropdownMenuItem<DiningTable>(
+                            value: t,
+                            child: Text('${t.name} (Sức chứa ${t.capacity} khách)'),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          if (val != null) setDialogState(() => selectedTarget = val);
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx, null),
+                  child: const Text('Hủy', style: TextStyle(color: Color(0xFF64748B))),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF7C3AED),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => Navigator.pop(dialogCtx, selectedTarget),
+                  child: const Text('Xác nhận gộp bàn', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (targetTable == null || !mounted) return;
+
+    final result = await TableRepository.mergeTables(sourceTable.id, targetTable.id);
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result['message']?.toString() ?? (result['success'] == true ? 'Gộp bàn thành công!' : 'Gộp bàn thất bại')),
+        backgroundColor: result['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+
+    if (result['success'] == true) {
+      await _loadData();
+    }
+  }
+
+  Future<void> _handleTableSplit(DiningTable sourceTable) async {
+    final emptyTables = _allTables.where((t) => t.status == 0 && t.id != sourceTable.id).toList();
+    if (emptyTables.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Không có bàn trống nào để tách món sang!'),
+          backgroundColor: const Color(0xFFD97706),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    final activeOrder = await TableRepository.getActiveOrderByTable(sourceTable.id);
+    if (activeOrder == null || activeOrder['details'] == null || (activeOrder['details'] as List).isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text('Bàn không có món ăn nào trong đơn hiện tại để tách!'),
+          backgroundColor: const Color(0xFFDC2626),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
+    final details = (activeOrder['details'] as List).cast<Map<String, dynamic>>();
+    final selectedDetailIds = <int>{};
+    DiningTable? selectedTarget = emptyTables.first;
+
+    if (!mounted) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0F9FF),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.call_split_rounded, color: Color(0xFF0284C7), size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  const Text('Tách bàn / Tách đơn', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Chọn các món muốn tách từ "${sourceTable.name}" sang bàn mới:',
+                        style: const TextStyle(fontSize: 13, color: Color(0xFF64748B))),
+                    const SizedBox(height: 12),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      child: ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: details.length,
+                        itemBuilder: (context, index) {
+                          final item = details[index];
+                          final id = item['orderDetailId'] as int? ?? item['id'] as int? ?? 0;
+                          final name = item['productName']?.toString() ?? 'Món ăn';
+                          final qty = item['quantity'] ?? 1;
+                          final price = (item['price'] as num?)?.toDouble() ?? 0.0;
+                          final isChecked = selectedDetailIds.contains(id);
+
+                          return CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('$name x$qty', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                            subtitle: Text(NumberFormat.currency(locale: 'vi_VN', symbol: 'đ').format(price * (qty as num))),
+                            value: isChecked,
+                            onChanged: (val) {
+                              setDialogState(() {
+                                if (val == true) {
+                                  selectedDetailIds.add(id);
+                                } else {
+                                  selectedDetailIds.remove(id);
+                                }
+                              });
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                    const Divider(height: 24),
+                    const Text('Chọn bàn trống đích để tách sang:', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+                      decoration: BoxDecoration(
+                        border: Border.all(color: const Color(0xFFCBD5E1)),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<DiningTable>(
+                          value: selectedTarget,
+                          isExpanded: true,
+                          items: emptyTables.map((t) {
+                            return DropdownMenuItem<DiningTable>(
+                              value: t,
+                              child: Text('${t.name} (Bàn trống • Sức chứa ${t.capacity})'),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) setDialogState(() => selectedTarget = val);
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx, false),
+                  child: const Text('Hủy', style: TextStyle(color: Color(0xFF64748B))),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF0284C7),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: selectedDetailIds.isEmpty
+                      ? null
+                      : () => Navigator.pop(dialogCtx, true),
+                  child: const Text('Tách bàn ngay', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted || selectedTarget == null) return;
+
+    final result = await TableRepository.splitTable(sourceTable.id, selectedTarget!.id, selectedDetailIds.toList());
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result['message']?.toString() ?? (result['success'] == true ? 'Tách bàn thành công!' : 'Tách bàn thất bại')),
+        backgroundColor: result['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+
+    if (result['success'] == true) {
+      await _loadData();
+    }
+  }
+
+  Future<void> _handleTableReservation(DiningTable table) async {
+    final nameCtrl = TextEditingController();
+    final phoneCtrl = TextEditingController();
+    final guestCtrl = TextEditingController(text: table.capacity.toString());
+    final noteCtrl = TextEditingController();
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            return AlertDialog(
+              backgroundColor: Colors.white,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 24),
+              actionsPadding: const EdgeInsets.fromLTRB(24, 16, 24, 20),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFFBEB),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.bookmark_add_outlined, color: Color(0xFFD97706), size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('Đặt trước ${table.name}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(labelText: 'Họ tên khách hàng *', hintText: 'VD: Anh Tuấn'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: phoneCtrl,
+                      keyboardType: TextInputType.phone,
+                      decoration: const InputDecoration(labelText: 'Số điện thoại *', hintText: 'VD: 0987654321'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: guestCtrl,
+                      keyboardType: TextInputType.number,
+                      decoration: const InputDecoration(labelText: 'Số lượng khách', hintText: '2'),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: noteCtrl,
+                      decoration: const InputDecoration(labelText: 'Ghi chú', hintText: 'VD: Chuẩn bị ghế trẻ em'),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx, false),
+                  child: const Text('Hủy', style: TextStyle(color: Color(0xFF64748B))),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFD97706),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () {
+                    if (nameCtrl.text.trim().isEmpty || phoneCtrl.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        const SnackBar(content: Text('Vui lòng nhập họ tên và số điện thoại!')),
+                      );
+                      return;
+                    }
+                    Navigator.pop(dialogCtx, true);
+                  },
+                  child: const Text('Xác nhận đặt bàn', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    final guestCount = int.tryParse(guestCtrl.text) ?? table.capacity;
+    final result = await TableRepository.reserveTable(
+      tableId: table.id,
+      customerName: nameCtrl.text.trim(),
+      phoneNumber: phoneCtrl.text.trim(),
+      guestCount: guestCount,
+      note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
+    );
+
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(result['message']?.toString() ?? (result['success'] == true ? 'Đặt bàn thành công!' : 'Đặt bàn thất bại')),
+        backgroundColor: result['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
+
+    if (result['success'] == true) {
+      await _loadData();
+    }
+  }
+
+  Future<void> _handleCheckInReservation(DiningTable table) async {
+    final success = await TableRepository.updateStatus(table.id, 1);
+    if (!mounted) return;
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Đã nhận bàn ${table.name} thành công. Chuyển sang trạng thái Có khách.'),
+          backgroundColor: const Color(0xFF059669),
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      await _loadData();
+    }
+  }
+
   void _showTableActionSheet(DiningTable table) {
     showModalBottomSheet(
       context: context,
@@ -305,9 +724,10 @@ class _FloorTablePageState extends State<FloorTablePage>
       ),
       builder: (bottomSheetCtx) {
         return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-            child: Column(
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+              child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
@@ -414,6 +834,67 @@ class _FloorTablePageState extends State<FloorTablePage>
                     _showChangeStatusDialog(table);
                   },
                 ),
+                if (table.status == 1) ...[
+                  _buildActionTile(
+                    icon: Icons.merge_type_rounded,
+                    iconColor: const Color(0xFF7C3AED),
+                    iconBg: const Color(0xFFF3E8FF),
+                    title: 'Gộp bàn',
+                    subtitle: 'Gộp hóa đơn bàn này vào bàn có khách khác',
+                    onTap: () {
+                      Navigator.pop(bottomSheetCtx);
+                      _handleTableMerge(table);
+                    },
+                  ),
+                  _buildActionTile(
+                    icon: Icons.call_split_rounded,
+                    iconColor: const Color(0xFF0284C7),
+                    iconBg: const Color(0xFFF0F9FF),
+                    title: 'Tách bàn / Tách đơn',
+                    subtitle: 'Chuyển một số món sang bàn trống mới',
+                    onTap: () {
+                      Navigator.pop(bottomSheetCtx);
+                      _handleTableSplit(table);
+                    },
+                  ),
+                ],
+                if (table.status == 0) ...[
+                  _buildActionTile(
+                    icon: Icons.bookmark_add_outlined,
+                    iconColor: const Color(0xFFD97706),
+                    iconBg: const Color(0xFFFFFBEB),
+                    title: 'Đặt bàn trước',
+                    subtitle: 'Lưu thông tin khách đặt bàn & giờ đến',
+                    onTap: () {
+                      Navigator.pop(bottomSheetCtx);
+                      _handleTableReservation(table);
+                    },
+                  ),
+                ],
+                if (table.status == 2) ...[
+                  _buildActionTile(
+                    icon: Icons.how_to_reg_rounded,
+                    iconColor: const Color(0xFF059669),
+                    iconBg: const Color(0xFFECFDF5),
+                    title: 'Khách đến nhận bàn',
+                    subtitle: 'Chuyển bàn sang trạng thái Có khách',
+                    onTap: () {
+                      Navigator.pop(bottomSheetCtx);
+                      _handleCheckInReservation(table);
+                    },
+                  ),
+                  _buildActionTile(
+                    icon: Icons.cancel_outlined,
+                    iconColor: const Color(0xFFDC2626),
+                    iconBg: const Color(0xFFFEF2F2),
+                    title: 'Hủy đặt bàn',
+                    subtitle: 'Chuyển bàn về trạng thái Trống',
+                    onTap: () {
+                      Navigator.pop(bottomSheetCtx);
+                      _updateTableStatus(table, 0);
+                    },
+                  ),
+                ],
                 _buildActionTile(
                   icon: Icons.swap_horiz_rounded,
                   iconColor: const Color(0xFFD97706),
@@ -441,8 +922,9 @@ class _FloorTablePageState extends State<FloorTablePage>
               ],
             ),
           ),
-        );
-      },
+        ),
+      );
+    },
     );
   }
 

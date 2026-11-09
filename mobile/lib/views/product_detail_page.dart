@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/product.dart';
@@ -106,6 +107,22 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
 
     final noteString = options.isNotEmpty ? options.join(' • ') : null;
 
+    final modifiers = <Map<String, dynamic>>[];
+    if (_selectedSize != null) {
+      modifiers.add({
+        'modifierName': _selectedSize!.attributeName,
+        'modifierGroup': 'Size',
+        'extraPrice': _selectedSize!.extraPrice,
+      });
+    }
+    for (var top in _selectedToppings) {
+      modifiers.add({
+        'modifierName': top.attributeName,
+        'modifierGroup': 'Topping',
+        'extraPrice': top.extraPrice,
+      });
+    }
+
     final cartItem = {
       'product_id': widget.product.productId,
       'product_name': widget.product.productName,
@@ -113,6 +130,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
       'quantity': _quantity,
       'image_url': widget.product.imageUrl,
       'note': noteString,
+      'modifiers_json': modifiers.isNotEmpty ? jsonEncode(modifiers) : null,
     };
 
     await _dbHelper.insertOrUpdateCart(cartItem);

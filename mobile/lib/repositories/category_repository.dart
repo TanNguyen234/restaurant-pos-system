@@ -4,16 +4,33 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../models/category.dart';
 import '../config/api_config.dart';
+import '../utils/database_helper.dart';
 
 class CategoryRepository {
   static String baseUrl = '${ApiConfig.baseUrl}/api/category';
   static Duration timeoutDuration = const Duration(seconds: 4);
 
   static Future<List<Category>?> getCategories() async {
-    final res = await http.get(Uri.parse(baseUrl)).timeout(timeoutDuration);
-    if (res.statusCode != 200) throw StateError('Danh mục chưa tải được (HTTP ${res.statusCode})');
-    final List<dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
-    return data.map((e) => Category.fromMap(e)).toList();
+    try {
+      final res = await http.get(Uri.parse(baseUrl)).timeout(timeoutDuration);
+      if (res.statusCode == 200) {
+        final List<dynamic> data = jsonDecode(utf8.decode(res.bodyBytes));
+        final cats = data.map((e) => Category.fromMap(e)).toList();
+        unawaited(DatabaseHelper().cacheCategories(cats.map((c) => c.toMap()).toList()));
+        return cats;
+      }
+    } catch (_) {
+      final cached = await DatabaseHelper().getCachedCategories();
+      if (cached.isNotEmpty) {
+        return cached.map((e) => Category.fromMap(e)).toList();
+      }
+      rethrow;
+    }
+    final cached = await DatabaseHelper().getCachedCategories();
+    if (cached.isNotEmpty) {
+      return cached.map((e) => Category.fromMap(e)).toList();
+    }
+    throw StateError('Danh mục chưa tải được');
   }
 
   static Future<Category?> getCategoryById(int id) async {

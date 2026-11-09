@@ -1,8 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/product.dart';
+import '../utils/database_helper.dart';
 
 class ProductRepository {
   static String baseUrl = '${ApiConfig.baseUrl}/api/product';
@@ -24,18 +26,64 @@ class ProductRepository {
     if (search != null && search.trim().isNotEmpty) queryParams['search'] = search.trim();
     if (sortBy != null && sortBy.trim().isNotEmpty) queryParams['sortBy'] = sortBy.trim();
 
-    final uri = Uri.parse(baseUrl).replace(queryParameters: queryParams);
-    final res = await http.get(uri).timeout(timeoutDuration);
-    if (res.statusCode != 200) throw StateError('Không tải được danh sách sản phẩm (HTTP ${res.statusCode})');
-    return PagedProductResult.fromMap(jsonDecode(utf8.decode(res.bodyBytes)));
+    try {
+      final uri = Uri.parse(baseUrl).replace(queryParameters: queryParams);
+      final res = await http.get(uri).timeout(timeoutDuration);
+      if (res.statusCode == 200) {
+        final result = PagedProductResult.fromMap(jsonDecode(utf8.decode(res.bodyBytes)));
+        unawaited(DatabaseHelper().cacheProducts(result.data.map((p) => p.toMap()).toList()));
+        return result;
+      }
+    } catch (_) {
+      final cached = await DatabaseHelper().getCachedProducts(categoryId: categoryId);
+      if (cached.isNotEmpty) {
+        final products = cached.map((e) => Product.fromMap(e)).toList();
+        return PagedProductResult(
+          data: products,
+          totalItems: products.length,
+          page: 1,
+          pageSize: products.length,
+          totalPages: 1,
+        );
+      }
+      rethrow;
+    }
+    final cached = await DatabaseHelper().getCachedProducts(categoryId: categoryId);
+    if (cached.isNotEmpty) {
+      final products = cached.map((e) => Product.fromMap(e)).toList();
+      return PagedProductResult(
+        data: products,
+        totalItems: products.length,
+        page: 1,
+        pageSize: products.length,
+        totalPages: 1,
+      );
+    }
+    throw StateError('Không tải được danh sách sản phẩm');
   }
 
   /// Lấy danh sách món nổi bật / bán chạy
   static Future<List<Product>> getFeaturedProducts({int limit = 10}) async {
-    final res = await http.get(Uri.parse('$baseUrl/featured?limit=$limit')).timeout(timeoutDuration);
-    if (res.statusCode != 200) throw StateError('Không tải được món nổi bật (HTTP ${res.statusCode})');
-    final data = jsonDecode(utf8.decode(res.bodyBytes)) as List;
-    return data.map((e) => Product.fromMap(e as Map<String, dynamic>)).toList();
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/featured?limit=$limit')).timeout(timeoutDuration);
+      if (res.statusCode == 200) {
+        final data = jsonDecode(utf8.decode(res.bodyBytes)) as List;
+        final list = data.map((e) => Product.fromMap(e as Map<String, dynamic>)).toList();
+        unawaited(DatabaseHelper().cacheProducts(list.map((p) => p.toMap()).toList()));
+        return list;
+      }
+    } catch (_) {
+      final cached = await DatabaseHelper().getCachedProducts();
+      if (cached.isNotEmpty) {
+        return cached.map((e) => Product.fromMap(e)).take(limit).toList();
+      }
+      rethrow;
+    }
+    final cached = await DatabaseHelper().getCachedProducts();
+    if (cached.isNotEmpty) {
+      return cached.map((e) => Product.fromMap(e)).take(limit).toList();
+    }
+    throw StateError('Không tải được món nổi bật');
   }
 
   /// Lấy chi tiết sản phẩm kèm thuộc tính (Attributes / Topping / Size)

@@ -1,3 +1,5 @@
+import 'dart:convert';
+import '../../config/api_config.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/dining_table.dart';
@@ -80,8 +82,89 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
     );
   }
 
-  double get _discount => 0; // Có thể mở rộng voucher
-  double get _finalAmount => _subtotal - _discount;
+  final TextEditingController _voucherController = TextEditingController();
+  String? _appliedDiscountCode;
+  double _discountAmount = 0.0;
+  bool _isValidatingVoucher = false;
+
+  double get _discount => _discountAmount;
+  double get _finalAmount => (_subtotal - _discount) < 0 ? 0.0 : (_subtotal - _discount);
+
+  Future<void> _applyVoucher() async {
+    final code = _voucherController.text.trim().toUpperCase();
+    if (code.isEmpty) return;
+
+    setState(() => _isValidatingVoucher = true);
+    try {
+      final res = await ApiConfig.post(
+        Uri.parse('${ApiConfig.baseUrl}/api/discount/validate'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'code': code,
+          'orderAmount': _subtotal,
+        }),
+      );
+
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body);
+        if (data['success'] == true) {
+          setState(() {
+            _appliedDiscountCode = code;
+            _discountAmount = (data['discountAmount'] as num?)?.toDouble() ?? 0.0;
+            _isValidatingVoucher = false;
+          });
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Áp dụng mã giảm giá "$code" thành công! Giảm ${currencyFormatter.format(_discountAmount)}'),
+                backgroundColor: const Color(0xFF059669),
+              ),
+            );
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // Fallback: Check local seeded discounts if backend offline
+    if (code == 'BANMOI10') {
+      setState(() {
+        _appliedDiscountCode = code;
+        _discountAmount = _subtotal * 0.10;
+      });
+    } else if (code == 'GIAM20K') {
+      setState(() {
+        _appliedDiscountCode = code;
+        _discountAmount = _subtotal >= 100000 ? 20000.0 : 0.0;
+      });
+    } else if (code == 'VIPMEMBER') {
+      setState(() {
+        _appliedDiscountCode = code;
+        _discountAmount = _subtotal * 0.15;
+      });
+    } else {
+      setState(() => _isValidatingVoucher = false);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Mã giảm giá không hợp lệ hoặc không đủ điều kiện!'),
+            backgroundColor: Color(0xFFDC2626),
+          ),
+        );
+      }
+      return;
+    }
+
+    setState(() => _isValidatingVoucher = false);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Áp dụng mã "$code" thành công! Giảm ${currencyFormatter.format(_discountAmount)}'),
+          backgroundColor: const Color(0xFF059669),
+        ),
+      );
+    }
+  }
 
   Future<void> _submitOrder() async {
     if (_cartItems.isEmpty) {
@@ -103,11 +186,18 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
 
     // Chuẩn bị payload tạo đơn
     final itemsPayload = _cartItems.map((item) {
+      List<dynamic> modifiersList = [];
+      if (item['modifiers_json'] != null) {
+        try {
+          modifiersList = jsonDecode(item['modifiers_json'].toString()) as List;
+        } catch (_) {}
+      }
       return {
         'productId': item['product_id'] ?? item['productId'],
         'quantity': item['quantity'] ?? 1,
         'unitPrice': (item['price'] as num? ?? 0).toDouble(),
         'itemNote': item['note'],
+        'modifiers': modifiersList,
       };
     }).toList();
 
@@ -117,6 +207,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
       'phoneNumber': _phoneController.text.trim(),
       'orderType': _orderType,
       'note': _noteController.text.trim(),
+      'discountCode': _appliedDiscountCode,
       'totalAmount': _subtotal,
       'discountAmount': _discount,
       'finalAmount': _finalAmount,
@@ -401,6 +492,49 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                               );
                             },
                           ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: TextField(
+                                  controller: _voucherController,
+                                  textCapitalization: TextCapitalization.characters,
+                                  decoration: InputDecoration(
+                                    hintText: 'Mã giảm giá (BANMOI10, GIAM20K, VIPMEMBER)',
+                                    prefixIcon: const Icon(Icons.confirmation_number_outlined, size: 20),
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                                    isDense: true,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              ElevatedButton(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF0F172A),
+                                  foregroundColor: Colors.white,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                ),
+                                onPressed: _isValidatingVoucher ? null : _applyVoucher,
+                                child: _isValidatingVoucher
+                                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    : const Text('Áp dụng', style: TextStyle(fontWeight: FontWeight.bold)),
+                              ),
+                            ],
+                          ),
+                          if (_discountAmount > 0) ...[
+                            const SizedBox(height: 10),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text('Giảm giá (${_appliedDiscountCode ?? ""}):',
+                                    style: const TextStyle(fontSize: 14, color: Color(0xFF059669), fontWeight: FontWeight.w600)),
+                                Text('-${currencyFormatter.format(_discountAmount)}',
+                                    style: const TextStyle(fontSize: 14, color: Color(0xFF059669), fontWeight: FontWeight.bold)),
+                              ],
+                            ),
+                          ],
                           const Divider(height: 24),
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
