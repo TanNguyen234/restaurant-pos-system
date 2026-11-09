@@ -5,6 +5,7 @@ import '../models/product.dart';
 import '../repositories/product_repository.dart';
 import '../utils/database_helper.dart';
 import 'cart_page.dart';
+import '../widgets/skeleton_loading.dart';
 
 class ProductDetailPage extends StatefulWidget {
   final Product product;
@@ -602,7 +603,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
 
   Widget _buildRelatedSection() {
     if (_isLoadingRelated) {
-      return const Center(child: CircularProgressIndicator());
+      return const SkeletonShimmer(child: SkeletonCardPlaceholder());
     }
     if (_relatedProducts.isEmpty) {
       return const SizedBox.shrink();

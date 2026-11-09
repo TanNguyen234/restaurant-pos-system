@@ -7,6 +7,7 @@ import '../../repositories/order_repository.dart';
 import '../../repositories/table_repository.dart';
 import '../../utils/database_helper.dart';
 import 'order_detail_page.dart';
+import '../../widgets/skeleton_loading.dart';
 
 class OrderCheckoutPage extends StatefulWidget {
   final int? preSelectedTableId;
@@ -270,7 +271,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
         elevation: 0,
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const SkeletonListPlaceholder(itemCount: 4)
           : SingleChildScrollView(
               padding: const EdgeInsets.all(16),
               child: Column(

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../models/order.dart';
 import '../../models/payment.dart';
 import '../../repositories/order_repository.dart';
+import '../../widgets/skeleton_loading.dart';
 
 class OrderDetailPage extends StatefulWidget {
   final int orderId;
@@ -51,6 +52,161 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       _vietQr = qr;
       _isLoading = false;
     });
+  }
+
+  Future<void> _showVoidItemDialog(OrderItemModel item) async {
+    if (_order == null) return;
+    String selectedReason = 'Khách đổi ý / Đổi món';
+    int voidQty = 1;
+    final otherReasonController = TextEditingController();
+
+    final reasons = [
+      'Khách đổi ý / Đổi món',
+      'Bếp báo hết nguyên liệu',
+      'Món làm sai yêu cầu khách',
+      'Chờ quá lâu không muốn đợi',
+      'Khác...',
+    ];
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setDialogState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFEF2F2),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.remove_circle_outline, color: Color(0xFFEF4444), size: 22),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text('Xác nhận hủy món', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Món: ${item.productName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    const SizedBox(height: 8),
+                    if (item.quantity > 1) ...[
+                      Row(
+                        children: [
+                          const Text('Số lượng hủy:', style: TextStyle(fontSize: 13)),
+                          const Spacer(),
+                          IconButton(
+                            icon: const Icon(Icons.remove_circle_outline),
+                            onPressed: voidQty > 1 ? () => setDialogState(() => voidQty--) : null,
+                          ),
+                          Text('$voidQty / ${item.quantity}', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          IconButton(
+                            icon: const Icon(Icons.add_circle_outline),
+                            onPressed: voidQty < item.quantity ? () => setDialogState(() => voidQty++) : null,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                    ],
+                    const Text('Lý do hủy món (*):', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 6),
+                    ...reasons.map((r) {
+                      final isSelected = selectedReason == r;
+                      return InkWell(
+                        onTap: () => setDialogState(() => selectedReason = r),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 4),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isSelected ? Icons.radio_button_checked : Icons.radio_button_off,
+                                size: 18,
+                                color: isSelected ? const Color(0xFFEF4444) : const Color(0xFF94A3B8),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(r, style: TextStyle(fontSize: 13, fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal)),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }),
+                    if (selectedReason == 'Khác...') ...[
+                      const SizedBox(height: 6),
+                      TextField(
+                        controller: otherReasonController,
+                        decoration: const InputDecoration(
+                          hintText: 'Nhập lý do hủy chi tiết...',
+                          border: OutlineInputBorder(),
+                          isDense: true,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogCtx, false),
+                  child: const Text('Đóng', style: TextStyle(color: Color(0xFF64748B))),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFEF4444),
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => Navigator.pop(dialogCtx, true),
+                  child: const Text('Hủy món ngay', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed == true && mounted && _order != null) {
+      final reason = selectedReason == 'Khác...'
+          ? (otherReasonController.text.trim().isNotEmpty ? otherReasonController.text.trim() : 'Lý do khác')
+          : selectedReason;
+
+      final res = await _orderRepo.voidOrderItem(
+        orderId: _order!.orderId,
+        orderDetailId: item.orderDetailId,
+        reason: reason,
+        voidQuantity: voidQty,
+      );
+
+      if (!mounted) return;
+
+      if (res['success'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message'] ?? 'Đã hủy món thành công'),
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        _loadOrderDetails();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message'] ?? 'Không thể hủy món'),
+            backgroundColor: const Color(0xFFEF4444),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
   }
 
   Future<void> _handleConfirmPayment() async {
@@ -121,7 +277,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     if (_isLoading) {
       return Scaffold(
         appBar: AppBar(title: const Text('Chi tiết đơn hàng')),
-        body: const Center(child: CircularProgressIndicator()),
+        body: const SkeletonListPlaceholder(itemCount: 4),
       );
     }
 
@@ -473,18 +629,26 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                       separatorBuilder: (_, _) => const Divider(height: 16),
                       itemBuilder: (context, index) {
                         final item = order.items[index];
+                        final isVoided = item.cookingStatus == 3 || (item.itemNote != null && item.itemNote!.contains('[ĐÃ HỦY'));
+                        final canVoid = !isVoided && order.paymentStatus == 0 && order.status != 4;
+
                         return Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF1F5F9),
+                                color: isVoided ? const Color(0xFFFEE2E2) : const Color(0xFFF1F5F9),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 '${item.quantity}x',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                style: TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13,
+                                  decoration: isVoided ? TextDecoration.lineThrough : null,
+                                  color: isVoided ? const Color(0xFFEF4444) : const Color(0xFF0F172A),
+                                ),
                               ),
                             ),
                             const SizedBox(width: 12),
@@ -494,43 +658,74 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                                 children: [
                                   Text(
                                     item.productName,
-                                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                      decoration: isVoided ? TextDecoration.lineThrough : null,
+                                      color: isVoided ? const Color(0xFF94A3B8) : const Color(0xFF0F172A),
+                                    ),
                                   ),
                                   if (item.itemNote != null && item.itemNote!.isNotEmpty)
                                     Text(
                                       'Ghi chú: ${item.itemNote}',
-                                      style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        color: isVoided ? const Color(0xFFEF4444) : const Color(0xFF64748B),
+                                        fontWeight: isVoided ? FontWeight.w600 : FontWeight.normal,
+                                      ),
                                     ),
                                   const SizedBox(height: 4),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: item.cookingStatus == 2
-                                          ? const Color(0xFFECFDF5)
-                                          : const Color(0xFFFFFBEB),
+                                      color: isVoided
+                                          ? const Color(0xFFFEF2F2)
+                                          : (item.cookingStatus == 2 ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB)),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
-                                      item.cookingStatusText,
+                                      isVoided ? 'Đã hủy món' : item.cookingStatusText,
                                       style: TextStyle(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
-                                        color: item.cookingStatus == 2
-                                            ? const Color(0xFF059669)
-                                            : const Color(0xFFD97706),
+                                        color: isVoided
+                                            ? const Color(0xFFDC2626)
+                                            : (item.cookingStatus == 2 ? const Color(0xFF059669) : const Color(0xFFD97706)),
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
                             ),
-                            Text(
-                              currencyFormatter.format(item.subTotal),
-                              style: const TextStyle(
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                color: Color(0xFF0F172A),
-                              ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.end,
+                              children: [
+                                Text(
+                                  currencyFormatter.format(item.subTotal),
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                    decoration: isVoided ? TextDecoration.lineThrough : null,
+                                    color: isVoided ? const Color(0xFF94A3B8) : const Color(0xFF0F172A),
+                                  ),
+                                ),
+                                if (canVoid)
+                                  InkWell(
+                                    onTap: () => _showVoidItemDialog(item),
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: const Padding(
+                                      padding: EdgeInsets.only(top: 4),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.remove_circle_outline, size: 13, color: Color(0xFFEF4444)),
+                                          SizedBox(width: 2),
+                                          Text('Hủy món', style: TextStyle(fontSize: 11, color: Color(0xFFEF4444), fontWeight: FontWeight.w600)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ],
                         );

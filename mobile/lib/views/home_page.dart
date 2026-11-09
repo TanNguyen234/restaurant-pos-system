@@ -10,6 +10,7 @@ import 'cart_page.dart';
 import 'product_detail_page.dart';
 import 'admin/admin_category_page.dart';
 import 'admin/admin_product_page.dart';
+import '../widgets/skeleton_loading.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -511,12 +512,7 @@ class _HomePageState extends State<HomePage> {
 
   Widget _buildProductGrid() {
     if (_isLoading) {
-      return const SizedBox(
-        height: 300,
-        child: Center(
-          child: CircularProgressIndicator(color: Color(0xFF0F172A)),
-        ),
-      );
+      return const SkeletonGridPlaceholder(itemCount: 4);
     }
 
     if (_products.isEmpty) {

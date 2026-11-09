@@ -5,6 +5,7 @@ import '../utils/database_helper.dart';
 import 'cart_page.dart';
 import 'home_page.dart';
 import 'admin/admin_category_page.dart';
+import '../widgets/skeleton_loading.dart';
 
 class CategoryPage extends StatefulWidget {
   final String title;
@@ -126,7 +127,7 @@ class _CategoryPageState extends State<CategoryPage> {
         ],
       ),
       body: isLoading
-          ? const Center(child: CircularProgressIndicator())
+          ? const SkeletonListPlaceholder(itemCount: 5)
           : RefreshIndicator(
               onRefresh: () async {
                 _initData();

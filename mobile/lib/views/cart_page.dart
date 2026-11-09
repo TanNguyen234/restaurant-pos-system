@@ -1,7 +1,9 @@
+import '../config/api_config.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../utils/database_helper.dart';
 import 'order/order_checkout_page.dart';
+import '../widgets/skeleton_loading.dart';
 
 class CartPage extends StatefulWidget {
   const CartPage({super.key});
@@ -162,7 +164,7 @@ class _CartPageState extends State<CartPage> {
         ],
       ),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF0F172A)))
+          ? const SkeletonListPlaceholder(itemCount: 3)
           : _cartItems.isEmpty
               ? _buildEmptyState()
               : _buildCartList(),
@@ -296,7 +298,7 @@ class _CartPageState extends State<CartPage> {
                         ? Image.network(
                             item['image_url'].toString().startsWith('http')
                                 ? item['image_url'].toString().split(';').first
-                                : 'http://localhost:5138/images/products/',
+                                : '${ApiConfig.baseUrl.replaceAll('/api', '')}/images/products/${item['image_url'].toString().split(';').first}',
                             width: 60,
                             height: 60,
                             fit: BoxFit.cover,

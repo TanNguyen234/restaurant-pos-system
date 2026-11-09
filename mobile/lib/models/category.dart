@@ -1,3 +1,5 @@
+import '../config/api_config.dart';
+
 class Category {
   final int id;
   final String name;
@@ -20,7 +22,8 @@ class Category {
   String get fullIconUrl {
     if (icon.isEmpty) return '';
     if (icon.startsWith('http://') || icon.startsWith('https://')) return icon;
-    return 'http://localhost:5138/images/categories/$icon';
+    final base = ApiConfig.baseUrl.replaceAll('/api', '');
+    return '$base/images/categories/$icon';
   }
 
   factory Category.fromMap(Map<String, dynamic> map) {
