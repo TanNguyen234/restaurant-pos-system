@@ -1,19 +1,15 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io' show Platform;
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/area.dart';
 import '../models/dining_table.dart';
 
 class TableRepository {
-  // Platform-aware default host: 10.0.2.2:5138 for Android emulator, localhost:5138 for Windows/Web/Desktop
-  static String defaultHost =
-      (!kIsWeb && Platform.isAndroid) ? '10.0.2.2:5138' : 'localhost:5138';
-
-  // Base URL pointing to backend Table API
-  static String baseUrl = "http://$defaultHost/api/table";
+  static String? _baseUrl;
+  /// Base URL pointing dynamically to backend Table API
+  static String get baseUrl => _baseUrl ?? '${ApiConfig.baseUrl}/api/table';
+  static set baseUrl(String value) => _baseUrl = value;
   static Duration timeoutDuration = const Duration(seconds: 4);
 
   static Future<Map<String, String>> _getHeaders() async {
@@ -310,6 +306,179 @@ class TableRepository {
       return null;
     } catch (_) {
       return null;
+    }
+  }
+
+  /// Tạo bàn mới (POST /api/table)
+  static Future<Map<String, dynamic>> createTable({
+    required int areaId,
+    required String tableName,
+    int capacity = 4,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http
+          .post(
+            Uri.parse(baseUrl),
+            headers: headers,
+            body: jsonEncode({
+              'areaId': areaId,
+              'tableName': tableName,
+              'capacity': capacity,
+            }),
+          )
+          .timeout(timeoutDuration);
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return {
+        'success': response.statusCode == 200 && data['success'] == true,
+        'message': data['message'] ?? (response.statusCode == 200 ? 'Tạo bàn thành công' : 'Thất bại'),
+        'data': data['data'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
+    }
+  }
+
+  /// Cập nhật thông tin bàn (PUT /api/table/{id})
+  static Future<Map<String, dynamic>> updateTable(
+    int tableId, {
+    int? areaId,
+    String? tableName,
+    int? capacity,
+    int? status,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final Map<String, dynamic> updateData = {};
+      if (areaId != null) updateData['areaId'] = areaId;
+      if (tableName != null) updateData['tableName'] = tableName;
+      if (capacity != null) updateData['capacity'] = capacity;
+      if (status != null) updateData['status'] = status;
+
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/$tableId'),
+            headers: headers,
+            body: jsonEncode(updateData),
+          )
+          .timeout(timeoutDuration);
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return {
+        'success': response.statusCode == 200 && data['success'] == true,
+        'message': data['message'] ?? (response.statusCode == 200 ? 'Cập nhật bàn thành công' : 'Thất bại'),
+        'data': data['data'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
+    }
+  }
+
+  /// Xóa bàn ăn (DELETE /api/table/{id})
+  static Future<Map<String, dynamic>> deleteTable(int tableId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http
+          .delete(
+            Uri.parse('$baseUrl/$tableId'),
+            headers: headers,
+          )
+          .timeout(timeoutDuration);
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return {
+        'success': response.statusCode == 200 && data['success'] == true,
+        'message': data['message'] ?? (response.statusCode == 200 ? 'Xóa bàn thành công' : 'Xóa bàn thất bại'),
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
+    }
+  }
+
+  /// Tạo khu vực mới (POST /api/table/area)
+  static Future<Map<String, dynamic>> createArea({
+    required String areaName,
+    String? description,
+    int sortOrder = 0,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http
+          .post(
+            Uri.parse('$baseUrl/area'),
+            headers: headers,
+            body: jsonEncode({
+              'areaName': areaName,
+              'description': description,
+              'sortOrder': sortOrder,
+            }),
+          )
+          .timeout(timeoutDuration);
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return {
+        'success': response.statusCode == 200 && data['success'] == true,
+        'message': data['message'] ?? (response.statusCode == 200 ? 'Tạo khu vực thành công' : 'Thất bại'),
+        'data': data['data'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
+    }
+  }
+
+  /// Cập nhật khu vực (PUT /api/table/area/{id})
+  static Future<Map<String, dynamic>> updateArea(
+    int areaId, {
+    required String areaName,
+    String? description,
+    int sortOrder = 0,
+    bool isActive = true,
+  }) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http
+          .put(
+            Uri.parse('$baseUrl/area/$areaId'),
+            headers: headers,
+            body: jsonEncode({
+              'areaName': areaName,
+              'description': description,
+              'sortOrder': sortOrder,
+              'isActive': isActive,
+            }),
+          )
+          .timeout(timeoutDuration);
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return {
+        'success': response.statusCode == 200 && data['success'] == true,
+        'message': data['message'] ?? (response.statusCode == 200 ? 'Cập nhật khu vực thành công' : 'Thất bại'),
+        'data': data['data'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
+    }
+  }
+
+  /// Xóa khu vực (DELETE /api/table/area/{id})
+  static Future<Map<String, dynamic>> deleteArea(int areaId) async {
+    try {
+      final headers = await _getHeaders();
+      final response = await http
+          .delete(
+            Uri.parse('$baseUrl/area/$areaId'),
+            headers: headers,
+          )
+          .timeout(timeoutDuration);
+
+      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      return {
+        'success': response.statusCode == 200 && data['success'] == true,
+        'message': data['message'] ?? (response.statusCode == 200 ? 'Xóa khu vực thành công' : 'Xóa khu vực thất bại'),
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
     }
   }
 }

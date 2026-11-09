@@ -394,4 +394,165 @@ public class TableRepository : BaseRepository
         context.SaveChanges();
         return (true, $"Đã hủy đặt bàn cho khách '{res.CustomerName}'");
     }
+
+    public List<TableResponseDto> GetAllEnrichedTables()
+    {
+        var tables = context.DiningTables
+            .OrderBy(t => t.AreaId)
+            .ThenBy(t => t.TableId)
+            .ToList();
+
+        var activeOrderIds = tables
+            .Where(t => t.CurrentOrderId.HasValue)
+            .Select(t => t.CurrentOrderId!.Value)
+            .Distinct()
+            .ToList();
+
+        var orders = context.Orders
+            .Where(o => activeOrderIds.Contains(o.OrderId))
+            .ToDictionary(o => o.OrderId);
+
+        var detailsCount = context.OrderDetails
+            .Where(d => activeOrderIds.Contains(d.OrderId) && d.CookingStatus != 3)
+            .GroupBy(d => d.OrderId)
+            .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+
+        return tables.Select(t =>
+        {
+            Order? ord = null;
+            if (t.CurrentOrderId.HasValue)
+            {
+                orders.TryGetValue(t.CurrentOrderId.Value, out ord);
+            }
+
+            int count = 0;
+            if (t.CurrentOrderId.HasValue)
+            {
+                detailsCount.TryGetValue(t.CurrentOrderId.Value, out count);
+            }
+
+            return new TableResponseDto
+            {
+                TableId = t.TableId,
+                AreaId = t.AreaId,
+                TableName = t.TableName,
+                Capacity = t.Capacity,
+                Status = t.Status,
+                CurrentOrderId = t.CurrentOrderId,
+                UpdatedAt = t.UpdatedAt,
+                OrderCreatedAt = ord?.CreatedAt,
+                RunningTotal = ord?.FinalAmount ?? (ord?.TotalAmount ?? 0),
+                ItemCount = count
+            };
+        }).ToList();
+    }
+
+    public (bool Success, string Message, DiningTable? Table) CreateTable(int areaId, string tableName, int capacity)
+    {
+        var area = context.Areas.Find(areaId);
+        if (area == null) return (false, "Khu vực được chọn không tồn tại", null);
+
+        var table = new DiningTable
+        {
+            AreaId = areaId,
+            TableName = tableName.Trim(),
+            Capacity = capacity > 0 ? capacity : 4,
+            Status = 0,
+            UpdatedAt = DateTime.Now
+        };
+
+        context.DiningTables.Add(table);
+        context.SaveChanges();
+        return (true, $"Đã tạo bàn '{table.TableName}' thành công", table);
+    }
+
+    public (bool Success, string Message, DiningTable? Table) UpdateTable(int tableId, int? areaId, string? tableName, int? capacity, int? status)
+    {
+        var table = context.DiningTables.Find(tableId);
+        if (table == null) return (false, "Không tìm thấy bàn cần cập nhật", null);
+
+        if (areaId.HasValue && areaId.Value > 0)
+        {
+            var area = context.Areas.Find(areaId.Value);
+            if (area == null) return (false, "Khu vực được chọn không tồn tại", null);
+            table.AreaId = areaId.Value;
+        }
+
+        if (!string.IsNullOrWhiteSpace(tableName)) table.TableName = tableName.Trim();
+        if (capacity.HasValue && capacity.Value > 0) table.Capacity = capacity.Value;
+        if (status.HasValue && status.Value >= 0 && status.Value <= 3) table.Status = status.Value;
+
+        table.UpdatedAt = DateTime.Now;
+        context.SaveChanges();
+        return (true, $"Cập nhật bàn '{table.TableName}' thành công", table);
+    }
+
+    public (bool Success, string Message) DeleteTable(int tableId)
+    {
+        var table = context.DiningTables.Find(tableId);
+        if (table == null) return (false, "Không tìm thấy bàn để xóa");
+
+        if (table.Status != 0 || table.CurrentOrderId.HasValue)
+        {
+            return (false, $"Bàn '{table.TableName}' hiện đang có khách hoặc đang có đơn phục vụ, không thể xóa!");
+        }
+
+        bool hasUnpaidOrders = context.Orders.Any(o => o.TableId == tableId && o.PaymentStatus == 0 && o.Status != 4);
+        if (hasUnpaidOrders)
+        {
+            return (false, $"Bàn '{table.TableName}' đang có hóa đơn chưa thanh toán trong hệ thống!");
+        }
+
+        context.DiningTables.Remove(table);
+        context.SaveChanges();
+        return (true, $"Đã xóa bàn '{table.TableName}' thành công");
+    }
+
+    public (bool Success, string Message, Area? Area) CreateArea(string areaName, string? description, int sortOrder)
+    {
+        if (string.IsNullOrWhiteSpace(areaName)) return (false, "Tên khu vực không được để trống", null);
+
+        var area = new Area
+        {
+            AreaName = areaName.Trim(),
+            Description = description?.Trim(),
+            SortOrder = sortOrder,
+            IsActive = true,
+            CreatedAt = DateTime.Now
+        };
+
+        context.Areas.Add(area);
+        context.SaveChanges();
+        return (true, $"Đã tạo khu vực '{area.AreaName}' thành công", area);
+    }
+
+    public (bool Success, string Message, Area? Area) UpdateArea(int areaId, string areaName, string? description, int sortOrder, bool isActive)
+    {
+        var area = context.Areas.Find(areaId);
+        if (area == null) return (false, "Không tìm thấy khu vực cần cập nhật", null);
+
+        if (!string.IsNullOrWhiteSpace(areaName)) area.AreaName = areaName.Trim();
+        if (description != null) area.Description = description.Trim();
+        area.SortOrder = sortOrder;
+        area.IsActive = isActive;
+
+        context.SaveChanges();
+        return (true, $"Cập nhật khu vực '{area.AreaName}' thành công", area);
+    }
+
+    public (bool Success, string Message) DeleteArea(int areaId)
+    {
+        var area = context.Areas.Find(areaId);
+        if (area == null) return (false, "Không tìm thấy khu vực để xóa");
+
+        bool hasTables = context.DiningTables.Any(t => t.AreaId == areaId);
+        if (hasTables)
+        {
+            return (false, $"Không thể xóa khu vực '{area.AreaName}' vì vẫn còn bàn thuộc khu vực này!");
+        }
+
+        context.Areas.Remove(area);
+        context.SaveChanges();
+        return (true, $"Đã xóa khu vực '{area.AreaName}' thành công");
+    }
 }

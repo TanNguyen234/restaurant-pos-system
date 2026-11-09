@@ -37,7 +37,7 @@ public class TableController : BaseController
     [HttpGet]
     public IActionResult GetAllTables()
     {
-        var tables = Provider.Table.GetAllTables();
+        var tables = Provider.Table.GetAllEnrichedTables();
         return Ok(tables);
     }
 
@@ -227,6 +227,97 @@ public class TableController : BaseController
     public IActionResult CancelReservation(int id)
     {
         var result = Provider.Table.CancelReservation(id);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
+    /// POST /api/table
+    /// Tạo bàn mới
+    /// </summary>
+    [HttpPost]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public IActionResult CreateTable([FromBody] CreateTableRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.TableName))
+        {
+            return BadRequest(new { success = false, message = "Tên bàn không được để trống" });
+        }
+        var result = Provider.Table.CreateTable(request.AreaId, request.TableName, request.Capacity);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+        return Ok(new { success = true, message = result.Message, data = result.Table });
+    }
+
+    /// <summary>
+    /// PUT /api/table/{id}
+    /// Cập nhật bàn
+    /// </summary>
+    [HttpPut("{id:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public IActionResult UpdateTable(int id, [FromBody] UpdateTableRequest request)
+    {
+        if (request == null) return BadRequest(new { success = false, message = "Dữ liệu cập nhật không hợp lệ" });
+        var result = Provider.Table.UpdateTable(id, request.AreaId, request.TableName, request.Capacity, request.Status);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+        return Ok(new { success = true, message = result.Message, data = result.Table });
+    }
+
+    /// <summary>
+    /// DELETE /api/table/{id}
+    /// Xóa bàn
+    /// </summary>
+    [HttpDelete("{id:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public IActionResult DeleteTable(int id)
+    {
+        var result = Provider.Table.DeleteTable(id);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+        return Ok(new { success = true, message = result.Message });
+    }
+
+    /// <summary>
+    /// POST /api/table/area
+    /// Tạo khu vực mới
+    /// </summary>
+    [HttpPost("area")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public IActionResult CreateArea([FromBody] CreateAreaRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.AreaName))
+        {
+            return BadRequest(new { success = false, message = "Tên khu vực không được để trống" });
+        }
+        var result = Provider.Table.CreateArea(request.AreaName, request.Description, request.SortOrder);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+        return Ok(new { success = true, message = result.Message, data = result.Area });
+    }
+
+    /// <summary>
+    /// PUT /api/table/area/{id}
+    /// Cập nhật khu vực
+    /// </summary>
+    [HttpPut("area/{id:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public IActionResult UpdateArea(int id, [FromBody] UpdateAreaRequest request)
+    {
+        if (request == null || string.IsNullOrWhiteSpace(request.AreaName))
+        {
+            return BadRequest(new { success = false, message = "Tên khu vực không được để trống" });
+        }
+        var result = Provider.Table.UpdateArea(id, request.AreaName, request.Description, request.SortOrder, request.IsActive);
+        if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+        return Ok(new { success = true, message = result.Message, data = result.Area });
+    }
+
+    /// <summary>
+    /// DELETE /api/table/area/{id}
+    /// Xóa khu vực
+    /// </summary>
+    [HttpDelete("area/{id:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public IActionResult DeleteArea(int id)
+    {
+        var result = Provider.Table.DeleteArea(id);
         if (!result.Success) return BadRequest(new { success = false, message = result.Message });
         return Ok(new { success = true, message = result.Message });
     }

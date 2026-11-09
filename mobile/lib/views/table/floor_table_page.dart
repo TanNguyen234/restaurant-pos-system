@@ -1431,7 +1431,7 @@ class _FloorTablePageState extends State<FloorTablePage>
           padding: const EdgeInsets.all(16),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: crossAxisCount,
-            childAspectRatio: 1.15,
+            childAspectRatio: 1.0,
             crossAxisSpacing: 14,
             mainAxisSpacing: 14,
           ),
@@ -1571,6 +1571,37 @@ class _FloorTablePageState extends State<FloorTablePage>
                     ],
                   ],
                 ),
+                if (table.status == 1) ...[
+                  Container(
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFF1F2),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: const Color(0xFFFFE4E6)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.timer_outlined, size: 12, color: Color(0xFFE11D48)),
+                            const SizedBox(width: 3),
+                            Text(
+                              table.seatingDurationText.isNotEmpty ? table.seatingDurationText : '<1p',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFFE11D48)),
+                            ),
+                          ],
+                        ),
+                        if (table.runningTotal > 0)
+                          Text(
+                            NumberFormat.compactCurrency(locale: 'vi_VN', symbol: 'đ').format(table.runningTotal),
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFBE123C)),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
@@ -1667,6 +1698,11 @@ class _FloorTablePageState extends State<FloorTablePage>
                 ],
               );
             },
+          ),
+          IconButton(
+            icon: const Icon(Icons.table_restaurant_outlined),
+            tooltip: 'Quản lý bàn & Khu vực',
+            onPressed: _showTableAreaManagerModal,
           ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
@@ -1769,6 +1805,438 @@ class _FloorTablePageState extends State<FloorTablePage>
                     ),
                   ],
                 ),
+    );
+  }
+
+  void _showTableAreaManagerModal() {
+    final newTableNameController = TextEditingController();
+    final newCapacityController = TextEditingController(text: '4');
+    int selectedAreaId = _areas.isNotEmpty ? _areas.first.id : 1;
+
+    final newAreaNameController = TextEditingController();
+    final newSortOrderController = TextEditingController(text: (_areas.length + 1).toString());
+    bool isSubmitting = false;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return DefaultTabController(
+          length: 2,
+          child: StatefulBuilder(
+            builder: (modalCtx, setModalState) {
+              return SizedBox(
+                height: MediaQuery.of(context).size.height * 0.85,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(Icons.tune_rounded, color: Color(0xFF0F172A), size: 22),
+                          ),
+                          const SizedBox(width: 12),
+                          const Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Quản lý Phòng Bàn & Khu Vực', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                                Text('Thêm bàn mới, sửa đổi và quản lý sơ đồ F&B', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded),
+                            onPressed: () => Navigator.pop(ctx),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const TabBar(
+                      labelColor: Color(0xFF0F172A),
+                      unselectedLabelColor: Color(0xFF94A3B8),
+                      indicatorColor: Color(0xFF0F172A),
+                      labelStyle: TextStyle(fontWeight: FontWeight.bold),
+                      tabs: [
+                        Tab(icon: Icon(Icons.table_bar_outlined, size: 20), text: 'Bàn ăn'),
+                        Tab(icon: Icon(Icons.layers_outlined, size: 20), text: 'Khu vực'),
+                      ],
+                    ),
+                    Expanded(
+                      child: TabBarView(
+                        children: [
+                          // Tab 1: Quản lý Bàn
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text('Thêm bàn mới', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            flex: 2,
+                                            child: TextField(
+                                              controller: newTableNameController,
+                                              decoration: const InputDecoration(
+                                                isDense: true,
+                                                labelText: 'Tên bàn (*)',
+                                                hintText: 'Bàn 10, VIP 1...',
+                                                border: OutlineInputBorder(),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 1,
+                                            child: TextField(
+                                              controller: newCapacityController,
+                                              keyboardType: TextInputType.number,
+                                              decoration: const InputDecoration(
+                                                isDense: true,
+                                                labelText: 'Số chỗ',
+                                                border: OutlineInputBorder(),
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: DropdownButtonFormField<int>(
+                                              isDense: true,
+                                              initialValue: selectedAreaId,
+                                              decoration: const InputDecoration(
+                                                labelText: 'Khu vực',
+                                                border: OutlineInputBorder(),
+                                              ),
+                                              items: _areas.map((a) {
+                                                return DropdownMenuItem<int>(
+                                                  value: a.id,
+                                                  child: Text(a.name),
+                                                );
+                                              }).toList(),
+                                              onChanged: (val) {
+                                                if (val != null) selectedAreaId = val;
+                                              },
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(0xFF0F172A),
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            onPressed: isSubmitting
+                                                ? null
+                                                : () async {
+                                                    final name = newTableNameController.text.trim();
+                                                    final cap = int.tryParse(newCapacityController.text.trim()) ?? 4;
+                                                    if (name.isEmpty) {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        const SnackBar(content: Text('Vui lòng nhập tên bàn')),
+                                                      );
+                                                      return;
+                                                    }
+                                                    setModalState(() => isSubmitting = true);
+                                                    final res = await TableRepository.createTable(
+                                                      areaId: selectedAreaId,
+                                                      tableName: name,
+                                                      capacity: cap,
+                                                    );
+                                                    setModalState(() => isSubmitting = false);
+                                                    if (res['success'] == true) {
+                                                      if (ctx.mounted) Navigator.pop(ctx);
+                                                      await _loadData();
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(content: Text(res['message'] ?? 'Thành công'), backgroundColor: const Color(0xFF10B981)),
+                                                        );
+                                                      }
+                                                    } else {
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(content: Text(res['message'] ?? 'Thất bại'), backgroundColor: const Color(0xFFEF4444)),
+                                                        );
+                                                      }
+                                                    }
+                                                  },
+                                            child: const Text('Thêm'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                const Text('Danh sách bàn ăn hiện tại', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                                const SizedBox(height: 6),
+                                Expanded(
+                                  child: ListView.separated(
+                                    itemCount: _allTables.length,
+                                    separatorBuilder: (itemCtx, index) => const Divider(height: 1),
+                                    itemBuilder: (itemCtx, index) {
+                                      final t = _allTables[index];
+                                      final area = _areas.firstWhere((a) => a.id == t.areaId, orElse: () => Area(id: 0, name: 'Khác', sortOrder: 0));
+                                      final canDelete = t.status == 0 && t.currentOrderId == null;
+
+                                      return ListTile(
+                                        dense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: CircleAvatar(
+                                          radius: 16,
+                                          backgroundColor: t.statusColor.withValues(alpha: 0.15),
+                                          child: Icon(t.statusIcon, size: 16, color: t.statusColor),
+                                        ),
+                                        title: Text('${t.name} (${t.capacity} chỗ)', style: const TextStyle(fontWeight: FontWeight.w600)),
+                                        subtitle: Text('${area.name} • ${t.statusText}', style: const TextStyle(fontSize: 12)),
+                                        trailing: canDelete
+                                            ? IconButton(
+                                                icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 20),
+                                                tooltip: 'Xóa bàn trống này',
+                                                onPressed: () async {
+                                                  final confirm = await showDialog<bool>(
+                                                    context: context,
+                                                    builder: (c) => AlertDialog(
+                                                      title: const Text('Xác nhận xóa bàn'),
+                                                      content: Text('Bạn có chắc muốn xóa bàn "${t.name}" không?'),
+                                                      actions: [
+                                                        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Hủy')),
+                                                        ElevatedButton(
+                                                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
+                                                          onPressed: () => Navigator.pop(c, true),
+                                                          child: const Text('Xóa'),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                  if (confirm == true) {
+                                                    final res = await TableRepository.deleteTable(t.id);
+                                                    if (res['success'] == true) {
+                                                      if (ctx.mounted) Navigator.pop(ctx);
+                                                      await _loadData();
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(content: Text(res['message'] ?? 'Đã xóa bàn'), backgroundColor: const Color(0xFF10B981)),
+                                                        );
+                                                      }
+                                                    } else {
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(content: Text(res['message'] ?? 'Không thể xóa'), backgroundColor: const Color(0xFFEF4444)),
+                                                        );
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                              )
+                                            : null,
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+
+                          // Tab 2: Quản lý Khu vực
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text('Thêm khu vực mới', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                                      const SizedBox(height: 10),
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            flex: 2,
+                                            child: TextField(
+                                              controller: newAreaNameController,
+                                              decoration: const InputDecoration(
+                                                isDense: true,
+                                                labelText: 'Tên khu vực (*)',
+                                                hintText: 'Tầng 1, Sân vườn, VIP...',
+                                                border: OutlineInputBorder(),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 1,
+                                            child: TextField(
+                                              controller: newSortOrderController,
+                                              keyboardType: TextInputType.number,
+                                              decoration: const InputDecoration(
+                                                isDense: true,
+                                                labelText: 'Thứ tự',
+                                                border: OutlineInputBorder(),
+                                              ),
+                                            ),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          ElevatedButton(
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: const Color(0xFF0F172A),
+                                              foregroundColor: Colors.white,
+                                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                            ),
+                                            onPressed: isSubmitting
+                                                ? null
+                                                : () async {
+                                                    final name = newAreaNameController.text.trim();
+                                                    final sort = int.tryParse(newSortOrderController.text.trim()) ?? 0;
+                                                    if (name.isEmpty) {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        const SnackBar(content: Text('Vui lòng nhập tên khu vực')),
+                                                      );
+                                                      return;
+                                                    }
+                                                    setModalState(() => isSubmitting = true);
+                                                    final res = await TableRepository.createArea(
+                                                      areaName: name,
+                                                      sortOrder: sort,
+                                                    );
+                                                    setModalState(() => isSubmitting = false);
+                                                    if (res['success'] == true) {
+                                                      if (ctx.mounted) Navigator.pop(ctx);
+                                                      await _loadData();
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(content: Text(res['message'] ?? 'Thành công'), backgroundColor: const Color(0xFF10B981)),
+                                                        );
+                                                      }
+                                                    } else {
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(content: Text(res['message'] ?? 'Thất bại'), backgroundColor: const Color(0xFFEF4444)),
+                                                        );
+                                                      }
+                                                    }
+                                                  },
+                                            child: const Text('Thêm'),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                const Text('Danh sách khu vực hiện tại', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                                const SizedBox(height: 6),
+                                Expanded(
+                                  child: ListView.separated(
+                                    itemCount: _areas.length,
+                                    separatorBuilder: (itemCtx, index) => const Divider(height: 1),
+                                    itemBuilder: (itemCtx, index) {
+                                      final a = _areas[index];
+                                      final tableCount = _allTables.where((t) => t.areaId == a.id).length;
+                                      final canDelete = tableCount == 0;
+
+                                      return ListTile(
+                                        dense: true,
+                                        contentPadding: EdgeInsets.zero,
+                                        leading: CircleAvatar(
+                                          radius: 16,
+                                          backgroundColor: const Color(0xFF0F172A).withValues(alpha: 0.1),
+                                          child: Text('${a.sortOrder}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF0F172A), fontSize: 12)),
+                                        ),
+                                        title: Text(a.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                                        subtitle: Text('$tableCount bàn ăn thuộc khu vực này', style: const TextStyle(fontSize: 12)),
+                                        trailing: canDelete
+                                            ? IconButton(
+                                                icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFEF4444), size: 20),
+                                                tooltip: 'Xóa khu vực rỗng',
+                                                onPressed: () async {
+                                                  final confirm = await showDialog<bool>(
+                                                    context: context,
+                                                    builder: (c) => AlertDialog(
+                                                      title: const Text('Xác nhận xóa khu vực'),
+                                                      content: Text('Bạn có chắc muốn xóa khu vực "${a.name}" không?'),
+                                                      actions: [
+                                                        TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Hủy')),
+                                                        ElevatedButton(
+                                                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
+                                                          onPressed: () => Navigator.pop(c, true),
+                                                          child: const Text('Xóa'),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  );
+                                                  if (confirm == true) {
+                                                    final res = await TableRepository.deleteArea(a.id);
+                                                    if (res['success'] == true) {
+                                                      if (ctx.mounted) Navigator.pop(ctx);
+                                                      await _loadData();
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(content: Text(res['message'] ?? 'Đã xóa khu vực'), backgroundColor: const Color(0xFF10B981)),
+                                                        );
+                                                      }
+                                                    } else {
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          SnackBar(content: Text(res['message'] ?? 'Không thể xóa'), backgroundColor: const Color(0xFFEF4444)),
+                                                        );
+                                                      }
+                                                    }
+                                                  }
+                                                },
+                                              )
+                                            : null,
+                                      );
+                                    },
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        );
+      },
     );
   }
 }

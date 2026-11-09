@@ -8,6 +8,9 @@ class DiningTable {
   int status; // 0: Trống, 1: Có khách, 2: Chờ phục vụ / Đã đặt trước
   final int? currentOrderId;
   final DateTime? updatedAt;
+  final DateTime? orderCreatedAt;
+  final double runningTotal;
+  final int itemCount;
 
   DiningTable({
     required this.id,
@@ -17,11 +20,29 @@ class DiningTable {
     required this.status,
     this.currentOrderId,
     this.updatedAt,
+    this.orderCreatedAt,
+    this.runningTotal = 0.0,
+    this.itemCount = 0,
   });
 
   bool get isAvailable => status == 0;
   bool get isOccupied => status == 1;
   bool get isReserved => status == 2;
+
+  Duration? get seatingDuration =>
+      (orderCreatedAt != null && status == 1) ? DateTime.now().difference(orderCreatedAt!) : null;
+
+  String get seatingDurationText {
+    final dur = seatingDuration;
+    if (dur == null || status != 1) return '';
+    final totalMins = dur.inMinutes;
+    if (totalMins < 60) {
+      return '$totalMins phút';
+    }
+    final hours = totalMins ~/ 60;
+    final mins = totalMins % 60;
+    return '${hours}h ${mins}p';
+  }
 
   String get statusText {
     switch (status) {
@@ -83,6 +104,9 @@ class DiningTable {
     int? status,
     int? currentOrderId,
     DateTime? updatedAt,
+    DateTime? orderCreatedAt,
+    double? runningTotal,
+    int? itemCount,
   }) {
     return DiningTable(
       id: id ?? this.id,
@@ -92,6 +116,9 @@ class DiningTable {
       status: status ?? this.status,
       currentOrderId: currentOrderId ?? this.currentOrderId,
       updatedAt: updatedAt ?? this.updatedAt,
+      orderCreatedAt: orderCreatedAt ?? this.orderCreatedAt,
+      runningTotal: runningTotal ?? this.runningTotal,
+      itemCount: itemCount ?? this.itemCount,
     );
   }
 
@@ -106,6 +133,11 @@ class DiningTable {
       updatedAt: map['updatedAt'] != null
           ? DateTime.tryParse(map['updatedAt'].toString())
           : null,
+      orderCreatedAt: map['orderCreatedAt'] != null
+          ? DateTime.tryParse(map['orderCreatedAt'].toString())
+          : null,
+      runningTotal: (map['runningTotal'] as num?)?.toDouble() ?? 0.0,
+      itemCount: map['itemCount'] ?? 0,
     );
   }
 
@@ -118,6 +150,9 @@ class DiningTable {
       'status': status,
       'currentOrderId': currentOrderId,
       'updatedAt': updatedAt?.toIso8601String(),
+      'orderCreatedAt': orderCreatedAt?.toIso8601String(),
+      'runningTotal': runningTotal,
+      'itemCount': itemCount,
     };
   }
 
