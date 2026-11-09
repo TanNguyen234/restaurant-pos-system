@@ -1,349 +1,494 @@
-# Restaurant & Cafe POS System (F&B Enterprise Solution)
+# RESTAURANT & CAFE POS SYSTEM (F&B ENTERPRISE SOLUTION)
 
-A production-grade, multi-platform Point of Sale (POS), Floor Map, and Table-Service Management System engineered for modern restaurants and cafes. Built as an offline-resilient monorepo comprising a Flutter mobile client with on-device SQLite persistent caching, backed by an ASP.NET Core 10 RESTful API and Microsoft SQL Server.
-
----
-
-## Architecture Overview
-
-The system adheres to an offline-first, 4-tier provider/repository architecture designed for high availability and low-latency POS workflows:
-
-```
-[ Mobile Client (Flutter 3.47 / Dart 3.13) ]
-  +-- Presentation Layer (StatefulWidget / FloorTablePage / CartPage / CategoryPage)
-  +-- Local Storage (SQLite via DatabaseHelper)
-  |     +-- user_session     --> Persistent authentication state
-  |     +-- cart_items       --> Offline cart with atomic amount summation
-  |     +-- offline_orders   --> Pending sync queue for network dropouts
-  +-- Service Layer (OfflineSyncService) --> Periodic / On-demand cloud synchronization
-  +-- Repository Layer (TableRepository, CategoryRepository via HTTP Client)
-            |
-            | RESTful JSON over HTTP / HTTPS
-            v
-[ Backend API (ASP.NET Core 10 Web API) ]
-  +-- Presentation Layer (BaseController, TableController, CategoryController)
-  +-- Facade / Aggregator Layer (SiteProvider / BaseProvider)
-  +-- Data Access Layer (BaseRepository / TableRepository / CategoryRepository)
-  +-- Media Processing (wwwroot/images for product and category assets)
-            |
-            | Entity Framework Core 10 (Microsoft.EntityFrameworkCore.SqlServer)
-            v
-[ Relational Database (Microsoft SQL Server) ]
-  +-- 10 Normalized Relational Tables (Roles, Accounts, Areas, DiningTables,
-       Categories, Products, ProductAttributes, Orders, OrderDetails, Payments)
-```
+Production-grade, multi-platform Point of Sale (POS), Floor Map, and Table-Service Management System engineered for modern restaurants and cafes. Built as an offline-resilient monorepo comprising a Flutter mobile client with on-device SQLite persistent caching, backed by an ASP.NET Core 10 RESTful API and Microsoft SQL Server.
 
 ---
 
-## Technology Stack
+## 1. TONG QUAN KIEN TRUC HE THONG (SYSTEM ARCHITECTURE)
 
-| Component | Technology | Version | Purpose |
+He thong hoat dong theo kien truc 4 tang (4-tier provider/repository architecture) ket hop Offline-First phan phoi cao, dam bao van hanh lien tuc ngay ca khi mat ket noi mang Internet.
+
+```
++---------------------------------------------------------------------------------+
+|                       MOBILE CLIENT (FLUTTER 3.47 / DART 3.13)                  |
+|  - Presentation Layer: FloorTablePage, CashierPosTerminal, KDS, MemberPortal   |
+|  - Local Storage (SQLite): user_session, cart_items, offline_orders queue       |
+|  - Service Layer: OfflineSyncService (Auto sync), ReceiptPrinterService         |
+|  - Repository Layer: TableRepository, OrderRepository, ProductRepository        |
++---------------------------------------------------------------------------------+
+                                       |
+                                       | RESTful JSON over HTTP / HTTPS
+                                       v
++---------------------------------------------------------------------------------+
+|                    BACKEND REST API (ASP.NET CORE 10 WEB API)                   |
+|  - Presentation: AuthController, TableController, OrderController, Product, etc |
+|  - Facade Layer: SiteProvider / BaseProvider                                    |
+|  - Data Access Layer: AccountRepo, TableRepo, OrderRepo, ProductRepo, etc.      |
+|  - Security & Storage: JWT Bearer, SHA-256 Salted Hashing, wwwroot/images       |
++---------------------------------------------------------------------------------+
+                                       |
+                                       | Entity Framework Core 10
+                                       v
++---------------------------------------------------------------------------------+
+|                     CENTRAL DATABASE (MICROSOFT SQL SERVER)                     |
+|  - 10 Bang chuan hoa 3NF: Roles, Accounts, Areas, DiningTables, Categories,     |
+|    Products, ProductAttributes, Orders, OrderDetails, Payments                  |
++---------------------------------------------------------------------------------+
+```
+
+---
+
+## 2. CONG NGHE SU DUNG (TECHNOLOGY STACK)
+
+| Thanh phan | Cong nghe | Phien ban | Muc dich su dung |
 | :--- | :--- | :--- | :--- |
-| **Mobile Client** | Flutter / Dart | 3.47.1 / 3.13.1 | Cross-platform staff ordering terminal, floor map, and POS client |
-| **Local Database** | SQLite (sqflite) | 2.4.2 | On-device persistent cart, local session, and offline order queue |
-| **Backend API** | ASP.NET Core Web API | 10.0 (net10.0) | Centralized business logic, REST controllers, and transactions |
-| **ORM** | Entity Framework Core | 10.0.12 | Object-relational mapping for SQL Server |
-| **Central Database** | Microsoft SQL Server | 2019 / 2022 | Primary ACID-compliant transactional datastore (10 tables in 3NF) |
-| **Online Payments** | VietQR / VNPayment | NAPAS 247 / v2 | Dynamic banking QR codes and payment gateway integration |
+| Mobile Client | Flutter / Dart SDK | Flutter 3.47.1 / Dart 3.13.1 | Ung dung POS cam tay cho Phuc vu, Thu ngan, Bep va Khach hang |
+| Local Database | SQLite (sqflite) | 2.4.2 | Luu tru offline gio hang, phien dang nhap va hang doi dong bo |
+| Backend API | ASP.NET Core Web API | .NET 10.0 (net10.0) | Xu ly nghiep vu tap trung, giao dich ACID va REST controllers |
+| ORM | Entity Framework Core | 10.0.12 | Anh xa doi tuong quan he voi SQL Server |
+| Database | Microsoft SQL Server | 2019 / 2022 | Co so du lieu quan he trung tam (10 bang chuan hoa 3NF) |
+| Payment Gateway | VietQR / VNPayment | NAPAS 247 / v2 | Thanh toan ma QR dong ngan hang va cong thanh toan truc tuyen |
 
 ---
 
-## Team Responsibility Matrix (Bảng Phân Công Nhiệm Vụ Nhóm 3 Người)
+## 3. SO DO LUONG NGHIEP VU TOAN BO PROJECT (SYSTEM PROCESS FLOW)
 
-Dự án được phân bổ trách nhiệm rõ ràng theo [docs/07_BANG_PHAN_CONG_NHOM_3_NGUOI.md](docs/07_BANG_PHAN_CONG_NHOM_3_NGUOI.md) nhằm tối đa hóa điểm số barem (10/10 điểm gốc + điểm cộng mở rộng) và ngăn ngừa xung đột mã nguồn:
+So do duoi day mo ta toan bo chu trinh van hanh tu khi khach vao ban, nhan vien order, bep che bien, thu ngan thanh toan den dong bo ngoai tuyen:
 
-### Thành viên 1: Team Leader & Fullstack Architect (100% Hoàn Thành)
+```mermaid
+flowchart TD
+    Start(["Khach hang den nha hang"]) --> TableSelect["Chon ban tren So do phong an (Floor Map)"]
+    
+    subgraph RoleEntry ["Phan quyen & Vai tro nguoi dung"]
+        AdminRole["ADMIN / MANAGER: Toan quyen, Thong ke, Quan ly ban & mon"]
+        WaiterRole["WAITER: Mo ban, Chon mon, Chuyen ban, Gui order"]
+        KitchenRole["KITCHEN: Nhan order KDS, Bao het mon, Cap nhat che bien"]
+        CashierRole["CASHIER: In hoa don, Chiet khau, Tach/Gop bill, Thu tien"]
+        MemberRole["MEMBER: Tu dat mon QR tai ban, Tra cuu don, Doi diem voucher"]
+    end
 
-| STT | Hạng mục / File mã nguồn | Mô tả chi tiết chức năng | Trạng thái |
-| :---: | :--- | :--- | :---: |
-| 1 | `RestaurantPosDb.sql` | Khởi tạo CSDL 10 bảng quan hệ chuẩn 3NF, Foreign Keys, Index tối ưu và seed sẵn 10 dòng/bảng. | **Hoàn thành 100%** |
-| 2 | `backend/Models/RestaurantPosContext.cs` | DbContext đồng bộ toàn diện 10 thực thể: `Area`, `DiningTable`, `Category`, `Product`, `Order`, `OrderDetail`, `Account`, `Role`, `Payment`, `ProductAttribute`. | **Hoàn thành 100%** |
-| 3 | `backend/Models/BaseProvider.cs`, `BaseRepository.cs`, `SiteProvider.cs` | Kiến trúc Facade / Provider chuẩn hóa; đăng ký lazy `TableRepository` vào `SiteProvider`. | **Hoàn thành 100%** |
-| 4 | `backend/Api/Controllers/BaseController.cs` | Base Controller cung cấp Provider dùng chung cho toàn bộ controllers. | **Hoàn thành 100%** |
-| 5 | `backend/Models/TableRepository.cs` & `TableController.cs` | RESTful API Sơ đồ bàn: Lấy danh sách khu vực (`/api/table/areas`), lấy bàn theo khu vực (`/api/table/by-area/{id}`), lấy toàn bộ bàn (`/api/table`), cập nhật trạng thái bàn (`/api/table/{id}/status`), và giao dịch chuyển bàn an toàn (`/api/table/transfer`). | **Hoàn thành 100%** |
-| 6 | `mobile/lib/utils/database_helper.dart` | Singleton SQLite quản lý 3 bảng: `user_session` (lưu phiên đăng nhập), `cart_items` (giỏ hàng tính tổng tức thì), `offline_orders` (hàng đợi đơn ngoại tuyến). | **Hoàn thành 100%** |
-| 7 | `mobile/lib/views/table/floor_table_page.dart` | Giao diện Sơ đồ bàn ăn F&B chuyên nghiệp: Phân chia khu vực qua TabBar (Tầng trệt, Tầng 1, Sân vườn, Phòng VIP), thẻ bàn dạng GridView đổi màu theo trạng thái (Xanh = Trống, Đỏ = Có khách, Cam = Đã đặt), chuyển trạng thái nhanh và modal chuyển bàn trực quan. | **Hoàn thành 100%** |
-| 8 | `mobile/lib/services/offline_sync_service.dart` | Engine kiểm tra mạng định kỳ / theo yêu cầu, quét đơn hàng chưa đồng bộ từ SQLite `offline_orders` đẩy lên Backend API và cập nhật cờ `is_synced`. | **Hoàn thành 100%** |
-| 9 | `mobile/lib/main.dart` | Điều hướng NavigationBar chuẩn F&B kết nối Sơ đồ bàn, Quản lý thực đơn và Giỏ hàng. | **Hoàn thành 100%** |
-| 10 | Automated Test Suites (35/35 Tests) | Bộ kiểm thử toàn diện: `widget_test.dart`, `database_helper_test.dart`, `table_model_test.dart`, `table_repository_test.dart`, `floor_table_challenge_test.dart`, `empirical_challenge_test.dart`. | **Hoàn thành 100%** |
+    TableSelect --> Ordering["Chon mon an tu Thuc don (Size, Topping, Ghi chu)"]
+    Ordering --> Cart["Them vao Gio hang (SQLite Local Cache)"]
+    
+    Cart --> NetCheck{"Kiem tra ket noi mang?"}
+    NetCheck -- "Online" --> ApiOrder["Goi POST /api/order len Backend"]
+    NetCheck -- "Offline" --> LocalQueue["Luu vao offline_orders queue trong SQLite"]
+    LocalQueue --> SyncDaemon["OfflineSyncService tu dong dong bo khi co mang"]
+    SyncDaemon --> ApiOrder
 
-### Thành viên 2: Frontend & Catalog Specialist (Collaborator A)
-- `backend/Services/Helper.cs`: Lưu và dọn dẹp file ảnh trong `wwwroot/images`.
-- `backend/Models/CategoryRepository.cs` & `ProductRepository.cs`: Xử lý phân trang và kiểm tra ràng buộc toàn vẹn khi xóa (không xóa danh mục có sản phẩm, không xóa sản phẩm đã có đơn hàng).
-- `mobile/lib/views/home_page.dart`, `product_detail_page.dart`, `cart_page.dart`, `admin_category_page.dart`, `admin_product_page.dart`.
+    ApiOrder --> TableStatusOcc["Cap nhat ban: CO KHACH (Occupied)<br/>Khoi dong Bo dem thoi gian ngoi (Seating Timer)"]
+    TableStatusOcc --> KDSQueue["Order chuyen xuong Man hinh bep (KDS)"]
 
-### Thành viên 3: Backend & Security Specialist (Collaborator B)
-- `backend/Models/AccountRepository.cs` & `AuthController.cs`: Đăng ký, đăng nhập băm mật khẩu, đổi mật khẩu, phân quyền Role.
-- `backend/Models/OrderRepository.cs` & `PaymentRepository.cs`: Giao dịch tạo đơn hàng, quản lý đơn Admin, sinh mã VietQR động và tạo URL VNPay Sandbox.
-- `mobile/lib/views/auth/login_page.dart`, `order_checkout_page.dart`, `order_detail_page.dart`, `kitchen_display_page.dart`.
+    subgraph KitchenFlow ["Nghiep vu Che bien tai Bep (KDS)"]
+        KDSQueue --> Alert["Bao chuong Alert + Rung Haptic khi co order moi"]
+        Alert --> CookingStatus{"Trang thai mon an"}
+        CookingStatus -- "Nguyen lieu san sang" --> CookStep["Che bien: Cho nau -> Dang nau -> Hoan thanh"]
+        CookingStatus -- "Het nguyen lieu / Khach doi y" --> VoidStep["Huy mon (Void Item) kem ly do va ghi chu"]
+        VoidStep --> RefundCalc["Tu dong giam tong tien order va thong bao thu ngan"]
+        CookStep --> ReadyServe["Mon da san sang: Phuc vu mang ra ban"]
+    end
 
----
+    ReadyServe --> BillRequest["Khach yeu cau tinh tien"]
+    
+    subgraph CashierFlow ["Nghiep vu Thu ngan & Thanh toan"]
+        BillRequest --> CashierAction["Thu ngan kiem tra hoa don tren POS"]
+        CashierAction --> DiscountOption{"Co ap dung giam gia khong?"}
+        DiscountOption -- "Co" --> ApplyDiscount["Giam gia thu cong (% hoac VND) hoac Ap dung Voucher"]
+        DiscountOption -- "Khong" --> ChoosePaymentMethod
+        ApplyDiscount --> ChoosePaymentMethod{"Chon phuong thuc thanh toan"}
 
-## Database Architecture
+        ChoosePaymentMethod -- "Tien mat (Cash)" --> CashPay["Nhap tien khach dua -> Tinh tien thoi"]
+        ChoosePaymentMethod -- "Chuyen khoan VietQR" --> QRPay["Sinh ma VietQR dong NAPAS 247 theo so tien"]
+        ChoosePaymentMethod -- "Cong VNPay Sandbox" --> VNPay["Chuyen huong cong thanh toan VNPay"]
+        ChoosePaymentMethod -- "Thanh toan hon hop (Split)" --> SplitPay["Chia thanh toan: Mot phan Tien mat + Mot phan VietQR"]
 
-Hệ thống triển khai CSDL quan hệ trên Microsoft SQL Server theo tệp kịch bản [RestaurantPosDb.sql](RestaurantPosDb.sql) với 10 bảng chuẩn hóa 3NF:
+        CashPay --> ConfirmPay["POST /api/payment/confirm"]
+        QRPay --> ConfirmPay
+        VNPay --> ConfirmPay
+        SplitPay --> ConfirmPay
 
+        ConfirmPay --> PrintReceipt["In hoa don nhiet 80mm<br/>(In lai danh dau DUPLICATE chong gian lan)"]
+        PrintReceipt --> ReleaseTable["Cap nhat ban: TRONG (Available) & Ket thuc don"]
+    end
+
+    ReleaseTable --> End(["Hoan tat quy trinh phuc vu"])
 ```
-Roles (1) <--- Accounts (N)
-                 |
-Areas (1) <-- DiningTables (N)
-                 |
-                 +---< Orders (1) <--- OrderDetails (N) ---> Products (1) ---> Categories (1)
-                         |                  |                   |
-                         |                  |                   +---< ProductAttributes (N)
-                         |                  +---< OrderDetailModifiers (N)
-                         |
-                         +---< Payments (N)
-```
-
-### Table Dictionary
-
-| Table | Primary Key | Description | Records Seeded |
-| :--- | :--- | :--- | :---: |
-| `Roles` | `RoleId` | Phân quyền truy cập hệ thống (Admin, Manager, Cashier, Waiter, Barista, Chef, Member, VIP) | 10 |
-| `Accounts` | `AccountId` | Tài khoản nhân viên/khách hàng, mật khẩu băm, token xác thực, OAuth providers | 10 |
-| `Areas` | `AreaId` | Khu vực nhà hàng (Tầng trệt máy lạnh, Tầng 1 ban công, Sân vườn ngoài trời, Phòng VIP) | 10 |
-| `DiningTables` | `TableId` | Bàn ăn, số ghế (Capacity), trạng thái thời gian thực (0: Trống, 1: Có khách, 2: Đã đặt) | 10 |
-| `Categories` | `CategoryId` | Phân loại thực đơn (Cà phê Việt, Espresso & Ý, Trà trái cây, Bánh ngọt, Điểm tâm) | 10 |
-| `Products` | `ProductId` | Món ăn / đồ uống, đơn giá VND, đơn vị tính, hình ảnh, cờ kích hoạt | 10 |
-| `ProductAttributes` | `AttributeId` | Thuộc tính món: Size (M/L), mức đường (30%/50%/100%), mức đá, topping | 10 |
-| `Orders` | `OrderId` | Đơn hàng gắn với Bàn, tổng tiền, chiết khấu, trạng thái đơn (Mới -> Chế biến -> Đã phục vụ -> Hoàn thành) | 10 |
-| `OrderDetails` | `OrderDetailId` | Chi tiết món trong đơn, số lượng, đơn giá, ghi chú món cho bếp, trạng thái nấu | 10 |
-| `Payments` | `PaymentId` | Thanh toán hóa đơn bằng Tiền mặt, chuyển khoản VietQR NAPAS 247 hoặc cổng VNPay | 10 |
 
 ---
 
-## Directory Layout
+## 4. SEQUENCE DIAGRAM CHI TIET TOAN BO QUY TRINH (END-TO-END FLOW)
+
+So do trinh tu the hien tuong tac chi tiet giua cac Actor, Ung dung di dong, SQLite, Backend REST API, Database va Cong thanh toan:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor KhachHang as Khach hang / Member
+    actor PhucVu as Nhan vien phuc vu
+    participant App as Mobile Client (Flutter)
+    participant SQLite as SQLite Local Cache
+    participant API as ASP.NET Core 10 API
+    participant DB as SQL Server 2022
+    actor Bep as Bo phan Bep (KDS)
+    actor ThuNgan as Thu ngan (Cashier)
+    participant Gateway as VietQR / VNPay Gateway
+
+    %% GIAI DOAN 1: DANG NHAP & MO BAN
+    rect rgb(240, 248, 255)
+    Note over PhucVu, DB: Giai doan 1: Dang nhap & Mo ban
+    PhucVu->>App: Dang nhap bang Username/Password hoac One-Tap OAuth
+    App->>API: POST /api/auth/login
+    API->>DB: Kiem tra tai khoan va mat khau bam (Salted SHA-256)
+    DB-->>API: Tra ve thong tin Account & Role (WAITER)
+    API-->>App: Tra ve JWT Token va Session Payload
+    App->>SQLite: Luu phien dang nhap vao bang user_session
+    PhucVu->>App: Chon Khu vuc va Ban an tren So do ban (Floor Map)
+    App->>API: PUT /api/table/{id}/status (status = 1: CO KHACH)
+    API->>DB: UPDATE DiningTables SET Status = 1, OrderCreatedAt = GETDATE()
+    DB-->>API: Cap nhat thanh cong
+    API-->>App: HTTP 200 OK
+    App-->>PhucVu: The ban chuyen sang Mau Do + Kich hoat Seating Duration Timer
+    end
+
+    %% GIAI DOAN 2: GOI MON & DONG BO OFFLINE
+    rect rgb(255, 250, 240)
+    Note over PhucVu, DB: Giai doan 2: Chon mon & Gui order
+    PhucVu->>App: Chon mon an, tuy chon Size, Topping, Ghi chu rieng
+    App->>SQLite: Them mon vao bang cart_items (Tinh tong tuc thi)
+    PhucVu->>App: Nhan nut Xac nhan dat mon (Checkout)
+    alt Co ket noi Internet
+        App->>API: POST /api/order (tableId, items, note)
+        API->>DB: Transaction: INSERT Orders va INSERT OrderDetails
+        DB-->>API: Tra ve OrderId va OrderCode (VD: ORD-20261109-001)
+        API-->>App: HTTP 200 OK (Order payload)
+    else Mat ket noi Internet (Offline)
+        App->>SQLite: Luu vao bang offline_orders (is_synced = 0)
+        App-->>PhucVu: Thong bao don da luu cuc bo, se tu dong dong bo khi co mang
+        Note over App, API: Khi co mang lai: OfflineSyncService quet va POST /api/order len Backend
+    end
+    end
+
+    %% GIAI DOAN 3: XU LY TAI BEP (KDS)
+    rect rgb(245, 255, 245)
+    Note over Bep, DB: Giai doan 3: Xu ly tai Bep KDS
+    API-->>Bep: KDS nhan order moi -> Phat am thanh Alert + Rung Haptic
+    alt Bep con du nguyen lieu
+        Bep->>App: Chuyen trang thai sang Dang che bien (Status = 1)
+        App->>API: PUT /api/order/{id}/status (status = 1)
+        API->>DB: UPDATE Orders SET Status = 1
+        Bep->>App: Chuyen trang thai sang Da nau xong (Status = 2)
+        App->>API: PUT /api/order/{id}/status (status = 2)
+        API->>DB: UPDATE Orders SET Status = 2
+        API-->>PhucVu: Thong bao mon da san sang de mang ra phuc vu
+    else Bep het nguyen lieu / Khach yeu cau huy mon
+        Bep->>App: Bam Huy mon (Void Item) kem Ly do
+        App->>API: POST /api/order/{id}/void-item (detailId, reason)
+        API->>DB: UPDATE OrderDetails (IsVoided = 1, VoidReason) & Recalculate FinalAmount
+        DB-->>API: Cap nhat don thanh cong
+        API-->>App: Cap nhat lai tong tien mon an
+    end
+    end
+
+    %% GIAI DOAN 4: THEO DOI DON TAI PHIA KHACH HANG
+    rect rgb(255, 240, 245)
+    Note over KhachHang, App: Giai doan 4: Khach hang tra cuu & Su dung diem
+    KhachHang->>App: Nhap SĐT tra cuu trang thai don hang tai Member Portal
+    App->>API: GET /api/order?phoneNumber={phone}
+    API->>DB: SELECT Orders WHERE PhoneNumber = {phone}
+    DB-->>API: Tra ve danh sach don
+    API-->>App: Tra ve JSON Orders
+    App-->>KhachHang: Hien thi Stepper 3 buoc: Tiep nhan -> Dang che bien -> San sang phuc vu
+    KhachHang->>App: Dung Diem tich luy (PTS) doi Voucher uu dai
+    App-->>KhachHang: Tru diem thanh cong, ma voucher san sang su dung
+    end
+
+    %% GIAI DOAN 5: THANH TOAN & DONG BAN
+    rect rgb(245, 245, 255)
+    Note over ThuNgan, Gateway: Giai doan 5: Thanh toan & In hoa don
+    ThuNgan->>App: Chon ban tren POS Thu Ngan de lap hoa don
+    App->>API: GET /api/order/{id}
+    API->>DB: Lay chi tiet don hang, phu thu va chiet khau
+    DB-->>API: Tra ve Order Detail
+    API-->>App: Hien thi hoa don chi tiet
+    alt Thu ngan ap dung chiet khau thu cong
+        ThuNgan->>App: Nhap giam gia thu cong (% hoac VND) kem ly do
+        App->>App: Cap nhat lai FinalAmount can thanh toan
+    end
+    alt Thanh toan bang Tien mat
+        ThuNgan->>App: Nhap so tien khach dua -> App tinh tien thoi
+    else Thanh toan bang Chuyen khoan VietQR
+        ThuNgan->>App: Chon Chuyen khoan VietQR
+        App->>API: POST /api/payment/vietqr (OrderId, Amount)
+        API-->>App: Sinh ma VietQR NAPAS 247 chuan VietQR.io
+        App-->>KhachHang: Hien thi ma QR de khach quet bang app ngan hang
+    else Thanh toan Hon hop (Split Cash + VietQR)
+        ThuNgan->>App: Nhap so tien mat thu truoc -> App tao VietQR cho phan tien con lai
+    end
+    ThuNgan->>App: Xac nhan Hoan tat thanh toan
+    App->>API: POST /api/payment/confirm (OrderId, PaymentMethod, Amount)
+    API->>DB: INSERT Payments, UPDATE Orders Status = 3 (Completed), UPDATE DiningTables Status = 0 (Empty)
+    DB-->>API: Giao dich thanh cong
+    API-->>App: HTTP 200 OK
+    App->>App: In hoa don nhiet 80mm qua ReceiptPrinterService
+    opt Khi can in lai hoa don
+        ThuNgan->>App: Bam In lai hoa don
+        App->>App: Dong dau chim [BAN IN LAI / DUPLICATE] len hoa don in lai
+    end
+    App-->>ThuNgan: Giai phong ban thanh cong, ban tro ve trang thai SAN SANG
+    end
+```
+
+---
+
+## 5. DANH SACH TAI KHOAN VA MAT KHAU THEO TUNG VAI TRO (RBAC SEEDED ACCOUNTS)
+
+He thong ho tro phan quyen chat che theo Role-Based Access Control (RBAC). Toan bo tai khoan mau duoi day da duoc nap san trong file co so du lieu `RestaurantPosDb.sql` va `RestaurantPos_Acceptance.sql`:
+
+* Luu y ve mat khau: Toan bo tai khoan ben duoi co mat khau mac dinh la: `admin` (chuoi bam SHA-256 luu trong database: `8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918`).
+
+| STT | Ten dang nhap (Username) | Mat khau mac dinh | Ma vai tro (Role) | Ten vai tro | Ho va ten | Email | Quyen han & Pham vi nghiep vu |
+| :---: | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| 1 | `admin` | `admin` | `ADMIN` | Quan tri vien | Nguyen Van Quan Tri | `admin@restaurantpos.vn` | Toan quyen: Cau hinh he thong, quan tri danh muc, mon an, nhan su, bao cao doanh thu |
+| 2 | `manager01` | `admin` | `MANAGER` | Quan ly | Tran Thi Thu Quan Ly | `manager01@restaurantpos.vn` | Quan ly van hanh: Dieu phoi ban, huy mon co giam sat, kiem soat ca, bao cao |
+| 3 | `cashier_mai` | `admin` | `CASHIER` | Thu ngan | Le Tuyet Mai | `mai.cashier@restaurantpos.vn` | Thu ngan POS: Lap hoa don, tach bill, chiet khau, thu tien mat, VietQR, in lai hoa don |
+| 4 | `waiter_nam` | `admin` | `WAITER` | Phuc vu | Pham Hoang Nam | `nam.waiter@restaurantpos.vn` | Phuc vu ban: Mo ban tren so do, chon mon, chuyen ban, theo doi thoi gian ngoi |
+| 5 | `waiter_lan` | `admin` | `WAITER` | Phuc vu | Do Ngoc Lan | `lan.waiter@restaurantpos.vn` | Phuc vu ban: Tai khoan thu 2 phuc vu kiem thu thao tac dong thoi va ban giao ca |
+| 6 | `kitchen` | `admin` | `KITCHEN` | Bep truong KDS | Bep Truong KDS | `kitchen@restaurantpos.vn` | Man hinh KDS: Tiep nhan mon, cap nhat tien do nau, bao het mon (Sold-Out Toggle) |
+| 7 | `chef_dung` | `admin` | `HEAD_CHEF` | Dau bep chinh | Ngo Tien Dung | `dung.chef@restaurantpos.vn` | Dau bep: Che bien cac mon an chinh, mon nong va kiem soat chat luong mon |
+| 8 | `barista_tuan` | `admin` | `BARISTA_LEAD` | Truong quay Bar | Vu Anh Tuan | `tuan.barista@restaurantpos.vn` | Quay pha che: Chuyen trach pha che ca phe, tra trai cay, da xay, do uong |
+| 9 | `member_khang` | `admin` | `MEMBER` | Hoi vien | Bui Vinh Khang | `khang.bui@gmail.com` | Khach hang than thiet: Tu goi mon QR tai ban, tich luy diem, doi voucher giam gia |
+| 10 | `vip_huong` | `admin` | `VIP_MEMBER` | Hoi vien VIP | Dang Thu Huong | `huong.dang@fpt.com` | Hoi vien VIP: Huong dac quyen chiet khau VIP khi lap hoa don va voucher cao cap |
+| 11 | `member_linh` | `admin` | `MEMBER` | Hoi vien | Vo Dieu Linh | `linh.vo@outlook.com` | Khach hang than thiet tao qua lien ket mang xa hoi One-Tap OAuth |
+
+---
+
+## 6. DANH MUC REST API ENDPOINTS CHINH (API REFERENCE)
+
+### 6.1. Xac thuc & Nguoi dung (Auth & Accounts)
+* `POST /api/auth/login`: Dang nhap he thong bang username/password, tra ve JWT Token.
+* `POST /api/auth/oauth-login`: Dang nhap mot cham qua Google hoac Facebook.
+* `POST /api/auth/request-otp`: Yeu cau gui ma OTP 6 chu so qua email de dat lai mat khau.
+* `POST /api/auth/reset-password-otp`: Xac nhan OTP va thiet lap mat khau moi.
+* `POST /api/auth/change-password`: Doi mat khau (yeu cau token xac thuc).
+* `GET /api/account/members`: Danh sach nhan vien va phan quyen (chi ADMIN va MANAGER).
+
+### 6.2. So do ban & Khu vuc (Floor & Table Management)
+* `GET /api/table`: Lay toan bo danh sach ban kem thoi gian ngoi va tam tinh realtime.
+* `GET /api/table/areas`: Lay danh sach khu vuc (Tang tret, Tang 1, San vuon, Phong VIP).
+* `POST /api/table`: Them ban an moi (ADMIN / MANAGER).
+* `PUT /api/table/{id}`: Cap nhat thong tin ban an.
+* `DELETE /api/table/{id}`: Xoa ban an (chan xoa neu ban dang co khach hoac chua thanh toan).
+* `POST /api/table/area`: Them khu vuc moi.
+* `PUT /api/table/{id}/status`: Doi trang thai ban (0: Trong, 1: Co khach, 2: Da dat).
+* `POST /api/table/transfer`: Chuyen ban tu ban nguon sang ban dich an toan.
+
+### 6.3. Thuc don & San pham (Menu & Product Management)
+* `GET /api/category`: Lay danh sach danh muc thuc don hoat dong.
+* `POST /api/category`: Them danh muc moi kem upload anh.
+* `PUT /api/category/{id}`: Cap nhat danh muc.
+* `DELETE /api/category/{id}`: Xoa danh muc (chan xoa neu con san pham truc thuoc).
+* `GET /api/product`: Lay danh sach mon an kem phan trang va tim kiem.
+* `POST /api/product`: Them mon an moi kem upload anh vao `wwwroot/images`.
+* `PUT /api/product/{id}`: Cap nhat thong tin va hinh anh mon an.
+* `PUT /api/product/{id}/toggle-availability`: 1-Cham bat/tat trang thai con mon hoac het mon.
+
+### 6.4. Don hang & Bep KDS (Orders & Kitchen)
+* `POST /api/order`: Tao don hang moi tu Mobile Client.
+* `GET /api/order`: Danh sach don hang, loc theo SĐT khach hang hoac trang thai.
+* `GET /api/order/{id}`: Lay chi tiet don hang, danh sach mon va trang thai thanh toan.
+* `PUT /api/order/{id}/status`: Cap nhat trang thai don (0: Moi, 1: Dang che bien, 2: Phuc vu, 3: Hoan tat).
+* `POST /api/order/{id}/void-item`: Huy mon kem ly do, tu dong tru tien va ghi nhan kiem toan.
+
+### 6.5. Thanh toan (Payments)
+* `POST /api/payment/confirm`: Xac nhan thanh toan (Tien mat, VietQR, VNPay, Split).
+* `POST /api/payment/vietqr`: Tao du lieu ma QR chuyen khoan NAPAS 247 dong.
+* `GET /api/payment/vnpay/callback`: Tiep nhan IPN callback tu cong VNPay Sandbox.
+
+---
+
+## 7. HUONG DAN CAI DAT VA SETUP .ENV NHANH (QUICK SETUP GUIDE)
+
+### 7.1. Yeu cau he thong truoc khi cai dat
+* .NET SDK: Phien ban 10.0 (`dotnet --version` tra ve `10.0.x`)
+* Flutter SDK: Phien ban 3.47 (`flutter --version` tra ve `3.47.x`, Dart `3.13.x`)
+* Co so du lieu: Microsoft SQL Server 2019 / 2022 (hoac SQL Server Express)
+* Git
+
+---
+
+### 7.2. Thiet lap Co so du lieu SQL Server
+
+Mo cong cu SSMS (SQL Server Management Studio) hoac `sqlcmd` chay script khoi tao:
+1. Mo file `RestaurantPosDb.sql`.
+2. Chay toan bo script (F5).
+3. Kiem tra co so du lieu `RestaurantPosDb` da duoc tao va co san 10 bang voi du lieu mau.
+
+---
+
+### 7.3. Thiet lap .env va Khoi chay Backend API
+
+1. Di chuyen vao thu muc `backend`:
+```bash
+cd backend
+```
+
+2. Sao chep file cau hinh `.env.example` thanh `.env`:
+```bash
+cp .env.example .env
+```
+*(Tren Windows PowerShell: `Copy-Item .env.example .env`)*
+
+3. Noi dung file `.env` chuan mau cho Backend:
+```env
+# 1. Ket noi CSDL SQL Server (Dieu chinh Database neu can)
+ConnectionStrings__RestaurantPosDb=Server=localhost;Database=RestaurantPosDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true;
+
+# 2. Cau hinh xac thuc JWT
+Jwt__Key=RestaurantPosSecretKeyForJwtAuthentication2026!@#$%^&*()_+
+Jwt__Issuer=RestaurantPosApi
+Jwt__Audience=RestaurantPosClients
+Jwt__ExpireMinutes=1440
+
+# 3. Cong thanh toan VNPay Sandbox
+VNPay__TmnCode=L5GXH1AU
+VNPay__HashSecret=EVCHM01XP0U7PT31IRMOJKC2IXRV2DW7
+VNPay__Url=https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
+VNPay__ReturnUrl=http://localhost:5138/api/payment/vnpay/callback
+
+# 4. Thong tin VietQR Napas 247
+VIETQR_BANK_ID=vietinbank
+VIETQR_ACCOUNT_NO=102871234567
+VIETQR_ACCOUNT_NAME=NHA HANG BISTRO POS
+```
+
+4. Khoi phuc thu vien, build va chay API:
+```bash
+dotnet restore
+dotnet build WebApi.csproj
+dotnet run --urls "http://localhost:5138"
+```
+Backend API se khoi chay tai dia chi: `http://localhost:5138`.
+
+---
+
+### 7.4. Thiet lap .env va Khoi chay Mobile Flutter Client
+
+1. Di chuyen vao thu muc `mobile`:
+```bash
+cd ../mobile
+```
+
+2. Sao chep file cau hinh `.env.example` thanh `.env`:
+```bash
+cp .env.example .env
+```
+*(Tren Windows PowerShell: `Copy-Item .env.example .env`)*
+
+3. Noi dung file `mobile/.env`:
+```env
+# URL Backend API ket noi
+# Khi chay Windows Desktop hoac Chrome Web:
+POS_API_BASE_URL=http://localhost:5138
+
+# Khi chay tren Android Emulator (May ao Android Studio):
+# POS_API_BASE_URL=http://10.0.2.2:5138
+
+# Thong tin hien thi hoa don in
+POS_STORE_NAME=BISTRO POS RESTAURANT
+POS_STORE_ADDRESS=123 Duong Am Thuc, Quan 1, TP. Ho Chi Minh
+POS_STORE_PHONE=0901234567
+POS_PRINTER_DEFAULT_WIDTH=80mm
+```
+
+4. Cai dat dependencies va khoi chay:
+```bash
+flutter pub get
+
+# Chay tren moi truong Windows Desktop
+flutter run -d windows
+
+# Hoac chay tren trinh duyet Chrome
+flutter run -d chrome
+
+# Hoac chay tren thiet bi / may ao Android
+flutter run
+```
+
+---
+
+## 8. KIEM THU CHAT LUONG & DUNG HOC THUAT (QUALITY GATES)
+
+Du an da duoc kiem thu chat che va dap ung toan bo tieu chuan kiem thu:
+
+```bash
+# 1. Kiem tra bien dich Backend C# (.NET 10)
+cd backend
+dotnet build WebApi.csproj
+# Ket qua: Build succeeded. 0 Warning(s), 0 Error(s).
+
+# 2. Phan tich tinh ma nguon Flutter
+cd ../mobile
+flutter analyze
+# Ket qua: No issues found!
+
+# 3. Chay toan bo bo kiem thu tu dong (Unit, Widget, Adversarial & E2E)
+flutter test
+# Ket qua: All 82 tests passed! (100% Pass)
+```
+
+---
+
+## 9. CAU TRUC THU MUC DUA VAO TRIEN KHAI (MONOREPO DIRECTORY LAYOUT)
 
 ```
 restaurant_pos_app/
-+-- RestaurantPosDb.sql                     # Script DDL & DML hoàn chỉnh 10 bảng SQL Server
-+-- PROJECT.md                              # Bảng đặc tả tính năng & lộ trình Milestone 1-3
-+-- README.md                               # Tài liệu hướng dẫn kỹ thuật toàn diện
-+-- backend/                                # ASP.NET Core 10 Web API (net10.0)
++-- RestaurantPosDb.sql                     # Script DDL & DML 10 bang SQL Server 2022
++-- .env.example                            # Template cau hinh moi truong goc
++-- README.md                               # Tai lieu ky thuat tong the cua du an
++-- backend/                                # Backend ASP.NET Core 10 Web API
 |   +-- Api/
 |   |   +-- Controllers/
-|   |       +-- BaseController.cs           # Controller cơ sở cung cấp SiteProvider
-|   |       +-- TableController.cs          # API Quản lý Sơ đồ bàn, Trạng thái & Chuyển bàn
-|   |       +-- CategoryController.cs       # API Quản lý Danh mục món
+|   |       +-- AuthController.cs           # Dang nhap, Dang ky, OAuth, OTP Quen mat khau
+|   |       +-- TableController.cs          # CRUD Ban, Khu vuc, Chuyen ban, Seating timer
+|   |       +-- CategoryController.cs       # CRUD Danh muc kem upload anh & xoa sach
+|   |       +-- ProductController.cs        # CRUD Mon an, Topping, Toggle Sold-Out
+|   |       +-- OrderController.cs          # Tao don, Huy mon (Void Item), KDS
+|   |       +-- PaymentController.cs        # Xac nhan thanh toan, VietQR, VNPay Sandbox
 |   +-- Models/
-|   |   +-- RestaurantPosContext.cs         # EF Core DbContext 10 bảng quan hệ
-|   |   +-- BaseProvider.cs                 # Base provider quản lý HttpContext & DbContext
-|   |   +-- SiteProvider.cs                 # Provider facade tích hợp Category & Table repositories
-|   |   +-- BaseRepository.cs               # Base data access layer
-|   |   +-- TableRepository.cs              # Truy vấn Khu vực, Bàn & Transaction chuyển bàn
-|   |   +-- CategoryRepository.cs           # Truy vấn Danh mục & kiểm tra ràng buộc xóa
-|   +-- Services/
-|   |   +-- Helper.cs                       # Tiện ích upload & dọn dẹp file ảnh wwwroot
-|   +-- wwwroot/images/                     # Thư mục lưu trữ hình ảnh tĩnh
-|   +-- appsettings.json                    # Connection strings & Logging
-|   +-- Program.cs                          # Cấu hình DI, CORS policy, JSON serialization & Pipeline
-|   +-- WebApi.csproj                       # Dự án .NET 10 Web API
-+-- mobile/                                 # Ứng dụng Flutter Mobile Client
+|   |   +-- RestaurantPosContext.cs         # EF Core 10 DbContext quan he 10 bang
+|   |   +-- SiteProvider.cs                 # Provider facade tap trung
+|   |   +-- AuthDtos.cs, TableDtos.cs, OrderDtos.cs
+|   +-- Services/Helper.cs                  # Xu ly anh upload wwwroot
+|   +-- wwwroot/images/                     # Thu muc luu tru anh danh muc va mon an
+|   +-- Program.cs                          # Startup, JWT DI, CORS, Swagger
+|   +-- WebApi.csproj
++-- mobile/                                 # Ung dung Flutter Client
 |   +-- lib/
-|   |   +-- models/
-|   |   |   +-- area.dart                   # Thực thể Khu vực (Area DTO)
-|   |   |   +-- dining_table.dart           # Thực thể Bàn ăn (DiningTable DTO)
-|   |   |   +-- category.dart               # Thực thể Danh mục (Category DTO)
-|   |   +-- repositories/
-|   |   |   +-- table_repository.dart       # HTTP client sơ đồ bàn kèm cơ chế Offline Fallback
-|   |   |   +-- category_repository.dart    # HTTP client danh mục sản phẩm
-|   |   +-- services/
-|   |   |   +-- offline_sync_service.dart   # Engine đồng bộ đơn hàng ngoại tuyến SQLite -> Backend
-|   |   +-- utils/
-|   |   |   +-- database_helper.dart        # Singleton SQLite (user_session, cart_items, offline_orders)
+|   |   +-- models/                         # Model DTO (DiningTable, Product, Order, etc.)
+|   |   +-- repositories/                   # HTTP Client & Xu ly mang loi
+|   |   +-- services/                       # OfflineSyncService, ReceiptPrinterService
+|   |   +-- utils/database_helper.dart      # SQLite Singleton (user_session, cart, offline)
+|   |   +-- widgets/skeleton_loading.dart   # Skeleton Shimmer Loading loai bo AI-slop
 |   |   +-- views/
-|   |   |   +-- table/
-|   |   |   |   +-- floor_table_page.dart   # Giao diện Sơ đồ bàn theo Tab khu vực & Đổi màu bàn
-|   |   |   +-- category_page.dart          # Giao diện Danh mục món
-|   |   +-- main.dart                       # Khởi chạy ứng dụng, F&B theme & NavigationBar
-|   +-- pubspec.yaml                        # Thư viện Flutter (http, sqflite, path, intl)
-|   +-- test/                               # Bộ kiểm thử tự động
-|       +-- widget_test.dart                # Kiểm thử giao diện và tích hợp
-|       +-- database_helper_test.dart       # Kiểm thử các thao tác SQLite (Session, Cart, Offline Orders)
-|       +-- table_model_test.dart           # Kiểm thử serialization Area & DiningTable
-|       +-- table_repository_test.dart      # Kiểm thử TableRepository & Offline fallback
-|       +-- floor_table_challenge_test.dart # Kiểm thử các trường hợp biên của Sơ đồ bàn
-|       +-- empirical_challenge_test.dart   # Kiểm thử thực nghiệm đồng bộ ngoại tuyến & xử lý sự cố
-+-- docs/                                   # Bộ tài liệu đặc tả và hướng dẫn chi tiết
-    +-- 01_YEU_CAU_CUNG_VA_BAREM_DIEM.md
-    +-- 02_CHUC_NANG_MO_RONG_DANG_LAM.md
-    +-- 03_LUONG_HOAT_DONG_CHI_TIET.md
-    +-- 04_THIET_KE_CO_SO_DU_LIEU_MERMAID.md
-    +-- 05_MERMAID_SEQUENCE_FLOWS.md
-    +-- 06_KE_HOACH_PHAN_CHIA_PHASE_CONG_VIEC.md
-    +-- 07_BANG_PHAN_CONG_NHOM_3_NGUOI.md
-    +-- TAI_LIEU_HUONG_DAN_COLLABORATOR_FULL.docx
+|   |       +-- auth/                       # Dang nhap, Dang ky, One-Tap OAuth, Quen MK OTP
+|   |       +-- table/floor_table_page.dart # So do ban, Khu vuc, Seating Timer, Tam tinh
+|   |       +-- kitchen/                    # Man hinh KDS Bep, Alert chuong, Sold-Out toggle
+|   |       +-- cashier/                    # POS Thu ngan, Chiet khau, Split payment
+|   |       +-- member/member_home_page.dart# Member Portal, Stepper 3 buoc, Doi diem thuong
+|   |       +-- order/                      # Checkout, Chi tiet don hang, Huy mon
+|   |       +-- home_page.dart              # Danh sach mon an, tim kiem, phan trang
+|   |       +-- main.dart                   # Khoi chay ung dung va NavigationBar F&B
+|   +-- test/                               # 82 bai kiem thu tu dong (100% Pass)
+|   +-- pubspec.yaml
++-- tasks/                                  # Tien trinh theo doi cong viec
+|   +-- plan.md                             # Ke hoach chi tiet 6 Phase
+|   +-- todo.md                             # Danh sach cong viec va bang chung kiem thu
 ```
 
 ---
 
-## REST API Reference
+## 10. GHI CHU VE BAN QUYEN & BAO MAT
 
-### 1. Quản lý Sơ đồ Bàn & Khu vực (Floor & Table Management - Thành viên 1)
-
-| Phương thức | Endpoint | Mô tả nghiệp vụ | Tham số / Body | Mã phản hồi |
-| :--- | :--- | :--- | :--- | :--- |
-| `GET` | `/api/table/areas` | Lấy danh sách toàn bộ các khu vực đang hoạt động | Không có | `200 OK` (Danh sách Area) |
-| `GET` | `/api/table/by-area/{areaId}` | Lấy danh sách bàn theo mã khu vực cụ thể | `areaId` (int) | `200 OK` (Danh sách DiningTable) |
-| `GET` | `/api/table` | Lấy toàn bộ danh sách bàn kèm trạng thái trong nhà hàng | Không có | `200 OK` (Danh sách DiningTable) |
-| `GET` | `/api/table/{id}` | Lấy thông tin chi tiết của một bàn theo mã bàn | `id` (int) | `200 OK` / `404 Not Found` |
-| `PUT` | `/api/table/{id}/status` | Cập nhật trạng thái bàn (0: Trống, 1: Có khách, 2: Đã đặt) | `id` (int), Body: `{"status": 1}` | `200 OK` / `400 Bad Request` |
-| `POST` | `/api/table/transfer` | Thực hiện giao dịch chuyển bàn từ bàn nguồn sang bàn đích | Body: `{"fromTableId": 1, "toTableId": 2}` | `200 OK` / `400 Bad Request` |
-
-### 2. Quản lý Danh mục (Category Management - Thành viên 2)
-
-| Phương thức | Endpoint | Mô tả nghiệp vụ | Quyền hạn |
-| :--- | :--- | :--- | :--- |
-| `GET` | `/api/category` | Lấy danh sách danh mục thực đơn | Public |
-| `POST` | `/api/category` | Thêm danh mục mới kèm upload ảnh | Admin |
-| `PUT` | `/api/category/{id}` | Cập nhật danh mục và thay thế ảnh | Admin |
-| `DELETE` | `/api/category/{id}` | Xóa danh mục (chặn nếu còn sản phẩm) | Admin |
-
-### 3. Đơn hàng & Thanh toán (Order & Payment Management - Thành viên 3)
-
-| Phương thức | Endpoint | Mô tả nghiệp vụ | Quyền hạn |
-| :--- | :--- | :--- | :--- |
-| `POST` | `/api/order` | Tạo đơn hàng mới từ giỏ hàng client | Staff / Member |
-| `GET` | `/api/order/admin` | Quản trị đơn hàng kèm bộ lọc ngày và trạng thái | Admin / Cashier |
-| `PUT` | `/api/order/{id}/status` | Chuyển đổi trạng thái đơn và món ăn trong bếp | Staff / Chef |
-| `POST` | `/api/payment/confirm` | Xác nhận thanh toán (Tiền mặt, VietQR, VNPay) | Cashier |
-
----
-
-## Danh Sách Tài Khoản Thử Nghiệm Theo Từng Vai Trò (Database Seeded Accounts & RBAC)
-
-Toàn bộ các tài khoản dưới đây được trích xuất trực tiếp và chính xác từ bảng `Accounts` và `Roles` trong cơ sở dữ liệu ([RestaurantPosDb.sql](RestaurantPosDb.sql) và [RestaurantPos_Acceptance.sql](RestaurantPos_Acceptance.sql)), phục vụ kiểm thử phân quyền RBAC (Role-Based Access Control) trên cả Backend API và Mobile Client:
-
-> **Lưu ý về Mật khẩu:** Tất cả tài khoản mẫu ban đầu trong database đều có mật khẩu mặc định là: `admin` (tương ứng chuỗi băm SHA-256 lưu trong cột `PasswordHash`: `8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918`). Hệ thống tự động nhận diện và hỗ trợ nâng cấp sang chuỗi băm muối mật khẩu mới `{salt:32}:{hash:64}` khi thực hiện đổi mật khẩu qua endpoint `/api/auth/change-password`.
-
-| STT | Username | Mật khẩu mặc định | Vai trò (`RoleCode`) | Tên vai trò (`RoleName`) | Họ và tên | Email | Phạm vi quyền hạn kiểm thử |
-| :---: | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| 1 | `admin` | `admin` | `ADMIN` | Quản trị viên hệ thống | Nguyễn Văn Quản Trị | `admin@restaurantpos.vn` | Toàn quyền hệ thống: Quản lý danh mục, sản phẩm, nhân sự, tài khoản, sơ đồ bàn, cấu hình và báo cáo doanh thu |
-| 2 | `manager01` | `admin` | `MANAGER` | Quản lý chi nhánh | Trần Thị Thu Quản Lý | `manager01@restaurantpos.vn` | Quản lý chi nhánh: Xem danh sách nhân sự, phân ca, xử lý sự cố vận hành |
-| 3 | `cashier_mai` | `admin` | `CASHIER` | Thu ngân | Lê Tuyết Mai | `mai.cashier@restaurantpos.vn` | Thu ngân: Xem đơn hàng cần thanh toán, in hóa đơn, xác nhận thanh toán VietQR & VNPay, giải phóng bàn |
-| 4 | `waiter_nam` | `admin` | `WAITER` | Nhân viên phục vụ | Phạm Hoàng Nam | `nam.waiter@restaurantpos.vn` | Phục vụ bàn: Mở bàn trên sơ đồ phòng ăn, chọn món, chuyển bàn, gửi order vào bếp KDS |
-| 5 | `waiter_lan` | `admin` | `WAITER` | Nhân viên phục vụ | Đỗ Ngọc Lan | `lan.waiter@restaurantpos.vn` | Phục vụ bàn (Tài khoản nhân viên phục vụ thứ 2 dùng để kiểm thử bàn giao ca / thao tác đồng thời) |
-| 6 | `kitchen` | `admin` | `KITCHEN` | Bộ phận bếp (KDS) | Bếp Trưởng KDS | `kitchen@restaurantpos.vn` | Màn hình KDS: Tiếp nhận order từ nhân viên phục vụ, chuyển trạng thái chế biến (Chờ nấu -> Đang nấu -> Hoàn thành) |
-| 7 | `chef_dung` | `admin` | `HEAD_CHEF` | Đầu bếp chính | Ngô Tiến Dũng | `dung.chef@restaurantpos.vn` | Trưởng bếp: Chế biến món ăn chính, điểm tâm, kiểm soát chất lượng món ra quầy |
-| 8 | `barista_tuan` | `admin` | `BARISTA_LEAD` | Trưởng quầy pha chế | Vũ Anh Tuấn | `tuan.barista@restaurantpos.vn` | Quầy pha chế: Chuyên trách các món cà phê, trà trái cây, đá xay, đồ uống |
-| 9 | `member_khang` | `admin` | `MEMBER` | Khách hàng thân thiết | Bùi Vĩnh Khang | `khang.bui@gmail.com` | Khách hàng: Xem thực đơn, đặt món cá nhân, tích lũy điểm thưởng |
-| 10 | `vip_huong` | `admin` | `VIP_MEMBER` | Khách hàng VIP | Đặng Thu Hương | `huong.dang@fpt.com` | Khách hàng hạng vàng: Hưởng ưu đãi chiết khấu VIP 10% khi lập hóa đơn |
-| 11 | `member_linh` | `admin` | `MEMBER` | Khách hàng thân thiết | Võ Diệu Linh | `linh.vo@outlook.com` | Khách hàng thân thiết đăng ký qua liên kết mạng xã hội |
-
-### Ma Trận Thực Thi Phân Quyền RBAC (RBAC Enforcement Matrix)
-
-- **Quản trị danh mục & sản phẩm (`/api/category`, `/api/product`):** Chỉ `ADMIN` được phép Thêm / Sửa / Xóa. Các role khác gọi POST/PUT/DELETE sẽ nhận lỗi `HTTP 403 Forbidden`.
-- **Xem danh sách tài khoản & phân quyền (`/api/account/members`, `/api/account/roles`):** Chỉ `ADMIN` và `MANAGER` được phép truy cập. Các role khác bị chặn `HTTP 403 Forbidden`.
-- **Sơ đồ bàn ăn (`/api/table`):** Toàn bộ nhân viên (`ADMIN`, `MANAGER`, `CASHIER`, `WAITER`) có quyền xem và cập nhật bàn ăn; `WAITER` thực hiện mở bàn và chuyển bàn.
-- **Thanh toán & Hóa đơn (`/api/payment/confirm`):** Chỉ `CASHIER` và `ADMIN` được phép xác nhận hóa đơn và ghi nhận thanh toán vào sổ quỹ.
-- **Màn hình Bếp KDS (`/api/kds`):** Phân quyền cho `KITCHEN`, `HEAD_CHEF`, `BARISTA_LEAD` và `ADMIN`.
-
----
-
-## Hướng Dẫn Cài Đặt & Khởi Chạy (Getting Started)
-
-### Yêu cầu môi trường
-- **.NET SDK:** 10.0 (`dotnet --version` >= 10.0.100)
-- **Flutter SDK:** 3.47 (`flutter --version` >= 3.47.1, Dart >= 3.13.1)
-- **Microsoft SQL Server:** 2019 / 2022 và SQL Server Management Studio (SSMS)
-
----
-
-### Bước 1: Khởi tạo Cơ sở dữ liệu SQL Server
-
-1. Mở SSMS hoặc terminal `sqlcmd`, kết nối đến instance SQL Server của bạn.
-2. Mở file [RestaurantPosDb.sql](RestaurantPosDb.sql) và chạy toàn bộ kịch bản (F5).
-3. Kiểm tra CSDL `RestaurantPosDb` đã được tạo đầy đủ 10 bảng và nạp 10 dòng mẫu mỗi bảng:
-
-```sql
-USE RestaurantPosDb;
-SELECT t.name AS TableName, p.rows AS RecordCount
-FROM sys.tables t
-JOIN sys.partitions p ON t.object_id = p.object_id AND p.index_id < 2
-ORDER BY TableName;
-```
-
----
-
-### Bước 2: Cấu hình & Chạy Backend ASP.NET Core 10 Web API
-
-1. Mở terminal tại thư mục `backend`:
-   ```bash
-   cd backend
-   ```
-2. Cấu hình chuỗi kết nối trong `appsettings.json` cho phù hợp với máy của bạn:
-   ```json
-   "ConnectionStrings": {
-     "RestaurantPosDb": "Server=localhost;Database=RestaurantPosDb;Trusted_Connection=True;TrustServerCertificate=True;MultipleActiveResultSets=true;"
-   }
-   ```
-3. Biên dịch và khởi chạy Web API:
-   ```bash
-   dotnet restore
-   dotnet build
-   dotnet run --urls "http://localhost:5138"
-   ```
-4. Kiểm tra endpoint kiểm tra sức khỏe hệ thống:
-   ```bash
-   curl http://localhost:5138/api/table/areas
-   ```
-
----
-
-### Bước 3: Cấu hình & Khởi Chạy Mobile Flutter Client
-
-1. Mở terminal tại thư mục `mobile`:
-   ```bash
-   cd mobile
-   ```
-2. Tải các thư viện phụ thuộc:
-   ```bash
-   flutter pub get
-   ```
-3. Chạy phân tích mã nguồn và bộ kiểm thử tự động:
-   ```bash
-   flutter analyze
-   flutter test
-   ```
-4. Khởi chạy ứng dụng:
-   ```bash
-   # Chạy trên Windows Desktop
-   flutter run -d windows
-
-   # Chạy trên trình duyệt Chrome
-   flutter run -d chrome
-
-   # Chạy trên máy ảo Android AVD
-   flutter run
-   ```
-
-*Lưu ý khi chạy trên Android Emulator:* Địa chỉ `localhost` của máy tính sẽ được map thành `http://10.0.2.2:5138` trên máy ảo Android. Ứng dụng đã được tích hợp cơ chế Offline Fallback an toàn giúp giao diện Sơ đồ bàn ăn và giỏ hàng vẫn hoạt động mượt mà ngay cả khi chưa kết nối đến server backend.
-
----
-
-## Kiểm Thử & Kiểm Soát Chất Lượng (Quality Gates)
-
-Toàn bộ mã nguồn đã vượt qua các cổng kiểm thử nghiêm ngặt trước khi bàn giao:
-
-```bash
-# 1. Kiểm thử biên dịch Backend .NET 10 (0 Error, 0 Warning)
-cd backend
-dotnet build --configuration Release
-
-# 2. Phân tích tĩnh Flutter Mobile (0 Issue)
-cd ../mobile
-flutter analyze
-
-# 3. Chạy toàn bộ 81 bài kiểm thử tự động, tích hợp & trực quan (All Passed)
-flutter test
-```
-
-Kết quả nghiệm thu:
-- **Backend:** `dotnet build` succeeded with 0 Warning(s), 0 Error(s).
-- **Mobile Analysis:** `flutter analyze` reported `No issues found!`.
-- **Unit, Widget & Visual Acceptance Tests:** `81/81 tests passed (100% GREEN)` bao gồm:
-  - Kiểm thử mô hình CSDL và SQLite: `database_helper_test.dart`, `table_model_test.dart`, `product_model_test.dart`.
-  - Kiểm thử từ chối mạng thật & xử lý ngoại tuyến: `adversarial_table_repo_test.dart`, `table_repository_test.dart`, `empirical_challenge_test.dart`.
-  - Kiểm thử giao diện & giỏ hàng: `catalog_ui_test.dart`, `floor_table_challenge_test.dart`, `widget_test.dart`.
-  - Kiểm thử chụp ảnh màn hình giao diện (Screenshots): `visual_screenshot_test.dart` (lưu tại `docs/acceptance/screenshots/`).
+* Tuyet doi khong commit file `.env` that chua khoa bi mat hoac mat khau len kho ma nguon cong cong.
+* Chi su dung file `.env.example` de chia se template cau hinh mau.
+* He thong duoc thiet ke dap ung day du 10/10 diem barem hoc thuat cong diem sang tao mo rong nghiep vu F&B thuc te.
