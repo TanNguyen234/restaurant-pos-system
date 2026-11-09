@@ -425,7 +425,45 @@ flutter run
 
 ---
 
-## 8. KIỂM THỬ CHẤT LƯỢNG & ĐỘ TIN CẬY (QUALITY GATES)
+## 8. HÌNH ẢNH GIAO DIỆN THỰC TẾ & MINH CHỨNG VẬN HÀNH (LIVE SYSTEM SHOWCASE)
+
+Dưới đây là một số hình ảnh thực tế được chụp trực tiếp từ phiên chạy tương tác màn hình giao diện thực tế (True Canvas Real UI Live Test) trên trình duyệt Google Chrome thông qua Flutter Web Semantics và Backend ASP.NET Core 10:
+
+### 8.1. Sơ đồ Bàn ăn Động & Bộ đếm Thời gian ngồi (Floor Table Map & Seating Duration Timer)
+Sơ đồ bàn trực quan theo từng khu vực (Tầng trệt, Tầng 1, Sân vườn, VIP), hiển thị trạng thái màu sắc (Trống, Có khách, Đã đặt), thời gian khách đã ngồi và tạm tính tiền theo thời gian thực:
+![Sơ đồ Bàn ăn](docs/images/showcase/01_floor_table_map.png)
+
+### 8.2. Thực đơn Món ăn & Tìm kiếm Phân loại (Menu Catalog & Instant Search)
+Giao diện danh mục món ăn phong phú với hình ảnh chất lượng cao, phân loại linh hoạt, tìm kiếm tức thì và hiệu ứng Skeleton Shimmer chống giật lag:
+![Thực đơn Món ăn](docs/images/showcase/02_menu_catalog.png)
+
+### 8.3. Xác nhận Đơn hàng & Điều phối Phục vụ (Waiter Order Checkout)
+Nhân viên phục vụ kiểm tra giỏ hàng, chọn bàn chỉ định, thêm ghi chú riêng từng món và gửi order trực tiếp xuống bếp:
+![Xác nhận Đơn hàng](docs/images/showcase/03_waiter_checkout.png)
+
+### 8.4. Màn hình Bếp KDS & 1-Chạm Báo Hết Món (Kitchen Display System & Sold-Out Toggle)
+Bếp trưởng tiếp nhận order tức thì kèm âm thanh cảnh báo, cập nhật tiến độ nấu và bật/tắt trạng thái hết món (Sold-Out) ngay trên màn hình KDS:
+![Màn hình Bếp KDS](docs/images/showcase/04_kds_kitchen_display.png)
+
+### 8.5. Trạm Điểm Bán Hàng Thu Ngân (Cashier POS Terminal)
+Màn hình POS thu ngân chuyên nghiệp hỗ trợ chọn bàn, kiểm tra chi tiết đơn hàng, áp dụng chiết khấu/voucher, tách bill và thanh toán đa phương thức:
+![Trạm POS Thu Ngân](docs/images/showcase/05_cashier_pos_terminal.png)
+
+### 8.6. Quy trình Xác thực OTP Khôi phục Mật khẩu (Member OTP Flow)
+Quy trình gửi mã xác thực OTP 6 số qua email/database, tự động điền form và đặt lại mật khẩu an toàn chuẩn Salted SHA-256:
+![Xác thực OTP](docs/images/showcase/06_member_otp_flow.png)
+
+### 8.7. Bảng Điều khiển Quản trị & Top 5 Món Bán Chạy (Admin KPI & Best-Sellers Dashboard)
+Bảng điều khiển kinh doanh tổng quan hiển thị doanh thu ngày, số lượng đơn hoàn tất, tỷ lệ lấp đầy bàn và biểu đồ Top 5 món bán chạy nhất:
+![Bảng Điều khiển Quản trị](docs/images/showcase/07_admin_dashboard_kpi.png)
+
+### 8.8. Quản trị Danh mục & Phân trang Thực đơn (Admin Product & Category Management)
+Quản trị viên thao tác thêm/sửa/xóa danh mục, quản lý món ăn kèm hình ảnh và phân trang linh hoạt:
+![Quản trị Món ăn](docs/images/showcase/08_admin_product_management.png)
+
+---
+
+## 9. KIỂM THỬ CHẤT LƯỢNG & ĐỘ TIN CẬY (QUALITY GATES)
 
 Mã nguồn toàn diện của dự án đã vượt qua tất cả các cổng kiểm soát chất lượng nghiêm ngặt trước khi bàn giao:
 
@@ -443,11 +481,15 @@ flutter analyze
 # 3. Chạy toàn bộ bộ kiểm thử tự động (Unit, Widget, Adversarial & E2E)
 flutter test
 # Kết quả: All 82 tests passed! (100% Pass)
+
+# 4. Kiểm thử tương tác trực tiếp màn hình toàn bộ vai trò (True Canvas Real UI Live Test)
+python scripts/run_true_canvas_live_test.py
+# Kết quả: 24/24 tests passed! (100% Pass across GUEST, WAITER, KITCHEN, CASHIER, MEMBER, ADMIN)
 ```
 
 ---
 
-## 9. CẤU TRÚC THƯ MỤC DỰ ÁN (MONOREPO DIRECTORY LAYOUT)
+## 10. CẤU TRÚC THƯ MỤC DỰ ÁN (MONOREPO DIRECTORY LAYOUT)
 
 ```
 restaurant_pos_app/
@@ -489,6 +531,11 @@ restaurant_pos_app/
 |   |       +-- main.dart                   # Khởi chạy ứng dụng và NavigationBar F&B
 |   +-- test/                               # 82 bài kiểm thử tự động (100% Pass)
 |   +-- pubspec.yaml
++-- docs/                                   # Tài nguyên ảnh và tài liệu minh chứng
+|   +-- images/showcase/                    # Ảnh chụp màn hình tương tác thực tế 6 vai trò
++-- scripts/                                # Kịch bản kiểm thử tự động hóa (True Canvas Live Test)
+|   +-- run_true_canvas_live_test.py        # Playwright E2E UI test trên Google Chrome
+|   +-- run_live_screen_test_all_roles.py   # Bộ kiểm thử tích hợp toàn diện 6 vai trò
 +-- tasks/                                  # Tiến trình theo dõi kế hoạch
 |   +-- plan.md                             # Kế hoạch chi tiết 6 Phase
 |   +-- todo.md                             # Danh sách công việc và bằng chứng kiểm thử
@@ -496,7 +543,7 @@ restaurant_pos_app/
 
 ---
 
-## 10. GHI CHÚ VỀ BẢN QUYỀN & BẢO MẬT HỆ THỐNG
+## 11. GHI CHÚ VỀ BẢN QUYỀN & BẢO MẬT HỆ THỐNG
 
 * Tuyệt đối không commit file `.env` chứa mật khẩu thực tế hoặc chuỗi bí mật lên kho mã nguồn công khai.
 * Sử dụng file `.env.example` làm mẫu cấu hình chuẩn khi bàn giao và triển khai.

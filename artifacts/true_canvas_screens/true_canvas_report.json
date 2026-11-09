@@ -1,0 +1,227 @@
+{
+  "test_suite": "True Canvas Real UI Live Test Acceptance",
+  "executed_at": "2026-11-09T21:21:18.048269",
+  "total_tests": 24,
+  "passed_tests": 24,
+  "failed_tests": 0,
+  "pass_rate_percentage": 100.0,
+  "duration_seconds": 184.87,
+  "results": [
+    {
+      "role": "GUEST",
+      "test_id": "UI-GUEST-01",
+      "description": "Trình duyệt render Sơ đồ bàn ăn nhà hàng (FloorTablePage)",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui01_guest_floor_plan.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:18:23.075004"
+    },
+    {
+      "role": "GUEST",
+      "test_id": "UI-GUEST-02",
+      "description": "Tương tác mở Modal Sheet Thao tác Bàn ăn (Table Action Sheet)",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui02_guest_table_action_sheet.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:18:25.317102"
+    },
+    {
+      "role": "GUEST",
+      "test_id": "UI-GUEST-03",
+      "description": "Trang chủ duyệt thực đơn món ăn & khuyến mãi (HomePage)",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui03_guest_home_catalog.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:18:31.745376"
+    },
+    {
+      "role": "GUEST",
+      "test_id": "UI-GUEST-04",
+      "description": "Tương tác gõ tìm kiếm món ăn 'Cà phê' trên thanh tìm kiếm",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui04_guest_search_results.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:18:35.281321"
+    },
+    {
+      "role": "GUEST",
+      "test_id": "UI-GUEST-05",
+      "description": "Xem chi tiết món ăn kèm hình ảnh lớn & món liên quan",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui05_guest_product_detail.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:18:40.599694"
+    },
+    {
+      "role": "GUEST",
+      "test_id": "UI-GUEST-06",
+      "description": "Mở Trung tâm Vận hành Phân quyền hiển thị cổng đăng nhập",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui06_guest_operations_gate.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:18:46.013670"
+    },
+    {
+      "role": "WAITER",
+      "test_id": "UI-WTR-01",
+      "description": "Giao diện Đăng nhập hệ thống POS cho Phục vụ",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui07_waiter_login_screen.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:18:53.599570"
+    },
+    {
+      "role": "WAITER",
+      "test_id": "UI-WTR-02",
+      "description": "Đăng nhập thành công, phiên làm việc phục vụ bàn được kích hoạt",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui08_waiter_authenticated_session.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:19:03.606474"
+    },
+    {
+      "role": "WAITER",
+      "test_id": "UI-WTR-03",
+      "description": "Màn hình Giỏ hàng phục vụ bàn (CartPage)",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui09_waiter_cart_items.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:19:08.839595"
+    },
+    {
+      "role": "WAITER",
+      "test_id": "UI-WTR-04",
+      "description": "Màn hình Xác nhận Đặt món & Chọn bàn gửi bếp",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui10_waiter_order_checkout.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:19:14.080434"
+    },
+    {
+      "role": "WAITER",
+      "test_id": "UI-WTR-05",
+      "description": "Chi tiết Hóa đơn bàn kèm trạng thái món ăn",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui11_waiter_order_detail.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:19:19.336841"
+    },
+    {
+      "role": "KDS",
+      "test_id": "UI-KDS-01",
+      "description": "Màn hình Bếp KDS thời gian thực hiển thị danh sách order",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui12_kds_active_queue.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:19:37.523907"
+    },
+    {
+      "role": "KDS",
+      "test_id": "UI-KDS-02",
+      "description": "Mở hộp thoại 1-Chạm Báo hết món (Sold-Out Dialog) trên KDS",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui13_kds_soldout_toggle_dialog.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:19:39.844518"
+    },
+    {
+      "role": "CASHIER",
+      "test_id": "UI-CSH-01",
+      "description": "Giao diện Quầy Thu Ngân POS Quản lý Đơn & Bàn ăn",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui14_cashier_pos_terminal.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:19:58.977350"
+    },
+    {
+      "role": "CASHIER",
+      "test_id": "UI-CSH-02",
+      "description": "Giao diện Quản lý Ca làm việc & Bàn giao két tiền Thu Ngân",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui15_cashier_shift_management.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:20:04.255632"
+    },
+    {
+      "role": "MEMBER",
+      "test_id": "UI-MEM-01",
+      "description": "Tương tác mở Modal Quên mật khẩu / Khôi phục OTP Email",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui16_member_forgot_password_modal.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:20:15.330492"
+    },
+    {
+      "role": "MEMBER",
+      "test_id": "UI-MEM-02",
+      "description": "Điền mã OTP thực tế (981548) vào ô xác thực trên giao diện",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui17_member_otp_filled_screen.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:20:21.891977"
+    },
+    {
+      "role": "MEMBER",
+      "test_id": "UI-MEM-03",
+      "description": "Cổng thành viên & Thanh theo dõi tiến độ đơn hàng thời gian thực",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui18_member_home_tracking.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:20:38.185562"
+    },
+    {
+      "role": "MEMBER",
+      "test_id": "UI-MEM-04",
+      "description": "Hộp thoại Đổi điểm thưởng tích lũy (Loyalty Points Redeem)",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui19_member_redeem_points_modal.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:20:41.309603"
+    },
+    {
+      "role": "ADMIN",
+      "test_id": "UI-ADM-01",
+      "description": "Bảng điều khiển 4 KPI Doanh thu & Top 5 Món bán chạy nhất",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui20_admin_kpi_bestsellers_dashboard.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:20:58.267924"
+    },
+    {
+      "role": "ADMIN",
+      "test_id": "UI-ADM-02",
+      "description": "Quản lý danh mục thực đơn kèm ảnh đại diện & sắp xếp",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui21_admin_category_management.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:21:04.551346"
+    },
+    {
+      "role": "ADMIN",
+      "test_id": "UI-ADM-03",
+      "description": "Hộp thoại Thêm danh mục mới có tải ảnh preview",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui22_admin_add_category_modal.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:21:06.975225"
+    },
+    {
+      "role": "ADMIN",
+      "test_id": "UI-ADM-04",
+      "description": "Quản lý món ăn & phân trang danh mục thực đơn",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui23_admin_product_pagination.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:21:12.428042"
+    },
+    {
+      "role": "ADMIN",
+      "test_id": "UI-ADM-05",
+      "description": "Xem danh sách nhân sự & ma trận phân quyền 6 Role RBAC",
+      "passed": true,
+      "screenshot": "artifacts/true_canvas_screens\\ui24_admin_user_rbac_matrix.png",
+      "details": "",
+      "timestamp": "2026-11-09T21:21:17.676905"
+    }
+  ]
+}

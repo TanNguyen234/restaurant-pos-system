@@ -50,3 +50,9 @@
   - *Evidence:* Replaced all `'http://localhost:5138'` in `mobile/lib/models/category.dart` and `mobile/lib/views/cart_page.dart` with `${ApiConfig.baseUrl.replaceAll('/api', '')}`.
 - [x] **Task 6.3:** Tích hợp Haptic Feedback, Badge Animation và kiểm thử hồi quy 100% Pass
   - *Evidence:* `dotnet build backend/WebApi.csproj` -> 0 warnings, 0 errors. `flutter analyze` -> No issues found! `flutter test` -> 82/82 tests passed!
+
+## Phase 7: Kiểm Thử Thực Tế True Canvas Real UI & Tài Liệu Hóa Minh Chứng
+- [x] **Task 7.1:** Kịch bản kiểm thử tương tác thực tế toàn bộ 6 vai trò trên Google Chrome (True Canvas UI Live Test)
+  - *Evidence:* `scripts/run_true_canvas_live_test.py` (24/24 tests passed - 100% Pass in 184.87s). Artifacts: `artifacts/true_canvas_screens/` (24 unique screen captures) & `artifacts/TRUE_CANVAS_LIVE_TEST_REPORT.md`.
+- [x] **Task 7.2:** Trích xuất Showcase ảnh giao diện thực tế vào README.md
+  - *Evidence:* `docs/images/showcase/` (8 ảnh đại diện 6 vai trò), `README.md` Section 8 Showcase và Section 9 Quality Gates.

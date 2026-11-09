@@ -1,0 +1,57 @@
+{
+  "gate": "evidence-first-content",
+  "evaluated_at": "2026-11-09T21:04:00+07:00",
+  "sourcesReviewed": true,
+  "outputsReviewed": true,
+  "claim_ledger_summary": {
+    "total_claims_audited": 7,
+    "fully_verified_quotes": 2,
+    "verified_paraphrases": 1,
+    "verified_entailments": 1,
+    "unsupported_on_ui_canvas": 3
+  },
+  "visual_artifact_audit": {
+    "total_screenshots": 28,
+    "unique_visual_states": 18,
+    "duplicate_screenshots_count": 10,
+    "duplicate_clusters": [
+      {
+        "cluster_name": "Login Screen Duplicates",
+        "hash": "6e4b9f...",
+        "files": ["step05_waiter_login.png", "step21_member_forgot_otp_modal.png", "step22_member_otp_verified.png"],
+        "root_cause": "Pixel coordinate click (320, 560) missed the text button on canvas; modal was not opened in screenshot"
+      },
+      {
+        "cluster_name": "KDS Queue Duplicates",
+        "hash": "9f30be...",
+        "files": ["step12_kds_active_queue.png", "step13_kds_cooking_state.png", "step14_kds_ready_state.png", "step15_kds_soldout_toggle.png"],
+        "root_cause": "Status transition was executed via backend HTTP PUT, but the Flutter Web page was not reloaded or clicked via UI"
+      },
+      {
+        "cluster_name": "Cashier POS Duplicates",
+        "hash": "b2a18d...",
+        "files": ["step16_cashier_terminal.png", "step17_cashier_discount.png", "step18_cashier_vietqr_dialog.png", "step19_cashier_paid_receipt.png"],
+        "root_cause": "VietQR, Discount, and Cash settlement were called via backend API; modals were not triggered by canvas mouse events"
+      },
+      {
+        "cluster_name": "Member Home Duplicates",
+        "hash": "41c7d2...",
+        "files": ["step23_member_home_tracking.png", "step24_member_redeem_points.png"],
+        "root_cause": "Redeem points modal was not triggered by canvas pointer click"
+      },
+      {
+        "cluster_name": "Floor Map Duplicates",
+        "hash": "e5d2a1...",
+        "files": ["step09_waiter_table_occupied.png", "step10_waiter_transfer_table.png"],
+        "root_cause": "Table transfer modal was not opened on screen before screenshot"
+      }
+    ]
+  },
+  "unresolved_claims": [
+    "True end-to-end canvas pointer interaction across all modals (VietQR dialog, OTP bottomsheet, KDS status button) was replaced by API-driven state change."
+  ],
+  "not_run_items": [
+    "Real external email inbox access (as requested by user, mocked via devOtp / direct database query)",
+    "Real money VNPay banking gateway transfer (simulated via sandbox HMAC checksum verification)"
+  ]
+}
