@@ -114,3 +114,20 @@ public class ResetPasswordOtpDto
     [MinLength(6)]
     public string NewPassword { get; set; } = null!;
 }
+
+public class OAuthLoginDto
+{
+    [Required]
+    public string Provider { get; set; } = null!; // 'Google' | 'Facebook'
+
+    public string? Token { get; set; }
+
+    [Required]
+    [EmailAddress]
+    public string Email { get; set; } = null!;
+
+    [Required]
+    public string FullName { get; set; } = null!;
+
+    public string? Avatar { get; set; }
+}

@@ -1,3 +1,4 @@
+import '../../config/api_config.dart';
 import 'package:flutter/material.dart';
 import '../../models/category.dart';
 import '../../repositories/category_repository.dart';
@@ -35,104 +36,162 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
     final titleController = TextEditingController(text: category?.title ?? '');
     final descController = TextEditingController(text: category?.description ?? '');
     final sortController = TextEditingController(text: (category?.sortOrder ?? 0).toString());
+    final iconController = TextEditingController(text: category?.icon ?? '');
 
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(
-          isEditing ? 'Chỉnh sửa danh mục' : 'Thêm danh mục mới',
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-        ),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Tên danh mục (*)',
-                  hintText: 'Ví dụ: Cà phê pha máy',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: titleController,
-                decoration: const InputDecoration(
-                  labelText: 'Tiêu đề phụ',
-                  hintText: 'Ví dụ: Hương vị Ý nguyên bản',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: descController,
-                maxLines: 2,
-                decoration: const InputDecoration(
-                  labelText: 'Mô tả chi tiết',
-                  hintText: 'Giới thiệu ngắn về nhóm món này',
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: sortController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: 'Thứ tự hiển thị',
-                  hintText: '1, 2, 3...',
-                ),
-              ),
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.all(12),
-                decoration: BoxDecoration(
-                  color: const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.image_outlined, color: Color(0xFF0F172A)),
-                    SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'Hình ảnh: Tự động lưu wwwroot/images/categories',
-                        style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Hủy', style: TextStyle(color: Color(0xFF64748B))),
-          ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0F172A),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) {
+          final iconText = iconController.text.trim();
+          final previewUrl = iconText.isEmpty
+              ? ''
+              : (iconText.startsWith('http')
+                  ? iconText
+                  : '${ApiConfig.baseUrl.replaceAll('/api', '')}/images/categories/$iconText');
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text(
+              isEditing ? 'Chỉnh sửa danh mục' : 'Thêm danh mục mới',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
             ),
-            onPressed: () async {
-              final name = nameController.text.trim();
-              if (name.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Vui lòng nhập tên danh mục!')),
-                );
-                return;
-              }
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(
+                      labelText: 'Tên danh mục (*)',
+                      hintText: 'Ví dụ: Cà phê pha máy',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: titleController,
+                    decoration: const InputDecoration(
+                      labelText: 'Tiêu đề phụ',
+                      hintText: 'Ví dụ: Hương vị Ý nguyên bản',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: descController,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Mô tả chi tiết',
+                      hintText: 'Giới thiệu ngắn về nhóm món này',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: sortController,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(
+                      labelText: 'Thứ tự hiển thị',
+                      hintText: '1, 2, 3...',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: iconController,
+                    decoration: InputDecoration(
+                      labelText: 'Tên file ảnh hoặc URL Icon',
+                      hintText: 'default_category.png hoặc https://...',
+                      suffixIcon: iconText.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 18),
+                              onPressed: () => setDialogState(() => iconController.clear()),
+                            )
+                          : null,
+                    ),
+                    onChanged: (_) => setDialogState(() {}),
+                  ),
+                  const SizedBox(height: 12),
+                  if (previewUrl.isNotEmpty) ...[
+                    Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            width: 52,
+                            height: 52,
+                            color: const Color(0xFFF1F5F9),
+                            child: Image.network(
+                              previewUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => const Icon(
+                                Icons.broken_image_outlined,
+                                color: Color(0xFF94A3B8),
+                                size: 28,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Xem trước hình ảnh danh mục',
+                            style: TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.image_outlined, color: Color(0xFF0F172A)),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Hình ảnh: Tự động lưu wwwroot/images/categories',
+                            style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: const Text('Hủy', style: TextStyle(color: Color(0xFF64748B))),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF0F172A),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () async {
+                  final name = nameController.text.trim();
+                  if (name.isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Vui lòng nhập tên danh mục!')),
+                    );
+                    return;
+                  }
 
-              Navigator.pop(ctx);
-              setState(() => _isLoading = true);
+                  Navigator.pop(ctx);
+                  setState(() => _isLoading = true);
 
-              final data = {
-                'Name': name,
-                'Title': titleController.text.trim(),
-                'Description': descController.text.trim(),
-                'SortOrder': int.tryParse(sortController.text.trim()) ?? 0,
-              };
+                  final data = {
+                    'Name': name,
+                    'Title': titleController.text.trim(),
+                    'Description': descController.text.trim(),
+                    'SortOrder': int.tryParse(sortController.text.trim()) ?? 0,
+                    'Icon': iconController.text.trim().isNotEmpty ? iconController.text.trim() : 'default_category.png',
+                  };
 
               Map<String, dynamic> result;
               if (isEditing) {
@@ -154,8 +213,10 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
             child: Text(isEditing ? 'Cập nhật' : 'Thêm mới'),
           ),
         ],
-      ),
-    );
+      );
+    },
+  ),
+);
   }
 
   Future<void> _deleteCategory(Category category) async {

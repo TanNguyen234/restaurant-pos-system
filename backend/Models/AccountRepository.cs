@@ -234,4 +234,58 @@ public class AccountRepository : BaseRepository
         await context.SaveChangesAsync();
         return (true, "Đặt lại mật khẩu mới thành công");
     }
+
+    public async Task<(bool Success, string Message, Account? Account, Role? Role)> OAuthLoginAsync(OAuthLoginDto dto)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Email))
+        {
+            return (false, "Email đăng nhập mạng xã hội không hợp lệ", null, null);
+        }
+
+        string email = dto.Email.Trim().ToLowerInvariant();
+        var existing = await context.Accounts
+            
+            .FirstOrDefaultAsync(a => a.Email != null && a.Email.ToLower() == email);
+
+        if (existing != null)
+        {
+            existing.FullName = string.IsNullOrWhiteSpace(dto.FullName) ? existing.FullName : dto.FullName.Trim();
+            if (!string.IsNullOrWhiteSpace(dto.Avatar)) existing.Avatar = dto.Avatar.Trim();
+            existing.OAuthProvider = dto.Provider.Trim();
+            existing.IsEmailVerified = true;
+            existing.UpdatedAt = DateTime.Now;
+            await context.SaveChangesAsync();
+            var role = await context.Roles.FindAsync(existing.RoleId); return (true, $"Đăng nhập bằng {dto.Provider} thành công", existing, role);
+        }
+
+        var memberRole = await context.Roles.FirstOrDefaultAsync(r => r.RoleCode == "MEMBER");
+        int roleId = memberRole?.RoleId ?? 6;
+
+        string baseUsername = email.Split('@')[0];
+        string username = baseUsername;
+        int counter = 1;
+        while (await context.Accounts.AnyAsync(a => a.Username.ToLower() == username.ToLower()))
+        {
+            username = $"{baseUsername}_{counter++}";
+        }
+
+        var newAccount = new Account
+        {
+            Username = username,
+            PasswordHash = PasswordHasher.HashPassword(Guid.NewGuid().ToString("N")),
+            FullName = string.IsNullOrWhiteSpace(dto.FullName) ? username : dto.FullName.Trim(),
+            Email = email,
+            RoleId = roleId,
+            IsActive = true,
+            IsEmailVerified = true,
+            OAuthProvider = dto.Provider.Trim(),
+            Avatar = dto.Avatar?.Trim(),
+            CreatedAt = DateTime.Now
+        };
+
+        context.Accounts.Add(newAccount);
+        await context.SaveChangesAsync();
+
+        var newRole = await context.Roles.FindAsync(roleId); return (true, $"Đăng ký và đăng nhập thành công với tài khoản {dto.Provider}", newAccount, newRole);
+    }
 }

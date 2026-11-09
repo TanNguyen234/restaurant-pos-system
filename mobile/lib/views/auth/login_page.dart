@@ -73,6 +73,258 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  Future<void> _handleOAuthLogin(String provider) async {
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    final defaultEmail = provider == 'Google' ? 'tanntd.2005@gmail.com' : 'tanntd.fb@gmail.com';
+    final defaultName = provider == 'Google' ? 'Tấn Nguyễn (Google)' : 'Tấn Nguyễn (Facebook)';
+
+    final result = await _authRepo.oauthLogin(
+      provider: provider,
+      email: defaultEmail,
+      fullName: defaultName,
+      token: 'demo_token_',
+    );
+
+    if (!mounted) return;
+    setState(() => _isLoading = false);
+
+    if (result['success'] == true) {
+      final UserAccount user = result['user'];
+      await SessionManager.instance.setSession(user);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Đăng nhập thành công với $provider! Xin chào ${user.fullName}'),
+          backgroundColor: const Color(0xFF059669),
+          behavior: SnackBarBehavior.floating,
+        ),
+      );
+
+      if (widget.onLoginSuccess != null) {
+        widget.onLoginSuccess!();
+      } else if (Navigator.canPop(context)) {
+        Navigator.pop(context, user);
+      }
+    } else {
+      setState(() {
+        _errorMessage = result['message'] ?? 'Đăng nhập $provider thất bại';
+      });
+    }
+  }
+
+  void _showForgotPasswordModal() {
+    final identityController = TextEditingController();
+    final otpController = TextEditingController();
+    final newPasswordController = TextEditingController();
+    int step = 1;
+    bool isSubmitting = false;
+    String? modalError;
+    String? devOtpHint;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 24,
+                right: 24,
+                top: 24,
+                bottom: MediaQuery.of(modalCtx).viewInsets.bottom + 24,
+              ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 16),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFE2E8F0),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFFEF3C7),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.mark_email_read_rounded, color: Color(0xFFD97706), size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        const Text(
+                          'Quên mật khẩu / Khôi phục OTP',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    if (modalError != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFFEF2F2),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: const Color(0xFFFECACA)),
+                        ),
+                        child: Text(modalError!, style: const TextStyle(color: Color(0xFFDC2626), fontSize: 13)),
+                      ),
+                    ],
+                    if (step == 1) ...[
+                      const Text(
+                        'Nhập email hoặc tên đăng nhập của bạn để nhận mã OTP 6 chữ số qua hòm thư điện tử.',
+                        style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                      ),
+                      const SizedBox(height: 16),
+                      TextField(
+                        controller: identityController,
+                        decoration: InputDecoration(
+                          labelText: 'Email hoặc Tên đăng nhập',
+                          prefixIcon: const Icon(Icons.person_outline),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF0F172A),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                final text = identityController.text.trim();
+                                if (text.isEmpty) {
+                                  setModalState(() => modalError = 'Vui lòng nhập email hoặc username');
+                                  return;
+                                }
+                                setModalState(() {
+                                  isSubmitting = true;
+                                  modalError = null;
+                                });
+                                final res = await _authRepo.requestOtp(text);
+                                setModalState(() => isSubmitting = false);
+                                if (res['success'] == true) {
+                                  setModalState(() {
+                                    step = 2;
+                                    devOtpHint = res['devOtp'];
+                                  });
+                                } else {
+                                  setModalState(() => modalError = res['message']);
+                                }
+                              },
+                        child: isSubmitting
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Text('Gửi mã OTP qua Email', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ] else ...[
+                      Text(
+                        'Mã xác thực đã được gửi. ${devOtpHint != null ? "(Demo OTP: $devOtpHint)" : ""}',
+                        style: const TextStyle(color: Color(0xFF059669), fontSize: 13, fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 14),
+                      TextField(
+                        controller: otpController,
+                        keyboardType: TextInputType.number,
+                        maxLength: 6,
+                        decoration: InputDecoration(
+                          labelText: 'Mã OTP 6 chữ số',
+                          prefixIcon: const Icon(Icons.security_rounded),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      TextField(
+                        controller: newPasswordController,
+                        obscureText: true,
+                        decoration: InputDecoration(
+                          labelText: 'Mật khẩu mới (tối thiểu 6 ký tự)',
+                          prefixIcon: const Icon(Icons.lock_reset_rounded),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 20),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF059669),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                        onPressed: isSubmitting
+                            ? null
+                            : () async {
+                                final otp = otpController.text.trim();
+                                final newPass = newPasswordController.text.trim();
+                                if (otp.length != 6 || newPass.length < 6) {
+                                  setModalState(() => modalError = 'Mã OTP 6 số và mật khẩu mới tối thiểu 6 ký tự');
+                                  return;
+                                }
+                                setModalState(() {
+                                  isSubmitting = true;
+                                  modalError = null;
+                                });
+                                final res = await _authRepo.resetPasswordOtp(
+                                  identity: identityController.text.trim(),
+                                  otp: otp,
+                                  newPassword: newPass,
+                                );
+                                setModalState(() => isSubmitting = false);
+                                if (res['success'] == true) {
+                                  if (ctx.mounted) {
+                                    Navigator.pop(ctx);
+                                  }
+                                  _usernameController.text = identityController.text.trim();
+                                  _passwordController.text = newPass;
+                                  if (mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      const SnackBar(
+                                        content: Text('Đặt lại mật khẩu thành công! Bạn có thể đăng nhập ngay.'),
+                                        backgroundColor: Color(0xFF059669),
+                                        behavior: SnackBarBehavior.floating,
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  setModalState(() => modalError = res['message']);
+                                }
+                              },
+                        child: isSubmitting
+                            ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                            : const Text('Xác nhận đặt lại mật khẩu', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   Future<void> _handleLogout() async {
     await SessionManager.instance.logout();
     if (!mounted) return;
@@ -303,7 +555,14 @@ class _LoginPageState extends State<LoginPage> {
                           return null;
                         },
                       ),
-                      const SizedBox(height: 24),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          onPressed: _showForgotPasswordModal,
+                          child: const Text('Quên mật khẩu?', style: TextStyle(color: Color(0xFFD97706), fontWeight: FontWeight.w600)),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
 
                       // Submit button
                       ElevatedButton(
@@ -337,6 +596,48 @@ class _LoginPageState extends State<LoginPage> {
                       ),
                       const SizedBox(height: 16),
 
+                      const SizedBox(height: 12),
+                      const Row(
+                        children: [
+                          Expanded(child: Divider(color: Color(0xFFE2E8F0))),
+                          Padding(
+                            padding: EdgeInsets.symmetric(horizontal: 10),
+                            child: Text('Hoặc đăng nhập bằng', style: TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                          ),
+                          Expanded(child: Divider(color: Color(0xFFE2E8F0))),
+                        ],
+                      ),
+                      const SizedBox(height: 14),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                side: const BorderSide(color: Color(0xFFCBD5E1)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.g_mobiledata_rounded, color: Color(0xFFEA4335), size: 28),
+                              label: const Text('Google', style: TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold)),
+                              onPressed: () => _handleOAuthLogin('Google'),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(vertical: 12),
+                                side: const BorderSide(color: Color(0xFFCBD5E1)),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.facebook_rounded, color: Color(0xFF1877F2), size: 20),
+                              label: const Text('Facebook', style: TextStyle(color: Color(0xFF0F172A), fontWeight: FontWeight.bold)),
+                              onPressed: () => _handleOAuthLogin('Facebook'),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
                       // Secondary options: Register & Change Password
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,

@@ -1,3 +1,4 @@
+import '../../config/api_config.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/category.dart';
@@ -145,12 +146,52 @@ class _AdminProductPageState extends State<AdminProductPage> {
                     labelText: 'Hình ảnh (Tên file hoặc URL)',
                     hintText: 'Ảnh đơn hoặc nhiều ảnh cách nhau dấu ;',
                     hintStyle: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-                    suffixIcon: IconButton(
-                      icon: const Icon(Icons.clear, size: 18),
-                      onPressed: () => setDialogState(() => imageController.clear()),
-                    ),
+                    suffixIcon: imageController.text.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear, size: 18),
+                            onPressed: () => setDialogState(() => imageController.clear()),
+                          )
+                        : null,
                   ),
+                  onChanged: (_) => setDialogState(() {}),
                 ),
+                if (imageController.text.trim().isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  Builder(builder: (c) {
+                    final firstImg = imageController.text.trim().split(';').first.trim();
+                    final previewUrl = firstImg.startsWith('http')
+                        ? firstImg
+                        : '${ApiConfig.baseUrl.replaceAll('/api', '')}/images/products/$firstImg';
+                    return Row(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Container(
+                            width: 60,
+                            height: 60,
+                            color: const Color(0xFFF1F5F9),
+                            child: Image.network(
+                              previewUrl,
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => const Icon(
+                                Icons.broken_image_outlined,
+                                color: Color(0xFF94A3B8),
+                                size: 28,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Text(
+                            'Xem trước ảnh đại diện món ăn',
+                            style: TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                          ),
+                        ),
+                      ],
+                    );
+                  }),
+                ],
                 const SizedBox(height: 12),
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,

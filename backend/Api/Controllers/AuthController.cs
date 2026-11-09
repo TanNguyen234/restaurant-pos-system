@@ -283,4 +283,42 @@ public class AuthController : BaseController
         _otpStore.TryRemove(key, out _);
         return Ok(new { success = true, message = "Đặt lại mật khẩu mới thành công! Bạn có thể đăng nhập ngay bằng mật khẩu mới." });
     }
+
+    /// <summary>
+    /// POST /api/auth/oauth-login
+    /// Đăng nhập bằng tài khoản mạng xã hội Google / Facebook (Barem 1.10)
+    /// </summary>
+    [HttpPost("oauth-login")]
+    public async Task<IActionResult> OAuthLogin([FromBody] OAuthLoginDto dto)
+    {
+        if (dto == null || string.IsNullOrWhiteSpace(dto.Email))
+        {
+            return BadRequest(new { success = false, message = "Thông tin đăng nhập mạng xã hội không hợp lệ" });
+        }
+
+        var result = await Provider.Account.OAuthLoginAsync(dto);
+        if (!result.Success || result.Account == null)
+        {
+            return BadRequest(new { success = false, message = result.Message });
+        }
+
+        string roleCode = result.Role?.RoleCode ?? "MEMBER";
+        string roleName = result.Role?.RoleName ?? "Khách hàng thành viên";
+        string token = _jwtTokenService.GenerateToken(result.Account, roleCode, roleName);
+
+        return Ok(new
+        {
+            success = true,
+            message = result.Message,
+            token,
+            accountId = result.Account.AccountId,
+            username = result.Account.Username,
+            fullName = result.Account.FullName,
+            role = roleCode,
+            roleName = roleName,
+            email = result.Account.Email,
+            avatar = result.Account.Avatar,
+            oauthProvider = result.Account.OAuthProvider
+        });
+    }
 }
