@@ -2,6 +2,7 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
+using WebApi.Services;
 
 namespace WebApi.Api.Controllers;
 
@@ -10,10 +11,12 @@ namespace WebApi.Api.Controllers;
 public class PaymentController : BaseController
 {
     private readonly IConfiguration _configuration;
+    private readonly PosRealtimeNotifier _realtime;
 
-    public PaymentController(IConfiguration configuration)
+    public PaymentController(IConfiguration configuration, PosRealtimeNotifier realtime)
     {
         _configuration = configuration;
+        _realtime = realtime;
     }
 
     private int? GetCallerAccountId()
@@ -36,6 +39,9 @@ public class PaymentController : BaseController
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
+
+        await _realtime.NotifyOrderChangedAsync("OrderPaid", result.Payment);
+        await _realtime.NotifyTableChangedAsync(new { orderId = dto.OrderId });
 
         return Ok(new
         {
@@ -68,6 +74,9 @@ public class PaymentController : BaseController
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
+
+        await _realtime.NotifyOrderChangedAsync("OrderPaid", result.Payment);
+        await _realtime.NotifyTableChangedAsync(new { orderId = dto.OrderId });
 
         return Ok(new
         {
@@ -182,6 +191,9 @@ public class PaymentController : BaseController
                 message = result.Message
             });
         }
+
+        await _realtime.NotifyOrderChangedAsync("OrderPaid", new { orderId = result.OrderId, method = "VNPay" });
+        await _realtime.NotifyTableChangedAsync(new { orderId = result.OrderId });
 
         return Ok(new
         {

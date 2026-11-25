@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
+using WebApi.Services;
 
 namespace WebApi.Api.Controllers;
 
@@ -9,6 +10,12 @@ namespace WebApi.Api.Controllers;
 [Authorize(Roles = "ADMIN,MANAGER,KITCHEN,HEAD_CHEF,BARISTA_LEAD,COOK_ASSISTANT")]
 public class KdsController : BaseController
 {
+    private readonly PosRealtimeNotifier _realtime;
+
+    public KdsController(PosRealtimeNotifier realtime)
+    {
+        _realtime = realtime;
+    }
     [HttpGet]
     public async Task<IActionResult> GetKdsItems()
     {
@@ -48,6 +55,9 @@ public class KdsController : BaseController
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
 
+        await _realtime.NotifyKdsChangedAsync(new { orderDetailId, cookingStatus = dto.CookingStatus });
+        await _realtime.NotifyOrderChangedAsync("KdsCookingStatus", new { orderDetailId, cookingStatus = dto.CookingStatus });
+
         return Ok(new
         {
             statusCode = 200,
@@ -73,6 +83,9 @@ public class KdsController : BaseController
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
+
+        await _realtime.NotifyKdsChangedAsync(new { orderDetailId, voided = true });
+        await _realtime.NotifyOrderChangedAsync("OrderVoided", result.Order);
 
         return Ok(new
         {

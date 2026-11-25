@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
+using WebApi.Services;
 
 namespace WebApi.Api.Controllers;
 
@@ -8,6 +9,12 @@ namespace WebApi.Api.Controllers;
 [Route("api/[controller]")]
 public class TableController : BaseController
 {
+    private readonly PosRealtimeNotifier _realtime;
+
+    public TableController(PosRealtimeNotifier realtime)
+    {
+        _realtime = realtime;
+    }
     [HttpGet("areas")]
     [AllowAnonymous]
     public IActionResult GetAreas()
@@ -79,7 +86,7 @@ public class TableController : BaseController
 
     [HttpPost("transfer")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
-    public IActionResult Transfer([FromBody] TransferTableRequest request)
+    public async Task<IActionResult> Transfer([FromBody] TransferTableRequest request)
     {
         if (request == null)
             return BadRequest(new { success = false, message = "Dữ liệu yêu cầu chuyển bàn không hợp lệ" });
@@ -102,6 +109,8 @@ public class TableController : BaseController
             });
         }
 
+        await _realtime.NotifyTableChangedAsync(new { action = "Transfer", fromTableId = result.FromTableId, toTableId = result.ToTableId });
+
         return Ok(new
         {
             success = true,
@@ -113,7 +122,7 @@ public class TableController : BaseController
 
     [HttpPost("merge")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
-    public IActionResult Merge([FromBody] TransferTableRequest request)
+    public async Task<IActionResult> Merge([FromBody] TransferTableRequest request)
     {
         if (request == null) return BadRequest(new { success = false, message = "Dữ liệu yêu cầu gộp bàn không hợp lệ" });
         int fromId = request.FromTableId ?? request.SourceTableId ?? 0;
@@ -124,12 +133,13 @@ public class TableController : BaseController
         var result = Provider.Table.MergeTables(fromId, toId);
         if (!result.Success) return BadRequest(new { success = false, message = result.Message });
 
+        await _realtime.NotifyTableChangedAsync(new { action = "Merge", fromTableId = result.FromTableId, toTableId = result.ToTableId });
         return Ok(new { success = true, message = result.Message, fromTableId = result.FromTableId, toTableId = result.ToTableId });
     }
 
     [HttpPost("split")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
-    public IActionResult Split([FromBody] SplitTableRequest request)
+    public async Task<IActionResult> Split([FromBody] SplitTableRequest request)
     {
         if (request == null) return BadRequest(new { success = false, message = "Dữ liệu yêu cầu tách bàn không hợp lệ" });
         if (request.FromTableId <= 0 || request.ToTableId <= 0) return BadRequest(new { success = false, message = "Vui lòng chọn bàn nguồn và bàn đích" });
@@ -138,6 +148,7 @@ public class TableController : BaseController
         var result = Provider.Table.SplitTable(request.FromTableId, request.ToTableId, request.OrderDetailIds);
         if (!result.Success) return BadRequest(new { success = false, message = result.Message });
 
+        await _realtime.NotifyTableChangedAsync(new { action = "Split", fromTableId = request.FromTableId, toTableId = request.ToTableId, newOrderId = result.NewOrderId });
         return Ok(new { success = true, message = result.Message, newOrderId = result.NewOrderId });
     }
 

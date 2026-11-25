@@ -21,6 +21,12 @@ public class ProductFormDto
 [Route("api/[controller]")]
 public class ProductController : BaseController
 {
+    private readonly PosRealtimeNotifier _realtime;
+
+    public ProductController(PosRealtimeNotifier realtime)
+    {
+        _realtime = realtime;
+    }
     [HttpGet]
     public async Task<IActionResult> Get(
         [FromQuery] int page = 1,
@@ -399,6 +405,8 @@ public class ProductController : BaseController
         product.IsAvailable = !product.IsAvailable;
         product.UpdatedAt = DateTime.Now;
         await Provider.Product.UpdateAsync(product);
+
+        await _realtime.NotifyKdsChangedAsync(new { productId = product.ProductId, isAvailable = product.IsAvailable });
 
         return Ok(new
         {

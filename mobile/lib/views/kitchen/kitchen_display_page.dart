@@ -6,6 +6,7 @@ import '../../models/order.dart';
 import '../../models/product.dart';
 import '../../repositories/order_repository.dart';
 import '../../repositories/product_repository.dart';
+import '../../services/realtime_service.dart';
 
 class KitchenDisplayPage extends StatefulWidget {
   const KitchenDisplayPage({super.key});
@@ -20,6 +21,7 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
   bool _isLoading = true;
   String? _errorMessage;
   Timer? _refreshTimer;
+  StreamSubscription<PosRealtimeEvent>? _rtSub;
 
   // 0: Chờ nấu, 1: Đang làm, 2: Đã xong, -1: Tất cả
   int _selectedFilterStatus = 0;
@@ -38,6 +40,12 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
   void initState() {
     super.initState();
     _loadKdsItems();
+    PosRealtimeService.instance.ensureStarted();
+    _rtSub = PosRealtimeService.instance.events.listen((ev) {
+      if (mounted && (ev.target == 'KdsUpdated' || ev.target == 'OrderEvent')) {
+        _loadKdsItems(showSpinner: false);
+      }
+    });
     _refreshTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (mounted) _loadKdsItems(showSpinner: false);
     });
@@ -45,6 +53,7 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
 
   @override
   void dispose() {
+    _rtSub?.cancel();
     _refreshTimer?.cancel();
     super.dispose();
   }

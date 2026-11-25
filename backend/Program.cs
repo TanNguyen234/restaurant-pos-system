@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
+using WebApi.Hubs;
 using WebApi.Models;
 using WebApi.Services;
 
@@ -63,7 +64,8 @@ builder.Services.AddCors(options =>
             return false;
         })
         .AllowAnyMethod()
-        .AllowAnyHeader();
+        .AllowAnyHeader()
+        .AllowCredentials();
     });
 });
 
@@ -71,11 +73,13 @@ builder.Services.AddCors(options =>
 builder.Services.AddDbContext<RestaurantPosContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("RestaurantPosDb")));
 
-// 3. Đăng ký HttpContextAccessor, SiteProvider, JwtTokenService và EmailService
+// 3. Đăng ký HttpContextAccessor, SiteProvider, JwtTokenService, EmailService và SignalR
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<SiteProvider>();
 builder.Services.AddSingleton<JwtTokenService>();
 builder.Services.AddScoped<EmailService>();
+builder.Services.AddSignalR();
+builder.Services.AddSingleton<PosRealtimeNotifier>();
 
 // 4. Cấu hình JWT Bearer Authentication & Authorization (Fail-fast nếu thiếu Jwt:Key)
 var jwtSettings = builder.Configuration.GetSection("Jwt");
@@ -141,5 +145,6 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapHub<PosHub>("/hubs/pos");
 
 app.Run();
