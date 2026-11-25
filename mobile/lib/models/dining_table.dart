@@ -5,7 +5,7 @@ class DiningTable {
   final int areaId;
   final String name;
   final int capacity;
-  int status; // 0: Trống, 1: Có khách, 2: Chờ phục vụ / Đã đặt trước
+  int status; // 0: Trống, 1: Có khách, 2: Chờ phục vụ, 3: Đặt trước
   final int? currentOrderId;
   final DateTime? updatedAt;
   final DateTime? orderCreatedAt;
@@ -26,15 +26,17 @@ class DiningTable {
   });
 
   bool get isAvailable => status == 0;
-  bool get isOccupied => status == 1;
-  bool get isReserved => status == 2;
+  bool get isOccupied => status == 1 || status == 2;
+  bool get isWaiting => status == 2;
+  bool get isReserved => status == 3;
 
   Duration? get seatingDuration =>
-      (orderCreatedAt != null && status == 1) ? DateTime.now().difference(orderCreatedAt!) : null;
+      (orderCreatedAt != null && isOccupied) ? DateTime.now().difference(orderCreatedAt!) : null;
 
   String get seatingDurationText {
     final dur = seatingDuration;
-    if (dur == null || status != 1) return '';
+    if (dur == null || !isOccupied) return '';
+    if (dur.isNegative || dur.inMinutes < 1) return '<1p';
     final totalMins = dur.inMinutes;
     if (totalMins < 60) {
       return '$totalMins phút';
@@ -51,6 +53,8 @@ class DiningTable {
       case 1:
         return 'Có khách';
       case 2:
+        return 'Chờ phục vụ';
+      case 3:
         return 'Đã đặt trước';
       default:
         return 'Khác';
@@ -60,11 +64,13 @@ class DiningTable {
   Color get statusColor {
     switch (status) {
       case 0:
-        return const Color(0xFF2E7D32); // Green #2E7D32
+        return const Color(0xFF059669);
       case 1:
-        return const Color(0xFFC62828); // Red #C62828
+        return const Color(0xFFDC2626);
       case 2:
-        return const Color(0xFFEF6C00); // Orange #EF6C00
+        return const Color(0xFFD97706);
+      case 3:
+        return const Color(0xFF0284C7);
       default:
         return Colors.grey;
     }
@@ -73,11 +79,13 @@ class DiningTable {
   Color get statusBackgroundColor {
     switch (status) {
       case 0:
-        return const Color(0xFFE8F5E9); // Light green #E8F5E9
+        return const Color(0xFFECFDF5);
       case 1:
-        return const Color(0xFFFFEBEE); // Light red #FFEBEE
+        return const Color(0xFFFEF2F2);
       case 2:
-        return const Color(0xFFFFF3E0); // Light orange #FFF3E0
+        return const Color(0xFFFFFBEB);
+      case 3:
+        return const Color(0xFFE0F2FE);
       default:
         return Colors.grey.shade100;
     }
@@ -90,6 +98,8 @@ class DiningTable {
       case 1:
         return Icons.restaurant;
       case 2:
+        return Icons.hourglass_top_rounded;
+      case 3:
         return Icons.bookmark_border;
       default:
         return Icons.info_outline;
@@ -137,7 +147,7 @@ class DiningTable {
           ? DateTime.tryParse(map['orderCreatedAt'].toString())
           : null,
       runningTotal: (map['runningTotal'] as num?)?.toDouble() ?? 0.0,
-      itemCount: map['itemCount'] ?? 0,
+      itemCount: (map['itemCount'] as num?)?.toInt() ?? 0,
     );
   }
 

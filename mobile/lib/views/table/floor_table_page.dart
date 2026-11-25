@@ -1,10 +1,13 @@
+import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import '../../models/area.dart';
 import '../../models/dining_table.dart';
 import '../../repositories/table_repository.dart';
 import '../../services/offline_sync_service.dart';
+import '../../services/session_manager.dart';
 import '../order/order_checkout_page.dart';
+import '../order/order_detail_page.dart';
 
 class FloorTablePage extends StatefulWidget {
   const FloorTablePage({super.key});
@@ -19,6 +22,7 @@ class _FloorTablePageState extends State<FloorTablePage>
   List<DiningTable> _allTables = [];
   bool _isLoading = true;
   TabController? _tabController;
+  Timer? _elapsedTimer;
   final OfflineSyncService _syncService = OfflineSyncService();
 
   @override
@@ -26,10 +30,14 @@ class _FloorTablePageState extends State<FloorTablePage>
     super.initState();
     _syncService.initialize();
     _loadData();
+    _elapsedTimer = Timer.periodic(const Duration(seconds: 60), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   @override
   void dispose() {
+    _elapsedTimer?.cancel();
     _tabController?.dispose();
     super.dispose();
   }
@@ -485,13 +493,14 @@ class _FloorTablePageState extends State<FloorTablePage>
                       constraints: const BoxConstraints(maxHeight: 200),
                       child: ListView.builder(
                         shrinkWrap: true,
-                        itemCount: details.length,
+                        itemCount: details.where((d) => d['cookingStatus'] != 4).length,
                         itemBuilder: (context, index) {
-                          final item = details[index];
+                          final activeDetails = details.where((d) => d['cookingStatus'] != 4).toList();
+                          final item = activeDetails[index];
                           final id = item['orderDetailId'] as int? ?? item['id'] as int? ?? 0;
                           final name = item['productName']?.toString() ?? 'Món ăn';
                           final qty = item['quantity'] ?? 1;
-                          final price = (item['price'] as num?)?.toDouble() ?? 0.0;
+                          final price = (item['unitPrice'] ?? item['price'] as num?)?.toDouble() ?? 0.0;
                           final isChecked = selectedDetailIds.contains(id);
 
                           return CheckboxListTile(
@@ -699,6 +708,24 @@ class _FloorTablePageState extends State<FloorTablePage>
   }
 
   Future<void> _handleCheckInReservation(DiningTable table) async {
+    final reservations = await TableRepository.getReservations();
+    final match = reservations.where((r) => r['tableId'] == table.id && (r['status'] == 0 || r['status'] == null)).toList();
+    if (match.isNotEmpty) {
+      final resId = match.first['reservationId'] as int? ?? 0;
+      if (resId > 0) {
+        final res = await TableRepository.checkInReservation(resId);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message']?.toString() ?? 'Nhận bàn thành công'),
+            backgroundColor: res['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        if (res['success'] == true) await _loadData();
+        return;
+      }
+    }
     final success = await TableRepository.updateStatus(table.id, 1);
     if (!mounted) return;
     if (success) {
@@ -712,6 +739,135 @@ class _FloorTablePageState extends State<FloorTablePage>
       );
       await _loadData();
     }
+  }
+
+  Future<void> _handleCancelReservation(DiningTable table) async {
+    final reservations = await TableRepository.getReservations();
+    final match = reservations.where((r) => r['tableId'] == table.id && (r['status'] == 0 || r['status'] == null)).toList();
+    if (match.isNotEmpty) {
+      final resId = match.first['reservationId'] as int? ?? 0;
+      if (resId > 0) {
+        final res = await TableRepository.cancelReservation(resId);
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(res['message']?.toString() ?? 'Đã hủy đặt bàn'),
+            backgroundColor: res['success'] == true ? const Color(0xFF0F172A) : const Color(0xFFDC2626),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        if (res['success'] == true) await _loadData();
+        return;
+      }
+    }
+    await _updateTableStatus(table, 0);
+  }
+
+  Future<void> _showReservationsModal() async {
+    final list = await TableRepository.getReservations();
+    if (!mounted) return;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: DraggableScrollableSheet(
+          initialChildSize: 0.65,
+          minChildSize: 0.4,
+          maxChildSize: 0.9,
+          expand: false,
+          builder: (_, scrollCtrl) => Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 12, 8),
+                child: Row(
+                  children: [
+                    const Icon(Icons.event_note_rounded, color: Color(0xFFD97706)),
+                    const SizedBox(width: 8),
+                    const Expanded(
+                      child: Text('Danh sách Đặt bàn trước', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                    ),
+                    IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                  ],
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: list.isEmpty
+                    ? const Center(child: Text('Hiện không có lịch đặt bàn nào sắp tới', style: TextStyle(color: Color(0xFF64748B))))
+                    : ListView.separated(
+                        controller: scrollCtrl,
+                        padding: const EdgeInsets.all(16),
+                        itemCount: list.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 10),
+                        itemBuilder: (_, i) {
+                          final r = list[i];
+                          final resId = r['reservationId'] as int? ?? 0;
+                          final tableName = r['tableName']?.toString() ?? 'Bàn #${r['tableId']}';
+                          final arr = r['arrivalTime'] != null ? DateTime.tryParse(r['arrivalTime'].toString()) : null;
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        '$tableName • ${r['customerName'] ?? ''}',
+                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                                      ),
+                                    ),
+                                    Text('${r['guestCount'] ?? 2} khách', style: const TextStyle(fontSize: 12, color: Color(0xFFD97706), fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  'SĐT: ${r['phoneNumber'] ?? ''}${arr != null ? ' • Giờ đến: ${DateFormat('HH:mm dd/MM').format(arr)}' : ''}',
+                                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                ),
+                                if (resId > 0) ...[
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      TextButton(
+                                        onPressed: () async {
+                                          Navigator.pop(ctx);
+                                          await TableRepository.cancelReservation(resId);
+                                          await _loadData();
+                                        },
+                                        child: const Text('Hủy lịch', style: TextStyle(color: Color(0xFFDC2626))),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      FilledButton(
+                                        onPressed: () async {
+                                          Navigator.pop(ctx);
+                                          await TableRepository.checkInReservation(resId);
+                                          await _loadData();
+                                        },
+                                        child: const Text('Nhận bàn'),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   void _showTableActionSheet(DiningTable table) {
@@ -804,6 +960,23 @@ class _FloorTablePageState extends State<FloorTablePage>
                 const SizedBox(height: 16),
                 const Divider(height: 1, color: Color(0xFFF1F5F9)),
                 const SizedBox(height: 12),
+                if (table.status == 1 && table.currentOrderId != null)
+                  _buildActionTile(
+                    icon: Icons.receipt_long_rounded,
+                    iconColor: const Color(0xFF0F172A),
+                    iconBg: const Color(0xFFF1F5F9),
+                    title: 'Xem hóa đơn & Thanh toán',
+                    subtitle: 'Đơn #HD-${table.currentOrderId} • Thu tiền / Hủy món / Tách món',
+                    onTap: () {
+                      Navigator.pop(bottomSheetCtx);
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => OrderDetailPage(orderId: table.currentOrderId!),
+                        ),
+                      ).then((_) => _loadData());
+                    },
+                  ),
                 _buildActionTile(
                   icon: Icons.restaurant_menu_rounded,
                   iconColor: const Color(0xFF059669),
@@ -820,7 +993,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                           preSelectedTableName: table.name,
                         ),
                       ),
-                    );
+                    ).then((_) => _loadData());
                   },
                 ),
                 _buildActionTile(
@@ -871,7 +1044,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                     },
                   ),
                 ],
-                if (table.status == 2) ...[
+                if (table.status == 2 || table.status == 3) ...[
                   _buildActionTile(
                     icon: Icons.how_to_reg_rounded,
                     iconColor: const Color(0xFF059669),
@@ -891,21 +1064,22 @@ class _FloorTablePageState extends State<FloorTablePage>
                     subtitle: 'Chuyển bàn về trạng thái Trống',
                     onTap: () {
                       Navigator.pop(bottomSheetCtx);
-                      _updateTableStatus(table, 0);
+                      _handleCancelReservation(table);
                     },
                   ),
                 ],
-                _buildActionTile(
-                  icon: Icons.swap_horiz_rounded,
-                  iconColor: const Color(0xFFD97706),
-                  iconBg: const Color(0xFFFFFBEB),
-                  title: 'Chuyển bàn ăn',
-                  subtitle: 'Chuyển khách và đơn sang bàn trống khác',
-                  onTap: () {
-                    Navigator.pop(bottomSheetCtx);
-                    _handleTableTransfer(table);
-                  },
-                ),
+                if (table.status == 1)
+                  _buildActionTile(
+                    icon: Icons.swap_horiz_rounded,
+                    iconColor: const Color(0xFFD97706),
+                    iconBg: const Color(0xFFFFFBEB),
+                    title: 'Chuyển bàn ăn',
+                    subtitle: 'Chuyển khách và đơn sang bàn trống khác',
+                    onTap: () {
+                      Navigator.pop(bottomSheetCtx);
+                      _handleTableTransfer(table);
+                    },
+                  ),
                 if (table.status == 1) ...[
                   _buildActionTile(
                     icon: Icons.check_circle_outline_rounded,
@@ -1225,7 +1399,7 @@ class _FloorTablePageState extends State<FloorTablePage>
   Widget _buildSummaryBar() {
     final available = _allTables.where((t) => t.status == 0).length;
     final occupied = _allTables.where((t) => t.status == 1).length;
-    final reserved = _allTables.where((t) => t.status == 2).length;
+    final reserved = _allTables.where((t) => t.status == 2 || t.status == 3).length;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1336,6 +1510,7 @@ class _FloorTablePageState extends State<FloorTablePage>
         text = 'CÓ KHÁCH';
         break;
       case 2:
+      case 3:
         bg = const Color(0xFFFFFBEB);
         fg = const Color(0xFFB45309);
         dot = const Color(0xFFF59E0B);
@@ -1427,19 +1602,25 @@ class _FloorTablePageState extends State<FloorTablePage>
       builder: (context, constraints) {
         final width = constraints.maxWidth;
         final crossAxisCount = width > 900 ? 4 : width > 600 ? 3 : 2;
-        return GridView.builder(
-          padding: const EdgeInsets.all(16),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: crossAxisCount,
-            childAspectRatio: 1.0,
-            crossAxisSpacing: 14,
-            mainAxisSpacing: 14,
+        final ratio = width < 500 ? 0.84 : 0.98;
+        return RefreshIndicator(
+          onRefresh: _loadData,
+          color: const Color(0xFF0F172A),
+          child: GridView.builder(
+            physics: const AlwaysScrollableScrollPhysics(),
+            padding: const EdgeInsets.all(14),
+            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: crossAxisCount,
+              childAspectRatio: ratio,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemCount: areaTables.length,
+            itemBuilder: (context, index) {
+              final table = areaTables[index];
+              return _buildTableCard(table);
+            },
           ),
-          itemCount: areaTables.length,
-          itemBuilder: (context, index) {
-            final table = areaTables[index];
-            return _buildTableCard(table);
-          },
         );
       },
     );
@@ -1471,6 +1652,7 @@ class _FloorTablePageState extends State<FloorTablePage>
         actionLabel = 'Xem đơn';
         break;
       case 2:
+      case 3:
         borderColor = const Color(0xFFF59E0B);
         glowColor = const Color(0x12F59E0B);
         actionBg = const Color(0xFFFFFBEB);
@@ -1493,16 +1675,8 @@ class _FloorTablePageState extends State<FloorTablePage>
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: borderColor.withValues(alpha: 0.35), width: 1.5),
         boxShadow: [
-          BoxShadow(
-            color: glowColor,
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
+          BoxShadow(color: glowColor, blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6, offset: const Offset(0, 2)),
         ],
       ),
       child: Material(
@@ -1511,70 +1685,55 @@ class _FloorTablePageState extends State<FloorTablePage>
           borderRadius: BorderRadius.circular(16),
           onTap: () => _showTableActionSheet(table),
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(11),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Expanded(
                       child: Text(
                         table.name,
-                        style: const TextStyle(
-                          fontSize: 16,
-                          fontWeight: FontWeight.w700,
-                          color: Color(0xFF0F172A),
-                        ),
-                        maxLines: 1,
+                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700, color: Color(0xFF0F172A)),
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
+                    const SizedBox(width: 4),
                     _buildStatusPill(table.status),
                   ],
                 ),
                 Row(
                   children: [
-                    const Icon(
-                      Icons.people_alt_rounded,
-                      size: 15,
-                      color: Color(0xFF64748B),
-                    ),
+                    const Icon(Icons.people_alt_rounded, size: 14, color: Color(0xFF64748B)),
                     const SizedBox(width: 4),
                     Text(
-                      '${table.capacity} chỗ',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: Color(0xFF475569),
-                      ),
+                      '${table.capacity} chỗ${table.status == 1 && table.itemCount > 0 ? ' • ${table.itemCount} món' : ''}',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF475569)),
                     ),
                     if (table.currentOrderId != null) ...[
                       const Spacer(),
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                         decoration: BoxDecoration(
                           color: const Color(0xFFFEE2E2),
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(color: const Color(0xFFFECACA)),
                         ),
                         child: Text(
-                          '#HD-${table.currentOrderId}',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.bold,
-                            color: Color(0xFF991B1B),
-                          ),
+                          '#${table.currentOrderId}',
+                          style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
                         ),
                       ),
                     ],
                   ],
                 ),
-                if (table.status == 1) ...[
+                if (table.status == 1)
                   Container(
-                    margin: const EdgeInsets.symmetric(vertical: 4),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
                     decoration: BoxDecoration(
                       color: const Color(0xFFFFF1F2),
                       borderRadius: BorderRadius.circular(6),
@@ -1584,31 +1743,31 @@ class _FloorTablePageState extends State<FloorTablePage>
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             const Icon(Icons.timer_outlined, size: 12, color: Color(0xFFE11D48)),
                             const SizedBox(width: 3),
                             Text(
-                              table.seatingDurationText.isNotEmpty ? table.seatingDurationText : '<1p',
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFFE11D48)),
+                              table.seatingDurationText.isNotEmpty ? table.seatingDurationText : 'Chưa có đơn',
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: Color(0xFFE11D48)),
                             ),
                           ],
                         ),
                         if (table.runningTotal > 0)
-                          Text(
-                            NumberFormat.compactCurrency(locale: 'vi_VN', symbol: 'đ').format(table.runningTotal),
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFBE123C)),
+                          Flexible(
+                            child: Text(
+                              NumberFormat.compactCurrency(locale: 'vi_VN', symbol: 'đ').format(table.runningTotal),
+                              style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFFBE123C)),
+                              overflow: TextOverflow.ellipsis,
+                            ),
                           ),
                       ],
                     ),
                   ),
-                ],
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                  decoration: BoxDecoration(
-                    color: actionBg,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
+                  decoration: BoxDecoration(color: actionBg, borderRadius: BorderRadius.circular(8)),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
@@ -1616,12 +1775,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                       const SizedBox(width: 4),
                       Text(
                         actionLabel,
-                        style: TextStyle(
-                          color: actionFg,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.3,
-                        ),
+                        style: TextStyle(color: actionFg, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 0.3),
                       ),
                     ],
                   ),
@@ -1700,10 +1854,16 @@ class _FloorTablePageState extends State<FloorTablePage>
             },
           ),
           IconButton(
-            icon: const Icon(Icons.table_restaurant_outlined),
-            tooltip: 'Quản lý bàn & Khu vực',
-            onPressed: _showTableAreaManagerModal,
+            icon: const Icon(Icons.event_note_outlined),
+            tooltip: 'Lịch đặt bàn trước',
+            onPressed: _showReservationsModal,
           ),
+          if (SessionManager.instance.isManager)
+            IconButton(
+              icon: const Icon(Icons.table_restaurant_outlined),
+              tooltip: 'Quản lý bàn & Khu vực',
+              onPressed: _showTableAreaManagerModal,
+            ),
           IconButton(
             icon: const Icon(Icons.refresh_rounded),
             tooltip: 'Làm mới',
@@ -1811,7 +1971,7 @@ class _FloorTablePageState extends State<FloorTablePage>
   void _showTableAreaManagerModal() {
     final newTableNameController = TextEditingController();
     final newCapacityController = TextEditingController(text: '4');
-    int selectedAreaId = _areas.isNotEmpty ? _areas.first.id : 1;
+    int? selectedAreaId = _areas.isNotEmpty ? _areas.first.id : null;
 
     final newAreaNameController = TextEditingController();
     final newSortOrderController = TextEditingController(text: (_areas.length + 1).toString());
@@ -1957,15 +2117,15 @@ class _FloorTablePageState extends State<FloorTablePage>
                                                 : () async {
                                                     final name = newTableNameController.text.trim();
                                                     final cap = int.tryParse(newCapacityController.text.trim()) ?? 4;
-                                                    if (name.isEmpty) {
+                                                    if (selectedAreaId == null || name.isEmpty) {
                                                       ScaffoldMessenger.of(context).showSnackBar(
-                                                        const SnackBar(content: Text('Vui lòng nhập tên bàn')),
+                                                        const SnackBar(content: Text('Vui lòng chọn khu vực và nhập tên bàn')),
                                                       );
                                                       return;
                                                     }
                                                     setModalState(() => isSubmitting = true);
                                                     final res = await TableRepository.createTable(
-                                                      areaId: selectedAreaId,
+                                                      areaId: selectedAreaId!,
                                                       tableName: name,
                                                       capacity: cap,
                                                     );

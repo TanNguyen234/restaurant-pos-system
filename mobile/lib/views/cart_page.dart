@@ -1,12 +1,14 @@
-import '../config/api_config.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../config/api_config.dart';
 import '../utils/database_helper.dart';
-import 'order/order_checkout_page.dart';
 import '../widgets/skeleton_loading.dart';
+import 'home_page.dart';
+import 'order/order_checkout_page.dart';
 
 class CartPage extends StatefulWidget {
-  const CartPage({super.key});
+  final VoidCallback? onExploreMenu;
+  const CartPage({super.key, this.onExploreMenu});
 
   @override
   State<CartPage> createState() => _CartPageState();
@@ -40,40 +42,40 @@ class _CartPageState extends State<CartPage> {
   }
 
   Future<void> _loadCart() async {
-    setState(() => _isLoading = true);
     final items = await _dbHelper.getCartItems();
     final total = await _dbHelper.getCartTotalAmount();
 
     if (!mounted) return;
     setState(() {
-      _cartItems = items;
+      _cartItems = List<Map<String, dynamic>>.from(items);
       _totalAmount = total;
       _isLoading = false;
     });
   }
 
   Future<void> _increaseQuantity(Map<String, dynamic> item) async {
-    final id = item['id'] as int;
-    final currentQty = item['quantity'] as int;
-    await _dbHelper.updateCartQuantity(id, currentQty + 1);
+    final rowId = item['id'] as int;
+    final currentQty = item['quantity'] as int? ?? 1;
+    await _dbHelper.updateCartItemQuantityById(rowId, currentQty + 1);
     await _loadCart();
   }
 
   Future<void> _decreaseQuantity(Map<String, dynamic> item) async {
-    final id = item['id'] as int;
-    final currentQty = item['quantity'] as int;
+    final rowId = item['id'] as int;
+    final currentQty = item['quantity'] as int? ?? 1;
     if (currentQty > 1) {
-      await _dbHelper.updateCartQuantity(id, currentQty - 1);
+      await _dbHelper.updateCartItemQuantityById(rowId, currentQty - 1);
+      await _loadCart();
     } else {
       final shouldDelete = await _showConfirmDialog(
         title: 'Xóa món ăn',
         content: 'Bạn có chắc chắn muốn bỏ "${item['product_name']}" khỏi giỏ hàng?',
       );
       if (shouldDelete == true) {
-        await _dbHelper.deleteCartItem(id);
+        await _dbHelper.deleteCartItem(rowId);
+        await _loadCart();
       }
     }
-    await _loadCart();
   }
 
   Future<void> _clearAllCart() async {
@@ -133,6 +135,13 @@ class _CartPageState extends State<CartPage> {
     }
   }
 
+  String _resolveImageUrl(dynamic raw) {
+    final first = (raw ?? '').toString().split(RegExp(r'[;|]')).first.trim();
+    if (first.isEmpty) return '';
+    if (first.startsWith('http://') || first.startsWith('https://')) return first;
+    return '${ApiConfig.baseUrl.replaceAll('/api', '')}/images/products/$first';
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -141,14 +150,8 @@ class _CartPageState extends State<CartPage> {
         title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'Giỏ hàng gọi món',
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-            ),
-            Text(
-              'Lưu trữ ngoại tuyến SQLite',
-              style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
-            ),
+            Text('Giỏ hàng gọi món', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+            Text('Lưu trữ ngoại tuyến SQLite', style: TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
           ],
         ),
         backgroundColor: const Color(0xFF0F172A),
@@ -181,24 +184,13 @@ class _CartPageState extends State<CartPage> {
           children: [
             Container(
               padding: const EdgeInsets.all(28),
-              decoration: const BoxDecoration(
-                color: Color(0xFFF1F5F9),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(
-                Icons.remove_shopping_cart_outlined,
-                size: 72,
-                color: Color(0xFF94A3B8),
-              ),
+              decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
+              child: const Icon(Icons.remove_shopping_cart_outlined, size: 72, color: Color(0xFF94A3B8)),
             ),
             const SizedBox(height: 24),
             const Text(
               'Giỏ hàng của bạn đang trống',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF0F172A),
-              ),
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -217,8 +209,12 @@ class _CartPageState extends State<CartPage> {
               icon: const Icon(Icons.restaurant_menu, color: Color(0xFFF59E0B)),
               label: const Text('KHÁM PHÁ THỰC ĐƠN', style: TextStyle(fontWeight: FontWeight.bold)),
               onPressed: () {
-                if (Navigator.canPop(context)) {
+                if (widget.onExploreMenu != null) {
+                  widget.onExploreMenu!();
+                } else if (Navigator.canPop(context)) {
                   Navigator.pop(context);
+                } else {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const HomePage()));
                 }
               },
             ),
@@ -235,21 +231,19 @@ class _CartPageState extends State<CartPage> {
       itemBuilder: (context, index) {
         final item = _cartItems[index];
         final id = item['id'] as int;
-        final name = item['product_name'] ?? 'Món ăn';
+        final name = item['product_name']?.toString() ?? 'Món ăn';
         final price = (item['price'] as num?)?.toDouble() ?? 0.0;
         final quantity = item['quantity'] as int? ?? 1;
         final subtotal = price * quantity;
-        final note = item['note'] as String?;
+        final note = item['note']?.toString();
+        final imgUrl = _resolveImageUrl(item['image_url']);
 
         return Dismissible(
           key: Key('cart_item_$id'),
           direction: DismissDirection.endToStart,
           background: Container(
             margin: const EdgeInsets.only(bottom: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xFFEF4444),
-              borderRadius: BorderRadius.circular(16),
-            ),
+            decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(16)),
             alignment: Alignment.centerRight,
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: const Row(
@@ -261,28 +255,26 @@ class _CartPageState extends State<CartPage> {
               ],
             ),
           ),
-          confirmDismiss: (direction) async {
-            return await _showConfirmDialog(
-              title: 'Xóa món ăn',
-              content: 'Bạn có chắc chắn muốn bỏ "$name" khỏi giỏ hàng?',
-            );
-          },
-          onDismissed: (direction) {
+          confirmDismiss: (_) => _showConfirmDialog(
+            title: 'Xóa món ăn',
+            content: 'Bạn có chắc chắn muốn bỏ "$name" khỏi giỏ hàng?',
+          ),
+          onDismissed: (_) {
+            setState(() {
+              _cartItems.removeWhere((e) => e['id'] == id);
+              _totalAmount = _cartItems.fold<double>(
+                0.0,
+                (s, e) => s + (((e['price'] as num?)?.toDouble() ?? 0.0) * ((e['quantity'] as int?) ?? 1)),
+              );
+            });
             _dbHelper.deleteCartItem(id);
-            _loadCart();
           },
           child: Container(
             margin: const EdgeInsets.only(bottom: 12),
             decoration: BoxDecoration(
               color: Colors.white,
               borderRadius: BorderRadius.circular(16),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x0A000000),
-                  blurRadius: 10,
-                  offset: Offset(0, 4),
-                ),
-              ],
+              boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 10, offset: Offset(0, 4))],
             ),
             padding: const EdgeInsets.all(12),
             child: Row(
@@ -294,45 +286,34 @@ class _CartPageState extends State<CartPage> {
                     width: 60,
                     height: 60,
                     color: const Color(0xFFF1F5F9),
-                    child: (item['image_url'] != null && item['image_url'].toString().isNotEmpty)
+                    child: imgUrl.isNotEmpty
                         ? Image.network(
-                            item['image_url'].toString().startsWith('http')
-                                ? item['image_url'].toString().split(';').first
-                                : '${ApiConfig.baseUrl.replaceAll('/api', '')}/images/products/${item['image_url'].toString().split(';').first}',
+                            imgUrl,
                             width: 60,
                             height: 60,
                             fit: BoxFit.cover,
-                            errorBuilder: (context, error, stackTrace) => const Center(
+                            errorBuilder: (_, _, _) => const Center(
                               child: Icon(Icons.coffee, color: Color(0xFF0F172A), size: 30),
                             ),
                           )
-                        : const Center(
-                            child: Icon(Icons.coffee, color: Color(0xFF0F172A), size: 30),
-                          ),
+                        : const Center(child: Icon(Icons.coffee, color: Color(0xFF0F172A), size: 30)),
                   ),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         name,
-                        style: const TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 15,
-                          color: Color(0xFF0F172A),
-                        ),
-                        maxLines: 1,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A)),
+                        maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                       const SizedBox(height: 4),
                       Text(
                         _currencyFormat.format(price),
-                        style: const TextStyle(
-                          color: Color(0xFF64748B),
-                          fontSize: 13,
-                        ),
+                        style: const TextStyle(color: Color(0xFF64748B), fontSize: 13),
                       ),
                       if (note != null && note.isNotEmpty) ...[
                         const SizedBox(height: 4),
@@ -345,7 +326,7 @@ class _CartPageState extends State<CartPage> {
                           child: Text(
                             note,
                             style: const TextStyle(fontSize: 11, color: Color(0xFFB45309)),
-                            maxLines: 1,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -353,45 +334,44 @@ class _CartPageState extends State<CartPage> {
                     ],
                   ),
                 ),
+                const SizedBox(width: 8),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
                       _currencyFormat.format(subtotal),
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 14,
-                        color: Color(0xFFEF4444),
-                      ),
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFFEF4444)),
                     ),
                     const SizedBox(height: 8),
                     Container(
                       decoration: BoxDecoration(
                         color: const Color(0xFFF8FAFC),
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: const Color(0xFFE2E8F0)),
                       ),
                       child: Row(
+                        mainAxisSize: MainAxisSize.min,
                         children: [
                           InkWell(
+                            borderRadius: BorderRadius.circular(8),
                             onTap: () => _decreaseQuantity(item),
-                            child: const Padding(
-                              padding: EdgeInsets.all(4),
-                              child: Icon(Icons.remove, size: 16, color: Color(0xFF0F172A)),
+                            child: const SizedBox(
+                              width: 36,
+                              height: 36,
+                              child: Icon(Icons.remove, size: 18, color: Color(0xFF0F172A)),
                             ),
                           ),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 8),
-                            child: Text(
-                              '$quantity',
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                            ),
+                            child: Text('$quantity', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                           ),
                           InkWell(
+                            borderRadius: BorderRadius.circular(8),
                             onTap: () => _increaseQuantity(item),
-                            child: const Padding(
-                              padding: EdgeInsets.all(4),
-                              child: Icon(Icons.add, size: 16, color: Color(0xFF0F172A)),
+                            child: const SizedBox(
+                              width: 36,
+                              height: 36,
+                              child: Icon(Icons.add, size: 18, color: Color(0xFF0F172A)),
                             ),
                           ),
                         ],
@@ -412,13 +392,7 @@ class _CartPageState extends State<CartPage> {
       padding: const EdgeInsets.all(20),
       decoration: const BoxDecoration(
         color: Colors.white,
-        boxShadow: [
-          BoxShadow(
-            color: Color(0x14000000),
-            blurRadius: 16,
-            offset: Offset(0, -4),
-          ),
-        ],
+        boxShadow: [BoxShadow(color: Color(0x14000000), blurRadius: 16, offset: Offset(0, -4))],
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: SafeArea(
@@ -433,11 +407,7 @@ class _CartPageState extends State<CartPage> {
                   children: [
                     const Text(
                       'Tổng thanh toán:',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF64748B),
-                      ),
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
                     ),
                     const SizedBox(height: 2),
                     Text(
@@ -448,11 +418,7 @@ class _CartPageState extends State<CartPage> {
                 ),
                 Text(
                   _currencyFormat.format(_totalAmount),
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFFEF4444),
-                  ),
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFFEF4444)),
                 ),
               ],
             ),
@@ -470,11 +436,7 @@ class _CartPageState extends State<CartPage> {
                 icon: const Icon(Icons.arrow_forward, color: Color(0xFFF59E0B)),
                 label: const Text(
                   'TIẾN HÀNH ĐẶT MÓN',
-                  style: TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                    letterSpacing: 0.5,
-                  ),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, letterSpacing: 0.5),
                 ),
                 onPressed: _proceedToCheckout,
               ),

@@ -26,15 +26,22 @@ class Category {
     return '$base/images/categories/$icon';
   }
 
+  static bool _parseBool(dynamic v, {bool fallback = true}) {
+    if (v == null) return fallback;
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    return v.toString().toLowerCase() == 'true' || v.toString() == '1';
+  }
+
   factory Category.fromMap(Map<String, dynamic> map) {
     return Category(
-      id: map['id'] ?? map['categoryId'] ?? 0,
-      name: map['name'] ?? map['categoryName'] ?? '',
-      title: map['title'] ?? '',
-      description: map['description'] ?? '',
-      icon: map['icon'] ?? '',
-      sortOrder: map['sortOrder'] ?? 0,
-      isActive: map['isActive'] ?? true,
+      id: (map['id'] ?? map['categoryId'] ?? 0) as int,
+      name: (map['name'] ?? map['categoryName'] ?? '').toString(),
+      title: (map['title'] ?? '').toString(),
+      description: (map['description'] ?? '').toString(),
+      icon: (map['icon'] ?? '').toString(),
+      sortOrder: ((map['sortOrder'] ?? map['sort_order']) as num? ?? 0).toInt(),
+      isActive: _parseBool(map['isActive'] ?? map['is_active'], fallback: true),
     );
   }
 

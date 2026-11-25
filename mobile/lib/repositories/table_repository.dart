@@ -7,10 +7,9 @@ import '../models/dining_table.dart';
 
 class TableRepository {
   static String? _baseUrl;
-  /// Base URL pointing dynamically to backend Table API
   static String get baseUrl => _baseUrl ?? '${ApiConfig.baseUrl}/api/table';
   static set baseUrl(String value) => _baseUrl = value;
-  static Duration timeoutDuration = const Duration(seconds: 4);
+  static Duration timeoutDuration = const Duration(seconds: 6);
 
   static Future<Map<String, String>> _getHeaders() async {
     final auth = await ApiConfig.authHeaders();
@@ -20,23 +19,26 @@ class TableRepository {
     };
   }
 
+  static Map<String, dynamic> _decodeMap(List<int> bodyBytes) {
+    final decoded = jsonDecode(utf8.decode(bodyBytes));
+    if (decoded is Map<String, dynamic>) return decoded;
+    if (decoded is Map) return Map<String, dynamic>.from(decoded);
+    return {};
+  }
+
   /// Lấy danh sách tất cả các khu vực (GET /api/table/areas)
   static Future<List<Area>> getAreas() async {
     try {
       final headers = await _getHeaders();
       final response = await http
-          .get(
-            Uri.parse('$baseUrl/areas'),
-            headers: headers,
-          )
+          .get(Uri.parse('$baseUrl/areas'), headers: headers)
           .timeout(timeoutDuration);
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        return data.map((item) => Area.fromMap(item)).toList();
+        final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
+        return data.map((item) => Area.fromMap(Map<String, dynamic>.from(item as Map))).toList();
       } else {
-        throw Exception(
-            'Lỗi máy chủ khi tải danh sách khu vực (HTTP ${response.statusCode})');
+        throw Exception('Lỗi máy chủ khi tải danh sách khu vực (HTTP ${response.statusCode})');
       }
     } catch (e) {
       throw Exception('Không thể tải danh sách khu vực: $e');
@@ -48,18 +50,14 @@ class TableRepository {
     try {
       final headers = await _getHeaders();
       final response = await http
-          .get(
-            Uri.parse('$baseUrl/by-area/$areaId'),
-            headers: headers,
-          )
+          .get(Uri.parse('$baseUrl/by-area/$areaId'), headers: headers)
           .timeout(timeoutDuration);
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        return data.map((item) => DiningTable.fromMap(item)).toList();
+        final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
+        return data.map((item) => DiningTable.fromMap(Map<String, dynamic>.from(item as Map))).toList();
       } else {
-        throw Exception(
-            'Lỗi máy chủ khi tải danh sách bàn theo khu vực (HTTP ${response.statusCode})');
+        throw Exception('Lỗi máy chủ khi tải danh sách bàn theo khu vực (HTTP ${response.statusCode})');
       }
     } catch (e) {
       throw Exception('Không thể tải danh sách bàn theo khu vực: $e');
@@ -71,18 +69,14 @@ class TableRepository {
     try {
       final headers = await _getHeaders();
       final response = await http
-          .get(
-            Uri.parse(baseUrl),
-            headers: headers,
-          )
+          .get(Uri.parse(baseUrl), headers: headers)
           .timeout(timeoutDuration);
 
       if (response.statusCode == 200) {
-        final List<dynamic> data = jsonDecode(response.body);
-        return data.map((item) => DiningTable.fromMap(item)).toList();
+        final List<dynamic> data = jsonDecode(utf8.decode(response.bodyBytes));
+        return data.map((item) => DiningTable.fromMap(Map<String, dynamic>.from(item as Map))).toList();
       } else {
-        throw Exception(
-            'Lỗi máy chủ khi tải toàn bộ danh sách bàn (HTTP ${response.statusCode})');
+        throw Exception('Lỗi máy chủ khi tải toàn bộ danh sách bàn (HTTP ${response.statusCode})');
       }
     } catch (e) {
       throw Exception('Không thể tải toàn bộ danh sách bàn: $e');
@@ -90,8 +84,6 @@ class TableRepository {
   }
 
   /// Cập nhật trạng thái bàn (PUT /api/table/{id}/status)
-  /// Trạng thái: 0: Trống, 1: Có khách, 2: Chờ phục vụ / Đã đặt trước
-  /// Trả về true NẾU VÀ CHỈ NẾU backend server phản hồi HTTP 200 OK
   static Future<bool> updateStatus(int tableId, int newStatus) async {
     try {
       final headers = await _getHeaders();
@@ -109,26 +101,32 @@ class TableRepository {
     }
   }
 
-  /// Chuyển bàn từ bàn nguồn sang bàn đích (POST /api/table/transfer)
-  /// Trả về true NẾU VÀ CHỈ NẾU backend server phản hồi HTTP 200 OK
-  static Future<bool> transferTable(int fromTableId, int toTableId) async {
+  /// Chuyển bàn từ bàn nguồn sang bàn đích kèm thông điệp chi tiết
+  static Future<Map<String, dynamic>> transferTableWithResult(int fromTableId, int toTableId) async {
     try {
       final headers = await _getHeaders();
       final response = await http
           .post(
             Uri.parse('$baseUrl/transfer'),
             headers: headers,
-            body: jsonEncode({
-              'fromTableId': fromTableId,
-              'toTableId': toTableId,
-            }),
+            body: jsonEncode({'fromTableId': fromTableId, 'toTableId': toTableId}),
           )
           .timeout(timeoutDuration);
 
-      return response.statusCode == 200;
-    } catch (_) {
-      return false;
+      final data = _decodeMap(response.bodyBytes);
+      return {
+        'success': response.statusCode == 200 && (data['success'] != false),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Chuyển bàn thành công' : 'Chuyển bàn thất bại (HTTP ${response.statusCode})'),
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
     }
+  }
+
+  /// Chuyển bàn từ bàn nguồn sang bàn đích (POST /api/table/transfer)
+  static Future<bool> transferTable(int fromTableId, int toTableId) async {
+    final res = await transferTableWithResult(fromTableId, toTableId);
+    return res['success'] == true;
   }
 
   /// Gộp bàn từ bàn nguồn vào bàn đích (POST /api/table/merge)
@@ -139,17 +137,14 @@ class TableRepository {
           .post(
             Uri.parse('$baseUrl/merge'),
             headers: headers,
-            body: jsonEncode({
-              'fromTableId': fromTableId,
-              'toTableId': toTableId,
-            }),
+            body: jsonEncode({'fromTableId': fromTableId, 'toTableId': toTableId}),
           )
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(response.body);
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && (data['success'] == true),
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Gộp bàn thành công' : 'Gộp bàn thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Gộp bàn thành công' : 'Gộp bàn thất bại'),
       };
     } catch (e) {
       return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
@@ -158,7 +153,10 @@ class TableRepository {
 
   /// Tách món ăn từ bàn nguồn sang bàn đích trống mới (POST /api/table/split)
   static Future<Map<String, dynamic>> splitTable(
-      int fromTableId, int toTableId, List<int> orderDetailIds) async {
+    int fromTableId,
+    int toTableId,
+    List<int> orderDetailIds,
+  ) async {
     try {
       final headers = await _getHeaders();
       final response = await http
@@ -173,10 +171,10 @@ class TableRepository {
           )
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(response.body);
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && (data['success'] == true),
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Tách bàn thành công' : 'Tách bàn thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Tách bàn thành công' : 'Tách bàn thất bại'),
         'newOrderId': data['newOrderId'],
       };
     } catch (e) {
@@ -212,10 +210,10 @@ class TableRepository {
           )
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(response.body);
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && (data['success'] == true),
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Đặt bàn thành công' : 'Đặt bàn thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Đặt bàn thành công' : 'Đặt bàn thất bại'),
         'data': data['data'],
       };
     } catch (e) {
@@ -233,9 +231,9 @@ class TableRepository {
 
       final response = await http.get(uri, headers: headers).timeout(timeoutDuration);
       if (response.statusCode == 200) {
-        final res = jsonDecode(response.body);
+        final res = _decodeMap(response.bodyBytes);
         final List<dynamic> list = res['data'] ?? [];
-        return list.cast<Map<String, dynamic>>();
+        return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
       }
       return [];
     } catch (_) {
@@ -248,16 +246,13 @@ class TableRepository {
     try {
       final headers = await _getHeaders();
       final response = await http
-          .put(
-            Uri.parse('$baseUrl/reservation/$reservationId/check-in'),
-            headers: headers,
-          )
+          .put(Uri.parse('$baseUrl/reservation/$reservationId/check-in'), headers: headers)
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(response.body);
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && (data['success'] == true),
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Nhận bàn thành công' : 'Nhận bàn thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Nhận bàn thành công' : 'Nhận bàn thất bại'),
       };
     } catch (e) {
       return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
@@ -269,16 +264,13 @@ class TableRepository {
     try {
       final headers = await _getHeaders();
       final response = await http
-          .delete(
-            Uri.parse('$baseUrl/reservation/$reservationId'),
-            headers: headers,
-          )
+          .delete(Uri.parse('$baseUrl/reservation/$reservationId'), headers: headers)
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(response.body);
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && (data['success'] == true),
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Hủy đặt bàn thành công' : 'Hủy đặt bàn thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Hủy đặt bàn thành công' : 'Hủy đặt bàn thất bại'),
       };
     } catch (e) {
       return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
@@ -291,16 +283,13 @@ class TableRepository {
       final headers = await _getHeaders();
       final orderHost = baseUrl.replaceAll('/api/table', '/api/order');
       final response = await http
-          .get(
-            Uri.parse('$orderHost/by-table/$tableId'),
-            headers: headers,
-          )
+          .get(Uri.parse('$orderHost/by-table/$tableId'), headers: headers)
           .timeout(timeoutDuration);
 
       if (response.statusCode == 200) {
-        final data = jsonDecode(response.body);
-        if (data['hasActiveOrder'] == true && data['data'] != null) {
-          return data['data'] as Map<String, dynamic>;
+        final data = _decodeMap(response.bodyBytes);
+        if (data['hasActiveOrder'] == true && data['data'] is Map) {
+          return Map<String, dynamic>.from(data['data'] as Map);
         }
       }
       return null;
@@ -321,18 +310,14 @@ class TableRepository {
           .post(
             Uri.parse(baseUrl),
             headers: headers,
-            body: jsonEncode({
-              'areaId': areaId,
-              'tableName': tableName,
-              'capacity': capacity,
-            }),
+            body: jsonEncode({'areaId': areaId, 'tableName': tableName, 'capacity': capacity}),
           )
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && data['success'] == true,
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Tạo bàn thành công' : 'Thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Tạo bàn thành công' : 'Thất bại'),
         'data': data['data'],
       };
     } catch (e) {
@@ -357,17 +342,13 @@ class TableRepository {
       if (status != null) updateData['status'] = status;
 
       final response = await http
-          .put(
-            Uri.parse('$baseUrl/$tableId'),
-            headers: headers,
-            body: jsonEncode(updateData),
-          )
+          .put(Uri.parse('$baseUrl/$tableId'), headers: headers, body: jsonEncode(updateData))
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && data['success'] == true,
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Cập nhật bàn thành công' : 'Thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Cập nhật bàn thành công' : 'Thất bại'),
         'data': data['data'],
       };
     } catch (e) {
@@ -380,16 +361,13 @@ class TableRepository {
     try {
       final headers = await _getHeaders();
       final response = await http
-          .delete(
-            Uri.parse('$baseUrl/$tableId'),
-            headers: headers,
-          )
+          .delete(Uri.parse('$baseUrl/$tableId'), headers: headers)
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && data['success'] == true,
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Xóa bàn thành công' : 'Xóa bàn thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Xóa bàn thành công' : 'Xóa bàn thất bại'),
       };
     } catch (e) {
       return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};
@@ -408,18 +386,14 @@ class TableRepository {
           .post(
             Uri.parse('$baseUrl/area'),
             headers: headers,
-            body: jsonEncode({
-              'areaName': areaName,
-              'description': description,
-              'sortOrder': sortOrder,
-            }),
+            body: jsonEncode({'areaName': areaName, 'description': description, 'sortOrder': sortOrder}),
           )
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && data['success'] == true,
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Tạo khu vực thành công' : 'Thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Tạo khu vực thành công' : 'Thất bại'),
         'data': data['data'],
       };
     } catch (e) {
@@ -450,10 +424,10 @@ class TableRepository {
           )
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && data['success'] == true,
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Cập nhật khu vực thành công' : 'Thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Cập nhật khu vực thành công' : 'Thất bại'),
         'data': data['data'],
       };
     } catch (e) {
@@ -466,16 +440,13 @@ class TableRepository {
     try {
       final headers = await _getHeaders();
       final response = await http
-          .delete(
-            Uri.parse('$baseUrl/area/$areaId'),
-            headers: headers,
-          )
+          .delete(Uri.parse('$baseUrl/area/$areaId'), headers: headers)
           .timeout(timeoutDuration);
 
-      final data = jsonDecode(utf8.decode(response.bodyBytes));
+      final data = _decodeMap(response.bodyBytes);
       return {
         'success': response.statusCode == 200 && data['success'] == true,
-        'message': data['message'] ?? (response.statusCode == 200 ? 'Xóa khu vực thành công' : 'Xóa khu vực thất bại'),
+        'message': data['message']?.toString() ?? (response.statusCode == 200 ? 'Xóa khu vực thành công' : 'Xóa khu vực thất bại'),
       };
     } catch (e) {
       return {'success': false, 'message': 'Không thể kết nối đến máy chủ: $e'};

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
+import 'package:uuid/uuid.dart';
 import '../utils/database_helper.dart';
 import '../config/api_config.dart';
 
@@ -29,7 +30,8 @@ class OfflineSyncService {
 
   static String orderApiUrl = '${ApiConfig.baseUrl}/api/order';
   static String healthCheckUrl = '${ApiConfig.baseUrl}/api/table/areas';
-  static const Duration timeoutDuration = Duration(seconds: 4);
+  static const Duration timeoutDuration = Duration(seconds: 5);
+  static const Uuid _uuid = Uuid();
 
   Timer? _periodicTimer;
   bool _isSyncing = false;
@@ -38,12 +40,10 @@ class OfflineSyncService {
 
   bool get isSyncing => _isSyncing;
 
-  /// Khởi tạo và cập nhật số lượng đơn hàng chưa đồng bộ ban đầu
   Future<void> initialize() async {
     await refreshUnsyncedCount();
   }
 
-  /// Cập nhật số lượng đơn hàng chưa đồng bộ
   Future<int> refreshUnsyncedCount() async {
     try {
       final count = await DatabaseHelper().getUnsyncedOrderCount();
@@ -54,7 +54,6 @@ class OfflineSyncService {
     }
   }
 
-  /// Kiểm tra xem Backend Server có thể truy cập được hay không
   Future<bool> checkNetworkReachability() async {
     try {
       final response = await ApiConfig.get(Uri.parse(healthCheckUrl))
@@ -65,7 +64,6 @@ class OfflineSyncService {
     }
   }
 
-  /// Bắt đầu chạy tiến trình đồng bộ định kỳ theo khoảng thời gian (mặc định 30 giây)
   void startPeriodicSync({Duration interval = const Duration(seconds: 30)}) {
     stopPeriodicSync();
     _periodicTimer = Timer.periodic(interval, (_) async {
@@ -73,13 +71,24 @@ class OfflineSyncService {
     });
   }
 
-  /// Dừng tiến trình đồng bộ định kỳ
   void stopPeriodicSync() {
     _periodicTimer?.cancel();
     _periodicTimer = null;
   }
 
-  /// Thực hiện đồng bộ các đơn hàng chưa đồng bộ lên Backend API
+  static List<Map<String, dynamic>> _normalizeItems(dynamic rawItems) {
+    if (rawItems is! List) return [];
+    return rawItems.whereType<Map>().map((raw) {
+      final item = Map<String, dynamic>.from(raw);
+      return {
+        'productId': item['productId'] ?? item['product_id'],
+        'quantity': item['quantity'] ?? item['qty'] ?? 1,
+        'itemNote': item['itemNote'] ?? item['note'],
+        if (item['modifiers'] != null) 'modifiers': item['modifiers'],
+      };
+    }).toList();
+  }
+
   Future<SyncResult> syncNow() async {
     if (_isSyncing) {
       return SyncResult(
@@ -133,29 +142,52 @@ class OfflineSyncService {
             parsedItems = [];
           }
 
-          final payload = {
+          final normalizedItems = _normalizeItems(parsedItems);
+          final payload = <String, dynamic>{
+            if (order['idempotency_key'] != null &&
+                order['idempotency_key'].toString().isNotEmpty)
+              'idempotencyKey': order['idempotency_key'],
             'offlineOrderId': orderId,
             'tableId': order['table_id'],
             'customerName': order['customer_name'],
+            if (order['phone_number'] != null) 'phoneNumber': order['phone_number'],
+            'orderType': order['order_type'] ?? (order['table_id'] != null ? 1 : 2),
+            if (order['note'] != null) 'note': order['note'],
+            if (order['discount_code'] != null) 'discountCode': order['discount_code'],
             'totalAmount': order['total_amount'],
-            'items': parsedItems,
+            'items': normalizedItems,
             'createdAt': order['created_at'],
           };
 
           final response = await ApiConfig.post(
-                Uri.parse(orderApiUrl),
-                headers: {'Content-Type': 'application/json'},
-                body: jsonEncode(payload),
-              )
-              .timeout(timeoutDuration);
+            Uri.parse(orderApiUrl),
+            headers: {'Content-Type': 'application/json'},
+            body: jsonEncode(payload),
+          ).timeout(timeoutDuration);
 
           if (response.statusCode >= 200 && response.statusCode < 300) {
             await DatabaseHelper().markOrderSynced(orderId);
             syncedCount++;
+          } else if (response.statusCode == 401 || response.statusCode == 403) {
+            await DatabaseHelper().markOrderSyncError(
+              orderId,
+              'Vui lòng đăng nhập tài khoản nhân viên/hội viên để đồng bộ đơn hàng (HTTP ${response.statusCode})',
+            );
+            failedCount++;
+            break;
           } else {
+            String errMsg = 'HTTP ${response.statusCode}';
+            try {
+              final d = jsonDecode(utf8.decode(response.bodyBytes));
+              if (d is Map && (d['message'] != null || d['error'] != null)) {
+                errMsg = (d['message'] ?? d['error']).toString();
+              }
+            } catch (_) {}
+            await DatabaseHelper().markOrderSyncError(orderId, errMsg);
             failedCount++;
           }
-        } catch (_) {
+        } catch (e) {
+          await DatabaseHelper().markOrderSyncError(orderId, 'Lỗi mạng: $e');
           failedCount++;
         }
       }
@@ -166,7 +198,9 @@ class OfflineSyncService {
         total: totalCount,
         synced: syncedCount,
         failed: failedCount,
-        message: 'Đã đồng bộ thành công $syncedCount/$totalCount đơn hàng.',
+        message: failedCount == 0
+            ? 'Đã đồng bộ thành công $syncedCount/$totalCount đơn hàng.'
+            : 'Đã đồng bộ $syncedCount/$totalCount đơn ($failedCount đơn lỗi).',
       );
     } finally {
       _isSyncing = false;
@@ -174,25 +208,32 @@ class OfflineSyncService {
     }
   }
 
-  /// Tiện ích lưu đơn hàng ngoại tuyến và kích hoạt đồng bộ ngầm
   Future<int> queueOfflineOrder({
     required int? tableId,
     required String? customerName,
+    String? phoneNumber,
+    int? orderType,
+    String? note,
+    String? discountCode,
     required double totalAmount,
     required List<Map<String, dynamic>> items,
   }) async {
     final order = {
+      'idempotency_key': _uuid.v4(),
       'table_id': tableId,
       'customer_name': customerName ?? 'Khách lẻ',
+      'phone_number': phoneNumber,
+      'order_type': orderType ?? (tableId != null ? 1 : 2),
+      'note': note,
+      'discount_code': discountCode,
       'total_amount': totalAmount,
-      'items_json': jsonEncode(items),
+      'items_json': jsonEncode(_normalizeItems(items)),
     };
 
     final id = await DatabaseHelper().saveOfflineOrder(order);
     await refreshUnsyncedCount();
 
     unawaited(syncNow());
-
     return id;
   }
 }

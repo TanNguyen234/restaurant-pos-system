@@ -183,8 +183,8 @@ class SkeletonGridPlaceholder extends StatelessWidget {
         padding: padding,
         physics: const NeverScrollableScrollPhysics(),
         shrinkWrap: true,
-        gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-          crossAxisCount: 2,
+        gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+          maxCrossAxisExtent: 220,
           crossAxisSpacing: 12,
           mainAxisSpacing: 12,
           childAspectRatio: 0.78,

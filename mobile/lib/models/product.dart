@@ -1,4 +1,5 @@
 import '../config/api_config.dart';
+
 class ProductAttribute {
   final int attributeId;
   final int productId;
@@ -16,14 +17,32 @@ class ProductAttribute {
     this.isRequired = false,
   });
 
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is ProductAttribute &&
+          runtimeType == other.runtimeType &&
+          attributeId == other.attributeId &&
+          attributeName == other.attributeName;
+
+  @override
+  int get hashCode => Object.hash(attributeId, attributeName);
+
+  static bool _parseBool(dynamic v) {
+    if (v == null) return false;
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    return v.toString().toLowerCase() == 'true' || v.toString() == '1';
+  }
+
   factory ProductAttribute.fromMap(Map<String, dynamic> map) {
     return ProductAttribute(
-      attributeId: map['attributeId'] ?? 0,
-      productId: map['productId'] ?? 0,
-      attributeGroup: map['attributeGroup'] ?? '',
-      attributeName: map['attributeName'] ?? '',
+      attributeId: (map['attributeId'] ?? 0) as int,
+      productId: (map['productId'] ?? 0) as int,
+      attributeGroup: (map['attributeGroup'] ?? '').toString(),
+      attributeName: (map['attributeName'] ?? '').toString(),
       extraPrice: (map['extraPrice'] as num?)?.toDouble() ?? 0.0,
-      isRequired: map['isRequired'] ?? false,
+      isRequired: _parseBool(map['isRequired']),
     );
   }
 
@@ -61,7 +80,7 @@ class Product {
     this.categoryName,
     required this.productName,
     required this.price,
-    this.unit = 'Phần',
+    this.unit = 'Ly',
     this.description,
     required this.imageUrl,
     this.images = const [],
@@ -73,18 +92,21 @@ class Product {
   });
 
   List<String> get resolvedImages {
-    if (images.isNotEmpty) return images;
-    if (imageUrl.contains(';')) {
-      return imageUrl.split(';').map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    if (images.isNotEmpty) return images.map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    if (imageUrl.isNotEmpty) {
+      return imageUrl
+          .split(RegExp(r'[;|]'))
+          .map((s) => s.trim())
+          .where((s) => s.isNotEmpty)
+          .toList();
     }
-    if (imageUrl.isNotEmpty) return [imageUrl];
     return [];
   }
 
   String get primaryImageUrl {
     final list = resolvedImages;
     if (list.isNotEmpty) return list.first;
-    return imageUrl;
+    return imageUrl.trim();
   }
 
   String get fullImageUrl {
@@ -105,32 +127,45 @@ class Product {
     }).toList();
   }
 
+  static bool _parseBool(dynamic v, {bool fallback = false}) {
+    if (v == null) return fallback;
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    return v.toString().toLowerCase() == 'true' || v.toString() == '1';
+  }
+
   factory Product.fromMap(Map<String, dynamic> map) {
     var attrsRaw = map['attributes'];
     List<ProductAttribute> attrs = [];
     if (attrsRaw is List) {
       attrs = attrsRaw
-          .whereType<Map<String, dynamic>>()
-          .map((a) => ProductAttribute.fromMap(a))
+          .whereType<Map>()
+          .map((a) => ProductAttribute.fromMap(Map<String, dynamic>.from(a)))
           .toList();
     }
 
+    final rawImageUrl = (map['imageUrl'] ?? map['image_url'] ?? map['image'] ?? '').toString();
+    final List<String> parsedImages;
+    if (map['images'] is List && (map['images'] as List).isNotEmpty) {
+      parsedImages = (map['images'] as List).map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+    } else if (rawImageUrl.isNotEmpty) {
+      parsedImages = rawImageUrl.split(RegExp(r'[;|]')).map((s) => s.trim()).where((s) => s.isNotEmpty).toList();
+    } else {
+      parsedImages = const [];
+    }
+
     return Product(
-      productId: map['productId'] ?? map['id'] ?? 0,
-      categoryId: (map['categoryId'] as num?)?.toInt() ?? 0,
+      productId: ((map['productId'] ?? map['id']) as num? ?? 0).toInt(),
+      categoryId: ((map['categoryId'] ?? map['category_id']) as num? ?? 0).toInt(),
       categoryName: map['categoryName'] as String?,
-      productName: map['productName'] ?? map['name'] ?? '',
+      productName: (map['productName'] ?? map['name'] ?? '').toString(),
       price: (map['price'] as num?)?.toDouble() ?? 0.0,
-      unit: map['unit'] ?? 'Phần',
+      unit: (map['unit'] ?? 'Ly').toString(),
       description: map['description'] as String?,
-      imageUrl: map['imageUrl'] ?? map['image'] ?? '',
-      images: (map['images'] is List)
-          ? (map['images'] as List).map((e) => e.toString()).toList()
-          : (map['imageUrl'] != null && map['imageUrl'].toString().contains(';'))
-              ? map['imageUrl'].toString().split(';').map((s) => s.trim()).where((s) => s.isNotEmpty).toList()
-              : const [],
-      isAvailable: map['isAvailable'] ?? true,
-      isFeatured: map['isFeatured'] ?? false,
+      imageUrl: rawImageUrl,
+      images: parsedImages,
+      isAvailable: _parseBool(map['isAvailable'] ?? map['is_available'], fallback: true),
+      isFeatured: _parseBool(map['isFeatured'] ?? map['is_featured'], fallback: false),
       createdAt: map['createdAt'] != null ? DateTime.tryParse(map['createdAt'].toString()) : null,
       updatedAt: map['updatedAt'] != null ? DateTime.tryParse(map['updatedAt'].toString()) : null,
       attributes: attrs,
@@ -173,13 +208,13 @@ class PagedProductResult {
   });
 
   factory PagedProductResult.fromMap(Map<String, dynamic> map) {
-    var rawList = map['data'] as List? ?? [];
+    var rawList = map['data'] as List? ?? map['items'] as List? ?? [];
     return PagedProductResult(
       totalItems: map['totalItems'] ?? 0,
       page: map['page'] ?? 1,
       pageSize: map['pageSize'] ?? 10,
       totalPages: map['totalPages'] ?? 0,
-      data: rawList.map((p) => Product.fromMap(p as Map<String, dynamic>)).toList(),
+      data: rawList.map((p) => Product.fromMap(Map<String, dynamic>.from(p as Map))).toList(),
     );
   }
 }

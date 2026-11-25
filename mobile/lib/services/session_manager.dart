@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 import '../models/user.dart';
+import '../repositories/auth_repository.dart';
 import '../utils/database_helper.dart';
 
 class SessionManager {
@@ -16,12 +17,14 @@ class SessionManager {
   bool get isManager => currentUser?.isManager ?? false;
   bool get isCashier => currentUser?.isCashier ?? false;
   bool get isWaiter => currentUser?.isWaiter ?? false;
+  bool get isChef => currentUser?.isChef ?? false;
   bool get isKitchen => currentUser?.isKitchen ?? false;
   bool get isStaff => currentUser?.isStaff ?? false;
   bool get isMember => currentUser?.isMember ?? false;
 
   Future<void> initialize() async {
     try {
+      await _dbHelper.initWebPersistence();
       final sessionMap = await _dbHelper.getCurrentSession();
       if (sessionMap != null) {
         currentUserNotifier.value = UserAccount.fromMap(sessionMap);
@@ -39,7 +42,7 @@ class SessionManager {
   }
 
   Future<void> logout() async {
-    await _dbHelper.clearUserSession();
+    await AuthRepository().logout();
     currentUserNotifier.value = null;
   }
 }

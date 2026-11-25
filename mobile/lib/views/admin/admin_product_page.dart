@@ -1,6 +1,8 @@
-import '../../config/api_config.dart';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
+import '../../config/api_config.dart';
 import '../../models/category.dart';
 import '../../models/product.dart';
 import '../../repositories/category_repository.dart';
@@ -16,12 +18,14 @@ class AdminProductPage extends StatefulWidget {
 class _AdminProductPageState extends State<AdminProductPage> {
   final NumberFormat _currencyFormat = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
   final TextEditingController _searchController = TextEditingController();
+  final ImagePicker _picker = ImagePicker();
 
   List<Category> _categories = [];
   int? _selectedFilterCategoryId;
 
   List<Product> _products = [];
   bool _isLoading = true;
+  String? _errorMessage;
 
   int _currentPage = 1;
   final int _pageSize = 10;
@@ -34,39 +38,80 @@ class _AdminProductPageState extends State<AdminProductPage> {
     _loadInitialData();
   }
 
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadInitialData() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
     await _loadCategories();
     await _loadProducts(page: 1);
   }
 
   Future<void> _loadCategories() async {
     try {
-      final cats = await CategoryRepository.getCategories();
+      final cats = await CategoryRepository.getCategories(includeInactive: true);
       if (mounted && cats != null) setState(() => _categories = cats);
     } catch (_) {}
   }
 
   Future<void> _loadProducts({int page = 1}) async {
-    setState(() => _isLoading = true);
-    final result = await ProductRepository.getProducts(
-      page: page,
-      pageSize: _pageSize,
-      categoryId: _selectedFilterCategoryId,
-      search: _searchController.text.trim(),
-    );
-
-    if (!mounted) return;
     setState(() {
-      _products = result.data;
-      _currentPage = result.page;
-      _totalPages = result.totalPages > 0 ? result.totalPages : 1;
-      _totalItems = result.totalItems;
-      _isLoading = false;
+      _isLoading = true;
+      _errorMessage = null;
     });
+    try {
+      final result = await ProductRepository.getProducts(
+        page: page,
+        pageSize: _pageSize,
+        categoryId: _selectedFilterCategoryId,
+        search: _searchController.text.trim(),
+      );
+
+      if (!mounted) return;
+      setState(() {
+        _products = result.data;
+        _currentPage = result.page;
+        _totalPages = result.totalPages > 0 ? result.totalPages : 1;
+        _totalItems = result.totalItems;
+        _isLoading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoading = false;
+        _errorMessage = 'Không thể tải danh sách món ăn: $e';
+      });
+    }
+  }
+
+  Future<void> _toggleAvailability(Product item) async {
+    final res = await ProductRepository.toggleAvailability(item.productId);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(res['message']?.toString() ?? 'Đã cập nhật trạng thái món'),
+        backgroundColor: res['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+      ),
+    );
+    if (res['success'] == true) {
+      await _loadProducts(page: _currentPage);
+    }
   }
 
   void _showProductFormDialog({Product? product}) {
+    if (_categories.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Chưa có danh mục nào. Vui lòng tạo danh mục trước!'), backgroundColor: Color(0xFFDC2626)),
+      );
+      return;
+    }
+
     final isEditing = product != null;
     final nameController = TextEditingController(text: product?.productName ?? '');
     final priceController = TextEditingController(text: product != null ? product.price.toInt().toString() : '');
@@ -74,9 +119,13 @@ class _AdminProductPageState extends State<AdminProductPage> {
     final descController = TextEditingController(text: product?.description ?? '');
     final imageController = TextEditingController(text: product?.imageUrl ?? '');
 
-    int selectedCatId = product?.categoryId ?? (_categories.isNotEmpty ? _categories.first.id : 1);
+    int selectedCatId = _categories.any((c) => c.id == product?.categoryId)
+        ? product!.categoryId
+        : _categories.first.id;
     bool isFeatured = product?.isFeatured ?? false;
     bool isAvailable = product?.isAvailable ?? true;
+    List<Uint8List> pickedImages = [];
+    List<String> pickedNames = [];
 
     showDialog(
       context: context,
@@ -100,16 +149,11 @@ class _AdminProductPageState extends State<AdminProductPage> {
                 DropdownButtonFormField<int>(
                   initialValue: selectedCatId,
                   decoration: const InputDecoration(labelText: 'Danh mục thực đơn (*)'),
-                  items: _categories.map((c) {
-                    return DropdownMenuItem<int>(
-                      value: c.id,
-                      child: Text(c.name),
-                    );
-                  }).toList(),
+                  items: _categories
+                      .map((c) => DropdownMenuItem<int>(value: c.id, child: Text(c.name)))
+                      .toList(),
                   onChanged: (val) {
-                    if (val != null) {
-                      setDialogState(() => selectedCatId = val);
-                    }
+                    if (val != null) setDialogState(() => selectedCatId = val);
                   },
                 ),
                 const SizedBox(height: 12),
@@ -140,11 +184,50 @@ class _AdminProductPageState extends State<AdminProductPage> {
                   decoration: const InputDecoration(labelText: 'Mô tả món ăn'),
                 ),
                 const SizedBox(height: 12),
+                OutlinedButton.icon(
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                  label: Text(
+                    pickedImages.isEmpty
+                        ? 'Chọn ảnh món ăn (hỗ trợ nhiều ảnh)'
+                        : 'Đã chọn ${pickedImages.length} ảnh mới',
+                  ),
+                  onPressed: () async {
+                    final files = await _picker.pickMultiImage(imageQuality: 85);
+                    if (files.isNotEmpty) {
+                      final bytesList = <Uint8List>[];
+                      final namesList = <String>[];
+                      for (final f in files) {
+                        bytesList.add(await f.readAsBytes());
+                        namesList.add(f.name);
+                      }
+                      setDialogState(() {
+                        pickedImages = bytesList;
+                        pickedNames = namesList;
+                      });
+                    }
+                  },
+                ),
+                if (pickedImages.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  SizedBox(
+                    height: 64,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: pickedImages.length,
+                      separatorBuilder: (_, _) => const SizedBox(width: 8),
+                      itemBuilder: (_, idx) => ClipRRect(
+                        borderRadius: BorderRadius.circular(8),
+                        child: Image.memory(pickedImages[idx], width: 64, height: 64, fit: BoxFit.cover),
+                      ),
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 8),
                 TextField(
                   controller: imageController,
                   decoration: InputDecoration(
-                    labelText: 'Hình ảnh (Tên file hoặc URL)',
-                    hintText: 'Ảnh đơn hoặc nhiều ảnh cách nhau dấu ;',
+                    labelText: 'Hoặc tên file / URL (nếu không upload mới)',
+                    hintText: 'default_product.png',
                     hintStyle: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
                     suffixIcon: imageController.text.isNotEmpty
                         ? IconButton(
@@ -155,7 +238,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
                   ),
                   onChanged: (_) => setDialogState(() {}),
                 ),
-                if (imageController.text.trim().isNotEmpty) ...[
+                if (pickedImages.isEmpty && imageController.text.trim().isNotEmpty) ...[
                   const SizedBox(height: 10),
                   Builder(builder: (c) {
                     final firstImg = imageController.text.trim().split(';').first.trim();
@@ -167,32 +250,23 @@ class _AdminProductPageState extends State<AdminProductPage> {
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: Container(
-                            width: 60,
-                            height: 60,
+                            width: 56,
+                            height: 56,
                             color: const Color(0xFFF1F5F9),
                             child: Image.network(
                               previewUrl,
                               fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => const Icon(
-                                Icons.broken_image_outlined,
-                                color: Color(0xFF94A3B8),
-                                size: 28,
-                              ),
+                              errorBuilder: (_, _, _) => const Icon(Icons.broken_image_outlined, color: Color(0xFF94A3B8), size: 28),
                             ),
                           ),
                         ),
                         const SizedBox(width: 12),
-                        const Expanded(
-                          child: Text(
-                            'Xem trước ảnh đại diện món ăn',
-                            style: TextStyle(fontSize: 12, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
-                          ),
-                        ),
+                        const Expanded(child: Text('Xem trước ảnh hiện tại', style: TextStyle(fontSize: 12, color: Color(0xFF64748B)))),
                       ],
                     );
                   }),
                 ],
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
                 CheckboxListTile(
                   contentPadding: EdgeInsets.zero,
                   dense: true,
@@ -207,26 +281,6 @@ class _AdminProductPageState extends State<AdminProductPage> {
                   value: isAvailable,
                   onChanged: (val) => setDialogState(() => isAvailable = val ?? true),
                 ),
-                const SizedBox(height: 8),
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.photo_library_outlined, size: 20, color: Color(0xFF0F172A)),
-                      SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          'Upload ảnh: Hỗ trợ nhiều ảnh phân cách bằng dấu ;. Tự động lưu & dọn dẹp tại wwwroot/images/products',
-                          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
               ],
             ),
           ),
@@ -236,11 +290,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
               child: const Text('Hủy', style: TextStyle(color: Color(0xFF64748B))),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0F172A),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white),
               onPressed: () async {
                 final name = nameController.text.trim();
                 final price = double.tryParse(priceController.text.trim()) ?? 0;
@@ -260,16 +310,26 @@ class _AdminProductPageState extends State<AdminProductPage> {
                   'Price': price,
                   'Unit': unitController.text.trim().isNotEmpty ? unitController.text.trim() : 'Ly',
                   'Description': descController.text.trim(),
-                  'ImageUrl': imageController.text.trim().isNotEmpty ? imageController.text.trim() : 'default_product.png',
+                  if (pickedImages.isEmpty)
+                    'ImageUrl': imageController.text.trim().isNotEmpty ? imageController.text.trim() : 'default_product.png',
                   'IsFeatured': isFeatured,
                   'IsAvailable': isAvailable,
                 };
 
-                Map<String, dynamic> result;
+                final Map<String, dynamic> result;
                 if (isEditing) {
-                  result = await ProductRepository.updateProduct(product.productId, data);
+                  result = await ProductRepository.updateProduct(
+                    product.productId,
+                    data,
+                    multipleImageBytes: pickedImages.isNotEmpty ? pickedImages : null,
+                    multipleFileNames: pickedNames.isNotEmpty ? pickedNames : null,
+                  );
                 } else {
-                  result = await ProductRepository.createProduct(data);
+                  result = await ProductRepository.createProduct(
+                    data,
+                    multipleImageBytes: pickedImages.isNotEmpty ? pickedImages : null,
+                    multipleFileNames: pickedNames.isNotEmpty ? pickedNames : null,
+                  );
                 }
 
                 await _loadProducts(page: _currentPage);
@@ -298,16 +358,9 @@ class _AdminProductPageState extends State<AdminProductPage> {
         title: const Text('Xác nhận xóa món', style: TextStyle(fontWeight: FontWeight.bold)),
         content: Text('Bạn có chắc muốn xóa món "${product.productName}" khỏi thực đơn?'),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Hủy', style: TextStyle(color: Color(0xFF64748B))),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Hủy', style: TextStyle(color: Color(0xFF64748B)))),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEF4444),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Xóa ngay'),
           ),
@@ -324,10 +377,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
     if (!mounted) return;
     if (result['success'] == true) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Đã xóa món "${product.productName}" thành công!'),
-          backgroundColor: const Color(0xFF10B981),
-        ),
+        SnackBar(content: Text('Đã xóa món "${product.productName}" thành công!'), backgroundColor: const Color(0xFF10B981)),
       );
     } else {
       showDialog(
@@ -341,17 +391,10 @@ class _AdminProductPageState extends State<AdminProductPage> {
               Text('Ràng buộc dữ liệu', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ],
           ),
-          content: Text(
-            result['message'] ?? 'Không thể xóa món ăn này vì đã gắn liền với các đơn hàng lịch sử.',
-            style: const TextStyle(fontSize: 14, color: Color(0xFF334155)),
-          ),
+          content: Text(result['message'] ?? 'Không thể xóa món ăn này vì đã gắn liền với các đơn hàng lịch sử.'),
           actions: [
             ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0F172A),
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white),
               onPressed: () => Navigator.pop(ctx),
               child: const Text('Đã hiểu'),
             ),
@@ -386,7 +429,6 @@ class _AdminProductPageState extends State<AdminProductPage> {
       ),
       body: Column(
         children: [
-          // Bộ lọc tìm kiếm & Danh mục
           Container(
             color: const Color(0xFF0F172A),
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -420,23 +462,14 @@ class _AdminProductPageState extends State<AdminProductPage> {
                 const SizedBox(width: 10),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
+                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12)),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<int?>(
                       value: _selectedFilterCategoryId,
                       hint: const Text('Tất cả nhóm', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
                       items: [
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('Tất cả nhóm', style: TextStyle(fontSize: 12)),
-                        ),
-                        ..._categories.map((c) => DropdownMenuItem<int?>(
-                              value: c.id,
-                              child: Text(c.name, style: const TextStyle(fontSize: 12)),
-                            )),
+                        const DropdownMenuItem<int?>(value: null, child: Text('Tất cả nhóm', style: TextStyle(fontSize: 12))),
+                        ..._categories.map((c) => DropdownMenuItem<int?>(value: c.id, child: Text(c.name, style: const TextStyle(fontSize: 12)))),
                       ],
                       onChanged: (val) {
                         setState(() => _selectedFilterCategoryId = val);
@@ -448,158 +481,154 @@ class _AdminProductPageState extends State<AdminProductPage> {
               ],
             ),
           ),
-
-          // Danh sách món ăn
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
-                : _products.isEmpty
-                    ? const Center(child: Text('Không tìm thấy món ăn nào'))
-                    : RefreshIndicator(
-                        onRefresh: () => _loadProducts(page: _currentPage),
-                        child: ListView.builder(
-                          padding: const EdgeInsets.all(16),
-                          itemCount: _products.length,
-                          itemBuilder: (context, index) {
-                            final item = _products[index];
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 12),
-                              decoration: BoxDecoration(
-                                color: Colors.white,
-                                borderRadius: BorderRadius.circular(14),
-                                boxShadow: const [
-                                  BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2)),
-                                ],
-                              ),
-                              child: ListTile(
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                                leading: ClipRRect(
-                                  borderRadius: BorderRadius.circular(10),
-                                  child: Container(
-                                    width: 48,
-                                    height: 48,
-                                    color: const Color(0xFF0F172A),
-                                    child: item.fullImageUrl.isNotEmpty
-                                        ? Image.network(
-                                            item.fullImageUrl,
-                                            width: 48,
-                                            height: 48,
-                                            fit: BoxFit.cover,
-                                            errorBuilder: (context, error, stackTrace) => const Center(
-                                              child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 24),
-                                            ),
-                                          )
-                                        : const Center(
-                                            child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 24),
-                                          ),
-                                  ),
-                                ),
-                                title: Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text(
-                                        item.productName,
-                                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                    if (item.resolvedImages.length > 1)
-                                      Container(
-                                        margin: const EdgeInsets.only(left: 4),
-                                        padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFE2E8F0),
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: Text(
-                                          '${item.resolvedImages.length} ảnh',
-                                          style: const TextStyle(color: Color(0xFF475569), fontSize: 9, fontWeight: FontWeight.bold),
-                                        ),
-                                      ),
-                                    if (item.isFeatured)
-                                      Container(
-                                        margin: const EdgeInsets.only(left: 6),
-                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                        decoration: BoxDecoration(
-                                          color: const Color(0xFFF59E0B),
-                                          borderRadius: BorderRadius.circular(4),
-                                        ),
-                                        child: const Text('HOT', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
-                                      ),
-                                  ],
-                                ),
-                                subtitle: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      '${_currencyFormat.format(item.price)} / ${item.unit}',
-                                      style: const TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 13),
-                                    ),
-                                    if (item.description != null && item.description!.isNotEmpty)
-                                      Text(
-                                        item.description!,
-                                        style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                  ],
-                                ),
-                                trailing: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.edit_outlined, color: Color(0xFF0F172A), size: 20),
-                                      tooltip: 'Chỉnh sửa',
-                                      onPressed: () => _showProductFormDialog(product: item),
-                                    ),
-                                    IconButton(
-                                      icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444), size: 20),
-                                      tooltip: 'Xóa',
-                                      onPressed: () => _deleteProduct(item),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            );
-                          },
+                : _errorMessage != null && _products.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.error_outline, size: 48, color: Color(0xFFEF4444)),
+                              const SizedBox(height: 12),
+                              Text(_errorMessage!, textAlign: TextAlign.center),
+                              const SizedBox(height: 14),
+                              FilledButton(onPressed: () => _loadProducts(page: _currentPage), child: const Text('Thử lại')),
+                            ],
+                          ),
                         ),
-                      ),
+                      )
+                    : _products.isEmpty
+                        ? const Center(child: Text('Không tìm thấy món ăn nào'))
+                        : RefreshIndicator(
+                            onRefresh: () => _loadProducts(page: _currentPage),
+                            child: ListView.builder(
+                              padding: const EdgeInsets.all(16),
+                              itemCount: _products.length,
+                              itemBuilder: (context, index) {
+                                final item = _products[index];
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 12),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(14),
+                                    boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2))],
+                                  ),
+                                  child: ListTile(
+                                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                    leading: ClipRRect(
+                                      borderRadius: BorderRadius.circular(10),
+                                      child: Container(
+                                        width: 48,
+                                        height: 48,
+                                        color: const Color(0xFF0F172A),
+                                        child: item.fullImageUrl.isNotEmpty
+                                            ? Image.network(
+                                                item.fullImageUrl,
+                                                width: 48,
+                                                height: 48,
+                                                fit: BoxFit.cover,
+                                                errorBuilder: (_, _, _) => const Center(child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 24)),
+                                              )
+                                            : const Center(child: Icon(Icons.coffee, color: Color(0xFFF59E0B), size: 24)),
+                                      ),
+                                    ),
+                                    title: Row(
+                                      children: [
+                                        Expanded(
+                                          child: Text(
+                                            item.productName,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 14,
+                                              decoration: item.isAvailable ? null : TextDecoration.lineThrough,
+                                              color: item.isAvailable ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
+                                            ),
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ),
+                                        if (!item.isAvailable)
+                                          Container(
+                                            margin: const EdgeInsets.only(left: 4),
+                                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                            decoration: BoxDecoration(color: const Color(0xFFEF4444), borderRadius: BorderRadius.circular(4)),
+                                            child: const Text('HẾT', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                                          ),
+                                        if (item.isFeatured)
+                                          Container(
+                                            margin: const EdgeInsets.only(left: 4),
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(color: const Color(0xFFF59E0B), borderRadius: BorderRadius.circular(4)),
+                                            child: const Text('HOT', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
+                                          ),
+                                      ],
+                                    ),
+                                    subtitle: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          '${_currencyFormat.format(item.price)} / ${item.unit}',
+                                          style: const TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 13),
+                                        ),
+                                        if (item.description != null && item.description!.isNotEmpty)
+                                          Text(item.description!, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                      ],
+                                    ),
+                                    trailing: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Switch(
+                                          value: item.isAvailable,
+                                          onChanged: (_) => _toggleAvailability(item),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.edit_outlined, color: Color(0xFF0F172A), size: 20),
+                                          tooltip: 'Chỉnh sửa',
+                                          onPressed: () => _showProductFormDialog(product: item),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.delete_outline, color: Color(0xFFEF4444), size: 20),
+                                          tooltip: 'Xóa',
+                                          onPressed: () => _deleteProduct(item),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
           ),
-
-          // Thanh phân trang
           if (_totalPages > 1)
             Container(
-              padding: const EdgeInsets.symmetric(vertical: 12),
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
               color: Colors.white,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 12,
+                runSpacing: 6,
                 children: [
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _currentPage > 1 ? const Color(0xFF0F172A) : const Color(0xFFCBD5E1),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     icon: const Icon(Icons.arrow_back_ios, size: 12),
                     label: const Text('Trước', style: TextStyle(fontSize: 12)),
                     onPressed: _currentPage > 1 ? () => _loadProducts(page: _currentPage - 1) : null,
                   ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Text(
-                      'Trang $_currentPage / $_totalPages (Tổng: $_totalItems món)',
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0F172A)),
-                    ),
-                  ),
+                  Text('Trang $_currentPage / $_totalPages (Tổng: $_totalItems)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF0F172A))),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _currentPage < _totalPages ? const Color(0xFF0F172A) : const Color(0xFFCBD5E1),
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
                     label: const Text('Sau', style: TextStyle(fontSize: 12)),
                     icon: const Icon(Icons.arrow_forward_ios, size: 12),
