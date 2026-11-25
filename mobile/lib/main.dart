@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'models/product.dart';
 import 'models/user.dart';
+import 'repositories/auth_repository.dart';
 import 'repositories/product_repository.dart';
 import 'services/escpos_printer_service.dart';
 import 'services/offline_sync_service.dart';
@@ -9,6 +10,7 @@ import 'services/qr_table_session.dart';
 import 'services/realtime_service.dart';
 import 'services/session_manager.dart';
 import 'utils/database_helper.dart';
+import 'utils/snackbar_helper.dart';
 import 'views/admin/admin_category_page.dart';
 import 'views/admin/admin_inventory_page.dart';
 import 'views/admin/admin_order_list_page.dart';
@@ -320,11 +322,44 @@ class _NavItemSpec {
 class MainNavigationPage extends StatefulWidget {
   const MainNavigationPage({super.key});
 
+  /// Tách tham số trả về từ VNPay callback URL (`?vnpayStatus=...&orderId=...&code=...`)
+  static ({String status, int orderId, String? code})? parseVnpayReturnFromUri(Uri uri) {
+    final params = <String, String>{...uri.queryParameters};
+    if (uri.fragment.contains('?')) {
+      final qIdx = uri.fragment.indexOf('?');
+      params.addAll(Uri.splitQueryString(uri.fragment.substring(qIdx + 1)));
+    }
+    final status = params['vnpayStatus']?.trim();
+    final rawOrderId = params['orderId']?.trim();
+    final orderId = rawOrderId != null ? int.tryParse(rawOrderId) : null;
+    if (status == null || status.isEmpty || orderId == null || orderId <= 0) {
+      return null;
+    }
+    return (status: status, orderId: orderId, code: params['code']?.trim());
+  }
+
+  /// Tách one-time OAuth ticket từ callback URL (`?oauthTicket=...` hoặc fragment)
+  static String? parseOAuthTicketFromUri(Uri uri) {
+    final params = <String, String>{...uri.queryParameters};
+    if (uri.fragment.contains('?')) {
+      final qIdx = uri.fragment.indexOf('?');
+      params.addAll(Uri.splitQueryString(uri.fragment.substring(qIdx + 1)));
+    } else if (uri.fragment.contains('=')) {
+      params.addAll(Uri.splitQueryString(uri.fragment));
+    }
+    final ticket = params['oauthTicket']?.trim();
+    if (ticket == null || ticket.isEmpty) {
+      return null;
+    }
+    return ticket;
+  }
+
   @override
   State<MainNavigationPage> createState() => _MainNavigationPageState();
 }
 
 class _MainNavigationPageState extends State<MainNavigationPage> {
+  static final Set<String> _handledOAuthTickets = <String>{};
   int _currentIndex = 0;
   String _lastRoleKey = '';
   final OfflineSyncService _syncService = OfflineSyncService();
@@ -335,6 +370,52 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
     DatabaseHelper().refreshCartNotifier();
     _syncService.initialize();
     _syncService.startPeriodicSync(interval: const Duration(seconds: 45));
+
+    final vnpayReturn = MainNavigationPage.parseVnpayReturnFromUri(Uri.base);
+    if (vnpayReturn != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => OrderDetailPage(
+              orderId: vnpayReturn.orderId,
+              vnpayStatus: vnpayReturn.status,
+              vnpayCode: vnpayReturn.code,
+              autoRestoreToCart: vnpayReturn.status == 'restore',
+            ),
+          ),
+        );
+      });
+    }
+
+    final oauthTicket = MainNavigationPage.parseOAuthTicketFromUri(Uri.base);
+    if (oauthTicket != null && !_handledOAuthTickets.contains(oauthTicket)) {
+      _handledOAuthTickets.add(oauthTicket);
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (!mounted) return;
+        final res = await AuthRepository().exchangeOAuthTicket(oauthTicket);
+        if (!mounted) return;
+        if (res['success'] == true) {
+          final user = res['user'] as UserAccount?;
+          if (user != null) {
+            await SessionManager.instance.setSession(user);
+          }
+          if (!mounted) return;
+          setState(() {});
+          showAutoDismissSnackBar(
+            context,
+            message: res['message']?.toString() ?? 'Đăng nhập OAuth thành công',
+            backgroundColor: const Color(0xFF059669),
+          );
+        } else {
+          showAutoDismissSnackBar(
+            context,
+            message: res['message']?.toString() ?? 'Không thể xác thực phiên OAuth',
+            backgroundColor: const Color(0xFFDC2626),
+          );
+        }
+      });
+    }
   }
 
   @override

@@ -350,25 +350,32 @@ public class PaymentRepository : BaseRepository
             return (false, "Mã website vnp_TmnCode không khớp", null);
         }
 
+        int? parsedOrderId = null;
+        if (queryParams.TryGetValue("vnp_TxnRef", out var txnRef) && !string.IsNullOrEmpty(txnRef) &&
+            int.TryParse(txnRef.Split('_')[0], out int oid) && oid > 0)
+        {
+            parsedOrderId = oid;
+        }
+
         if (!queryParams.TryGetValue("vnp_ResponseCode", out var responseCode) || responseCode != "00")
         {
-            return (false, $"Giao dịch VNPay không thành công (ResponseCode: {responseCode})", null);
+            string msg = responseCode == "24"
+                ? "Khách hàng đã hủy giao dịch thanh toán VNPay (Mã 24). Đơn hàng của bạn vẫn được giữ nguyên."
+                : $"Giao dịch VNPay không thành công (ResponseCode: {responseCode})";
+            return (false, msg, parsedOrderId);
         }
 
         if (queryParams.TryGetValue("vnp_TransactionStatus", out var txnStatus) && txnStatus != "00")
         {
-            return (false, $"Trạng thái giao dịch VNPay chưa hoàn tất (TransactionStatus: {txnStatus})", null);
+            return (false, $"Trạng thái giao dịch VNPay chưa hoàn tất (TransactionStatus: {txnStatus})", parsedOrderId);
         }
 
-        if (!queryParams.TryGetValue("vnp_TxnRef", out var txnRef) || string.IsNullOrEmpty(txnRef))
+        if (!parsedOrderId.HasValue)
         {
-            return (false, "Mã tham chiếu giao dịch vnp_TxnRef rỗng", null);
+            return (false, "Mã tham chiếu giao dịch vnp_TxnRef rỗng hoặc không hợp lệ", null);
         }
 
-        if (!int.TryParse(txnRef.Split('_')[0], out int orderId) || orderId <= 0)
-        {
-            return (false, "Định dạng mã đơn hàng trong vnp_TxnRef không hợp lệ", null);
-        }
+        int orderId = parsedOrderId.Value;
 
         var order = await context.Orders.FindAsync(orderId);
         if (order == null) return (false, "Không tìm thấy đơn hàng", null);

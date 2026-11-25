@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import '../../models/order.dart';
 import '../../repositories/order_repository.dart';
 import '../../repositories/table_repository.dart';
 import '../../services/session_manager.dart';
+import '../../utils/snackbar_helper.dart';
 import '../auth/login_page.dart';
 import '../auth/profile_page.dart';
 import '../order/order_checkout_page.dart';
@@ -34,8 +36,8 @@ class _MemberHomePageState extends State<MemberHomePage> {
   List<Map<String, dynamic>> _history = [];
 
   List<OrderModel> _foundOrders = [];
-  bool _isSearchingOrders = false;
-  bool _hasSearched = false;
+  bool _isLoadingOrders = false;
+  bool _hasLoadedOrders = false;
 
   @override
   void initState() {
@@ -57,6 +59,11 @@ class _MemberHomePageState extends State<MemberHomePage> {
 
     final user = SessionManager.instance.currentUser;
     if (user == null) {
+      setState(() {
+        _foundOrders = [];
+        _hasLoadedOrders = false;
+        _isLoadingOrders = false;
+      });
       // Khách vãng lai: chỉ tải danh sách voucher công khai
       try {
         final res = await ApiConfig.get(Uri.parse('${ApiConfig.baseUrl}/api/discount/active')).timeout(const Duration(seconds: 6));
@@ -77,6 +84,8 @@ class _MemberHomePageState extends State<MemberHomePage> {
       setState(() => _isLoadingLoyalty = false);
       return;
     }
+
+    unawaited(_loadMyOrders(query: _searchQueryController.text.trim()));
 
     try {
       final res = await ApiConfig.get(Uri.parse('${ApiConfig.baseUrl}/api/loyalty/me')).timeout(const Duration(seconds: 6));
@@ -110,8 +119,9 @@ class _MemberHomePageState extends State<MemberHomePage> {
   Future<void> _redeemVoucher(Map<String, dynamic> voucher) async {
     final user = SessionManager.instance.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng đăng nhập tài khoản để đổi điểm lấy voucher!')),
+      showAutoDismissSnackBar(
+        context,
+        message: 'Vui lòng đăng nhập tài khoản để đổi điểm lấy voucher!',
       );
       return;
     }
@@ -119,11 +129,10 @@ class _MemberHomePageState extends State<MemberHomePage> {
     final code = (voucher['code'] ?? '').toString();
     final cost = (voucher['pointsCost'] as num? ?? 0).toInt();
     if (_userPoints < cost) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Bạn cần thêm ${cost - _userPoints} PTS để đổi mã "$code"'),
-          backgroundColor: const Color(0xFFDC2626),
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: 'Bạn cần thêm ${cost - _userPoints} PTS để đổi mã "$code"',
+        backgroundColor: const Color(0xFFDC2626),
       );
       return;
     }
@@ -156,19 +165,54 @@ class _MemberHomePageState extends State<MemberHomePage> {
       if (!mounted) return;
       if (res.statusCode == 200 && data['success'] == true) {
         HapticFeedback.mediumImpact();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message']?.toString() ?? 'Đổi voucher thành công!'), backgroundColor: const Color(0xFF059669)),
+        showAutoDismissSnackBar(
+          context,
+          message: data['message']?.toString() ?? 'Đổi voucher thành công!',
+          backgroundColor: const Color(0xFF059669),
         );
         await _loadLoyaltyData();
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(data['message']?.toString() ?? 'Không thể đổi voucher'), backgroundColor: const Color(0xFFDC2626)),
+        showAutoDismissSnackBar(
+          context,
+          message: data['message']?.toString() ?? 'Không thể đổi voucher',
+          backgroundColor: const Color(0xFFDC2626),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi kết nối khi đổi điểm: $e'), backgroundColor: const Color(0xFFDC2626)),
+        showAutoDismissSnackBar(
+          context,
+          message: 'Lỗi kết nối khi đổi điểm: $e',
+          backgroundColor: const Color(0xFFDC2626),
+        );
+      }
+    }
+  }
+
+  Future<void> _loadMyOrders({String query = '', bool showError = false}) async {
+    if (SessionManager.instance.currentUser == null) return;
+    setState(() {
+      _isLoadingOrders = true;
+    });
+    try {
+      final list = await _orderRepo.lookupOrders(query.trim());
+      if (!mounted) return;
+      setState(() {
+        _foundOrders = list;
+        _isLoadingOrders = false;
+        _hasLoadedOrders = true;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isLoadingOrders = false;
+        _hasLoadedOrders = true;
+      });
+      if (showError) {
+        showAutoDismissSnackBar(
+          context,
+          message: '$e',
+          backgroundColor: const Color(0xFFDC2626),
         );
       }
     }
@@ -177,33 +221,14 @@ class _MemberHomePageState extends State<MemberHomePage> {
   Future<void> _searchOrders() async {
     final query = _searchQueryController.text.trim();
     if (SessionManager.instance.currentUser == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng đăng nhập để tra cứu lịch sử đơn hàng')),
+      showAutoDismissSnackBar(
+        context,
+        message: 'Vui lòng đăng nhập để tra cứu lịch sử đơn hàng',
       );
       return;
     }
 
-    setState(() {
-      _isSearchingOrders = true;
-      _hasSearched = true;
-    });
-    try {
-      final list = await _orderRepo.lookupOrders(query);
-      if (!mounted) return;
-      setState(() {
-        _foundOrders = list;
-        _isSearchingOrders = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() {
-        _foundOrders = [];
-        _isSearchingOrders = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: const Color(0xFFDC2626)),
-      );
-    }
+    await _loadMyOrders(query: query, showError: true);
   }
 
   Future<void> _showScanQrDialog() async {
@@ -627,17 +652,19 @@ class _MemberHomePageState extends State<MemberHomePage> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Expanded(
+                      Expanded(
                         child: Text(
-                          'Tra Cứu Đơn Hàng (Mã đơn hoặc SĐT)',
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                          user != null
+                              ? 'Đơn hàng của tôi (${_foundOrders.length})'
+                              : 'Tra Cứu Đơn Hàng (Mã đơn hoặc SĐT)',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
                         ),
                       ),
-                      if (_hasSearched)
+                      if (user != null || _hasLoadedOrders)
                         IconButton(
                           icon: const Icon(Icons.refresh_rounded, size: 20, color: Color(0xFF0284C7)),
                           tooltip: 'Làm mới',
-                          onPressed: _isSearchingOrders ? null : _searchOrders,
+                          onPressed: _isLoadingOrders ? null : _searchOrders,
                         ),
                     ],
                   ),
@@ -647,10 +674,29 @@ class _MemberHomePageState extends State<MemberHomePage> {
                       Expanded(
                         child: TextField(
                           controller: _searchQueryController,
+                          onChanged: (val) {
+                            setState(() {});
+                            if (val.trim().isEmpty && user != null) {
+                              _loadMyOrders();
+                            }
+                          },
                           onSubmitted: (_) => _searchOrders(),
                           decoration: InputDecoration(
-                            hintText: 'VD: ORD- hoặc SĐT (để trống = đơn của tôi)',
+                            hintText: 'Lọc theo mã đơn (ORD-) hoặc SĐT',
                             prefixIcon: const Icon(Icons.search, size: 20),
+                            suffixIcon: _searchQueryController.text.isNotEmpty
+                                ? IconButton(
+                                    icon: const Icon(Icons.clear, size: 18),
+                                    tooltip: 'Xóa bộ lọc',
+                                    onPressed: () {
+                                      _searchQueryController.clear();
+                                      setState(() {});
+                                      if (user != null) {
+                                        _loadMyOrders();
+                                      }
+                                    },
+                                  )
+                                : null,
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           ),
@@ -664,18 +710,36 @@ class _MemberHomePageState extends State<MemberHomePage> {
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                         ),
-                        onPressed: _isSearchingOrders ? null : _searchOrders,
-                        child: _isSearchingOrders
+                        onPressed: _isLoadingOrders ? null : _searchOrders,
+                        child: _isLoadingOrders
                             ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
                             : const Text('Tra cứu', style: TextStyle(fontWeight: FontWeight.bold)),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
-                  if (_hasSearched && _foundOrders.isEmpty && !_isSearchingOrders)
+                  if (user == null)
                     const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('Không tìm thấy đơn hàng nào khớp.', style: TextStyle(color: Color(0xFF64748B))),
+                      padding: EdgeInsets.symmetric(vertical: 8),
+                      child: Text(
+                        'Đăng nhập để tự động hiển thị danh sách đơn hàng của bạn.',
+                        style: TextStyle(color: Color(0xFF64748B), fontSize: 13),
+                      ),
+                    )
+                  else if (_isLoadingOrders && _foundOrders.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 20),
+                      child: Center(child: CircularProgressIndicator()),
+                    )
+                  else if (_hasLoadedOrders && _foundOrders.isEmpty)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      child: Text(
+                        _searchQueryController.text.trim().isNotEmpty
+                            ? 'Không tìm thấy đơn hàng nào khớp.'
+                            : 'Bạn chưa có đơn hàng nào.',
+                        style: const TextStyle(color: Color(0xFF64748B)),
+                      ),
                     )
                   else
                     ..._foundOrders.map((o) => _buildOrderStatusTracker(o)),
@@ -691,7 +755,10 @@ class _MemberHomePageState extends State<MemberHomePage> {
   Widget _buildOrderStatusTracker(OrderModel o) {
     final isCancelled = o.isCancelled;
     return InkWell(
-      onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => OrderDetailPage(orderId: o.orderId))),
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => OrderDetailPage(orderId: o.orderId)),
+      ).then((_) => _loadLoyaltyData()),
       borderRadius: BorderRadius.circular(16),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),

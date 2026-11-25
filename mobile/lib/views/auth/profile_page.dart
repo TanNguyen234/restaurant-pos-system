@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import '../../models/order.dart';
 import '../../models/user.dart';
 import '../../repositories/auth_repository.dart';
+import '../../repositories/order_repository.dart';
 import '../../services/session_manager.dart';
+import '../../utils/snackbar_helper.dart';
+import '../order/order_detail_page.dart';
 import 'change_password_page.dart';
 import 'login_page.dart';
 
@@ -15,6 +20,8 @@ class ProfilePage extends StatefulWidget {
 
 class _ProfilePageState extends State<ProfilePage> {
   final AuthRepository _authRepo = AuthRepository();
+  final OrderRepository _orderRepo = OrderRepository();
+  final NumberFormat _currencyFormat = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
   final _formKey = GlobalKey<FormState>();
   final _fullNameController = TextEditingController();
   final _emailController = TextEditingController();
@@ -23,6 +30,8 @@ class _ProfilePageState extends State<ProfilePage> {
   UserAccount? _user;
   bool _isLoading = true;
   bool _isSaving = false;
+  List<OrderModel> _myOrders = [];
+  bool _isLoadingOrders = false;
 
   @override
   void initState() {
@@ -39,12 +48,21 @@ class _ProfilePageState extends State<ProfilePage> {
   }
 
   Future<void> _loadProfile() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _isLoadingOrders = true;
+    });
     var session = SessionManager.instance.currentUser ?? await _authRepo.getCurrentSession();
     final remote = session != null ? await _authRepo.getMyProfile() : null;
     if (remote != null) {
       session = remote;
-      SessionManager.instance.setSession(remote);
+      await SessionManager.instance.setSession(remote);
+    }
+    List<OrderModel> orders = [];
+    if (session != null) {
+      try {
+        orders = await _orderRepo.lookupOrders('');
+      } catch (_) {}
     }
     if (mounted) {
       setState(() {
@@ -52,7 +70,9 @@ class _ProfilePageState extends State<ProfilePage> {
         _fullNameController.text = session?.fullName ?? '';
         _emailController.text = session?.email ?? '';
         _phoneController.text = session?.phoneNumber ?? '';
+        _myOrders = orders;
         _isLoading = false;
+        _isLoadingOrders = false;
       });
     }
   }
@@ -71,18 +91,16 @@ class _ProfilePageState extends State<ProfilePage> {
     if (res['success'] == true) {
       await _loadProfile();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(res['message'] ?? 'Cập nhật hồ sơ thành công'),
-          backgroundColor: const Color(0xFF059669),
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: res['message']?.toString() ?? 'Cập nhật hồ sơ thành công',
+        backgroundColor: const Color(0xFF059669),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(res['message'] ?? 'Không thể cập nhật hồ sơ'),
-          backgroundColor: const Color(0xFFDC2626),
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: res['message']?.toString() ?? 'Không thể cập nhật hồ sơ',
+        backgroundColor: const Color(0xFFDC2626),
       );
     }
   }
@@ -92,11 +110,10 @@ class _ProfilePageState extends State<ProfilePage> {
     if (user == null) return;
     final emailText = _emailController.text.trim();
     if (emailText.isEmpty || !emailText.contains('@')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Vui lòng nhập và lưu Email hợp lệ trước khi xác thực'),
-          backgroundColor: Colors.orange,
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: 'Vui lòng nhập và lưu Email hợp lệ trước khi xác thực',
+        backgroundColor: Colors.orange,
       );
       return;
     }
@@ -109,23 +126,28 @@ class _ProfilePageState extends State<ProfilePage> {
       );
       if (saveRes['success'] != true) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(saveRes['message'] ?? 'Lỗi lưu email'), backgroundColor: Colors.red),
+        showAutoDismissSnackBar(
+          context,
+          message: saveRes['message']?.toString() ?? 'Lỗi lưu email',
+          backgroundColor: Colors.red,
         );
         return;
       }
     }
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Đang gửi mã OTP xác thực tới email của bạn...')),
+    showAutoDismissSnackBar(
+      context,
+      message: 'Đang gửi mã OTP xác thực tới email của bạn...',
     );
 
     final reqRes = await _authRepo.requestEmailVerification(emailText);
     if (!mounted) return;
     if (reqRes['success'] != true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(reqRes['message'] ?? 'Không gửi được OTP'), backgroundColor: Colors.red),
+      showAutoDismissSnackBar(
+        context,
+        message: reqRes['message']?.toString() ?? 'Không gửi được OTP',
+        backgroundColor: Colors.red,
       );
       return;
     }
@@ -209,11 +231,10 @@ class _ProfilePageState extends State<ProfilePage> {
     if (verified == true && mounted) {
       await _loadProfile();
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Xác thực Email thành công!'),
-          backgroundColor: Color(0xFF059669),
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: 'Xác thực Email thành công!',
+        backgroundColor: const Color(0xFF059669),
       );
     }
   }
@@ -445,6 +466,10 @@ class _ProfilePageState extends State<ProfilePage> {
                             ),
                             const SizedBox(height: 16),
 
+                            // My Orders Section
+                            _buildMyOrdersSection(),
+                            const SizedBox(height: 16),
+
                             // Account Actions
                             Material(
                               color: Colors.white,
@@ -484,6 +509,170 @@ class _ProfilePageState extends State<ProfilePage> {
                     ),
                   ),
                 ),
+    );
+  }
+
+  Color _orderStatusColor(int status) {
+    switch (status) {
+      case 0:
+        return const Color(0xFF3B82F6);
+      case 1:
+        return const Color(0xFFD97706);
+      case 2:
+        return const Color(0xFF7C3AED);
+      case 3:
+        return const Color(0xFF059669);
+      case 4:
+        return const Color(0xFFDC2626);
+      default:
+        return const Color(0xFF64748B);
+    }
+  }
+
+  Widget _buildMyOrdersSection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFE2E8F0)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.receipt_long_rounded, color: Color(0xFF0F172A), size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Đơn hàng của tôi (${_myOrders.length})',
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.refresh_rounded, size: 20, color: Color(0xFF0284C7)),
+                tooltip: 'Làm mới đơn hàng',
+                onPressed: _isLoadingOrders ? null : _loadProfile,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (_isLoadingOrders)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 20),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_myOrders.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'Bạn chưa có đơn hàng nào',
+                style: TextStyle(color: Color(0xFF64748B), fontSize: 13.5),
+              ),
+            )
+          else
+            ..._myOrders.map((o) {
+              final statusColor = _orderStatusColor(o.status);
+              return Container(
+                margin: const EdgeInsets.only(bottom: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(12),
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => OrderDetailPage(orderId: o.orderId)),
+                  ).then((_) => _loadProfile()),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                o.orderCode,
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF0F172A)),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _currencyFormat.format(o.finalAmount),
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFFD97706)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: statusColor.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                o.statusText,
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: o.isPaid ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                o.paymentStatusText,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: o.isPaid ? const Color(0xFF166534) : const Color(0xFFB45309),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                '${DateFormat('HH:mm dd/MM/yyyy').format(o.createdAt)} • ${o.totalItems} món',
+                                style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  'Xem chi tiết',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF0284C7)),
+                                ),
+                                Icon(Icons.chevron_right, size: 16, color: Color(0xFF0284C7)),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }),
+        ],
+      ),
     );
   }
 }

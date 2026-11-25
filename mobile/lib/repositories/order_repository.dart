@@ -383,6 +383,24 @@ class OrderRepository {
     }
   }
 
+  /// Hủy đơn chưa thanh toán để khôi phục giỏ hàng / đổi luồng đặt (POST /api/order/{id}/cancel-unpaid)
+  Future<Map<String, dynamic>> cancelUnpaidOrder(int orderId) async {
+    try {
+      final res = await ApiConfig.post(
+        Uri.parse('$baseUrl/$orderId/cancel-unpaid'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({}),
+      ).timeout(timeoutDuration);
+      final d = _decodeMap(res.bodyBytes);
+      return {
+        'success': res.statusCode == 200 && d['success'] == true,
+        'message': d['message']?.toString() ?? (res.statusCode == 200 ? 'Đã hủy đơn' : 'Không thể hủy đơn'),
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Lỗi kết nối khi hủy đơn: $e'};
+    }
+  }
+
   /// Đặt món tự phục vụ qua mã QR tại bàn (POST /api/order/qr-self-order)
   Future<Map<String, dynamic>> createQrSelfOrder(Map<String, dynamic> orderData) async {
     final payload = Map<String, dynamic>.from(orderData);

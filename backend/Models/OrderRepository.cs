@@ -452,6 +452,19 @@ public class OrderRepository : BaseRepository
     public async Task<List<OrderDto>> LookupOrdersAsync(string? queryText, int? callerAccountId, bool isStaff)
     {
         string kw = queryText?.Trim().ToLower() ?? string.Empty;
+
+        string? callerPhone = null;
+        if (callerAccountId.HasValue)
+        {
+            callerPhone = await context.Accounts
+                .Where(a => a.AccountId == callerAccountId.Value)
+                .Select(a => a.PhoneNumber)
+                .FirstOrDefaultAsync();
+            callerPhone = string.IsNullOrWhiteSpace(callerPhone) ? null : callerPhone.Trim();
+        }
+        bool hasCallerPhone = callerPhone != null;
+        string callerPhoneVal = callerPhone ?? string.Empty;
+
         var baseQuery = from o in context.Orders
                         join t in context.DiningTables on o.TableId equals t.TableId into tGroup
                         from t in tGroup.DefaultIfEmpty()
@@ -464,20 +477,41 @@ public class OrderRepository : BaseRepository
                             WaiterName = a != null ? a.FullName : null
                         };
 
-        if (!string.IsNullOrEmpty(kw))
+        if (string.IsNullOrEmpty(kw))
+        {
+            if (!isStaff)
+            {
+                if (!callerAccountId.HasValue)
+                {
+                    return new List<OrderDto>();
+                }
+
+                baseQuery = baseQuery.Where(x =>
+                    x.Order.AccountId == callerAccountId.Value ||
+                    (hasCallerPhone && x.Order.PhoneNumber == callerPhoneVal));
+            }
+            else if (callerAccountId.HasValue)
+            {
+                baseQuery = baseQuery.Where(x => x.Order.AccountId == callerAccountId.Value);
+            }
+        }
+        else if (!isStaff)
+        {
+            baseQuery = baseQuery.Where(x =>
+                ((callerAccountId.HasValue && x.Order.AccountId == callerAccountId.Value) ||
+                 (hasCallerPhone && x.Order.PhoneNumber == callerPhoneVal) ||
+                 (x.Order.PhoneNumber != null && x.Order.PhoneNumber.ToLower() == kw) ||
+                 x.Order.OrderCode.ToLower() == kw)
+                &&
+                (x.Order.OrderCode.ToLower().Contains(kw) ||
+                 (x.Order.PhoneNumber != null && x.Order.PhoneNumber.ToLower().Contains(kw)) ||
+                 (x.Order.CustomerName != null && x.Order.CustomerName.ToLower().Contains(kw))));
+        }
+        else
         {
             baseQuery = baseQuery.Where(x =>
                 x.Order.OrderCode.ToLower().Contains(kw) ||
                 (x.Order.PhoneNumber != null && x.Order.PhoneNumber.ToLower().Contains(kw)));
-        }
-        else if (callerAccountId.HasValue)
-        {
-            baseQuery = baseQuery.Where(x => x.Order.AccountId == callerAccountId.Value);
-        }
-
-        if (!isStaff && string.IsNullOrEmpty(kw) && callerAccountId.HasValue)
-        {
-            baseQuery = baseQuery.Where(x => x.Order.AccountId == callerAccountId.Value);
         }
 
         var rawList = await baseQuery
@@ -503,9 +537,17 @@ public class OrderRepository : BaseRepository
                                         CookingStatus = d.CookingStatus
                                     }).ToListAsync();
 
+        var paidByOrder = ids.Count == 0
+            ? new Dictionary<int, decimal>()
+            : await context.Payments
+                .Where(p => ids.Contains(p.OrderId) && p.Status == 1)
+                .GroupBy(p => p.OrderId)
+                .ToDictionaryAsync(g => g.Key, g => g.Sum(p => p.Amount));
+
         return rawList.Select(item =>
         {
             var ord = item.Order;
+            paidByOrder.TryGetValue(ord.OrderId, out decimal paidAmount);
             return new OrderDto
             {
                 OrderId = ord.OrderId,
@@ -522,6 +564,7 @@ public class OrderRepository : BaseRepository
                 TotalAmount = ord.TotalAmount,
                 DiscountAmount = ord.DiscountAmount,
                 FinalAmount = ord.FinalAmount,
+                PaidAmount = paidAmount,
                 Status = ord.Status,
                 PaymentStatus = ord.PaymentStatus,
                 CreatedAt = ord.CreatedAt,
@@ -674,6 +717,92 @@ public class OrderRepository : BaseRepository
 
         await context.SaveChangesAsync();
         return (true, "Cập nhật trạng thái đơn hàng thành công");
+    }
+
+    /// <summary>
+    /// Hủy đơn chưa thanh toán (ví dụ khách hủy thanh toán VNPay và muốn khôi phục lại giỏ hàng):
+    /// hoàn trả tồn kho BOM, giải phóng bàn đang giữ, giữ lịch sử Status=4.
+    /// </summary>
+    public async Task<(bool Success, bool Forbidden, string Message, int? TableId)> CancelUnpaidOrderAsync(
+        int orderId,
+        int? callerAccountId,
+        bool isStaff)
+    {
+        using var tx = await context.Database.BeginTransactionAsync();
+        try
+        {
+            var order = await context.Orders.FindAsync(orderId);
+            if (order == null) return (false, false, "Không tìm thấy đơn hàng", null);
+
+            if (!isStaff && order.AccountId.HasValue && order.AccountId.Value != callerAccountId)
+                return (false, true, "Bạn không có quyền hủy đơn hàng của người khác", order.TableId);
+
+            if (order.Status == 4)
+                return (true, false, "Đơn hàng đã được hủy trước đó", order.TableId);
+
+            if (order.PaymentStatus == 1 || order.Status == 3)
+                return (false, false, "Đơn hàng đã thanh toán hoặc hoàn thành, không thể hủy để hoàn giỏ", order.TableId);
+
+            bool hasPaidTxn = await context.Payments.AnyAsync(p => p.OrderId == orderId && p.Status == 1);
+            if (hasPaidTxn)
+                return (false, false, "Đơn hàng đã ghi nhận giao dịch thanh toán, không thể hoàn giỏ", order.TableId);
+
+            var details = await context.OrderDetails
+                .Where(d => d.OrderId == orderId && d.CookingStatus != 4)
+                .ToListAsync();
+
+            if (!isStaff && details.Any(d => d.CookingStatus >= 2))
+                return (false, false, "Bếp đã chế biến xong món trong đơn, vui lòng nhờ thu ngân/nhân viên hỗ trợ", order.TableId);
+
+            var invRepo = new InventoryRepository(context);
+            foreach (var d in details)
+            {
+                int qty = d.Quantity;
+                d.CookingStatus = 4;
+                d.SubTotal = 0;
+                d.ItemNote = string.IsNullOrEmpty(d.ItemNote)
+                    ? "[Khách hủy thanh toán / Hoàn giỏ]"
+                    : $"{d.ItemNote} [Hoàn giỏ]";
+                await invRepo.RestoreForVoidAsync(orderId, d.ProductId, qty, callerAccountId ?? order.AccountId);
+            }
+
+            order.Status = 4;
+            order.TotalAmount = 0;
+            order.DiscountAmount = 0;
+            order.FinalAmount = 0;
+            context.Orders.Update(order);
+
+            int? freedTableId = null;
+            if (order.TableId.HasValue)
+            {
+                var table = await context.DiningTables.FindAsync(order.TableId.Value);
+                if (table != null)
+                {
+                    bool hasOtherActive = await context.Orders.AnyAsync(o =>
+                        o.TableId == table.TableId &&
+                        o.OrderId != order.OrderId &&
+                        o.Status < 3 &&
+                        o.PaymentStatus == 0);
+                    if (!hasOtherActive)
+                    {
+                        table.Status = 0;
+                        table.CurrentOrderId = null;
+                        table.UpdatedAt = DateTime.Now;
+                        context.DiningTables.Update(table);
+                        freedTableId = table.TableId;
+                    }
+                }
+            }
+
+            await context.SaveChangesAsync();
+            await tx.CommitAsync();
+            return (true, false, "Đã hủy đơn chưa thanh toán và hoàn lại tồn kho thành công", freedTableId);
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            return (false, false, "Lỗi khi hủy đơn chưa thanh toán", null);
+        }
     }
 
     public async Task<List<KdsItemDto>> GetKdsItemsAsync()

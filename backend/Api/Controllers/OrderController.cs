@@ -343,6 +343,40 @@ public class OrderController : BaseController
             data = result.Order
         });
     }
+
+    [HttpPost("{id:int}/cancel-unpaid")]
+    [AllowAnonymous]
+    public async Task<IActionResult> CancelUnpaidOrder(int id)
+    {
+        var existing = await Provider.Order.GetOrderByIdAsync(id);
+        if (existing == null)
+        {
+            return NotFound(new { statusCode = 404, success = false, message = $"Không tìm thấy đơn hàng #{id}" });
+        }
+
+        int? callerId = GetCallerAccountId();
+        bool isStaff = IsStaffUser();
+        if (existing.AccountId.HasValue && !isStaff)
+        {
+            if (!callerId.HasValue) return Unauthorized(new { statusCode = 401, success = false, message = "Vui lòng đăng nhập để hủy đơn của bạn" });
+            if (callerId.Value != existing.AccountId.Value) return Forbid();
+        }
+
+        var result = await Provider.Order.CancelUnpaidOrderAsync(id, callerId, isStaff);
+        if (result.Forbidden) return Forbid();
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        await _realtime.NotifyOrderChangedAsync("OrderCancelled", new { orderId = id, tableId = result.TableId });
+        if (result.TableId.HasValue)
+        {
+            await _realtime.NotifyTableChangedAsync(new { tableId = result.TableId.Value });
+        }
+
+        return Ok(new { statusCode = 200, success = true, message = result.Message, orderId = id, tableId = result.TableId });
+    }
 }
 
 public class UpdateStatusDto
