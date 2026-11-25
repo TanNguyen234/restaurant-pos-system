@@ -64,8 +64,8 @@ void main() {
       expect(table.isOccupied, false);
       expect(table.isReserved, false);
       expect(table.statusText, 'Trống');
-      expect(table.statusColor, const Color(0xFF2E7D32));
-      expect(table.statusBackgroundColor, const Color(0xFFE8F5E9));
+      expect(table.statusColor, const Color(0xFF059669));
+      expect(table.statusBackgroundColor, const Color(0xFFECFDF5));
 
       final toMap = table.toMap();
       expect(toMap['tableId'], 10);
@@ -73,7 +73,7 @@ void main() {
       expect(toMap['status'], 0);
     });
 
-    test('DiningTable status helpers for Occupied (1) and Reserved (2)', () {
+    test('DiningTable status helpers for Occupied (1), Waiting (2) and Reserved (3)', () {
       final occupiedTable = DiningTable(
         id: 1,
         areaId: 1,
@@ -85,18 +85,28 @@ void main() {
 
       expect(occupiedTable.isAvailable, false);
       expect(occupiedTable.isOccupied, true);
+      expect(occupiedTable.isWaiting, false);
       expect(occupiedTable.isReserved, false);
       expect(occupiedTable.statusText, 'Có khách');
-      expect(occupiedTable.statusColor, const Color(0xFFC62828));
-      expect(occupiedTable.statusBackgroundColor, const Color(0xFFFFEBEE));
+      expect(occupiedTable.statusColor, const Color(0xFFDC2626));
+      expect(occupiedTable.statusBackgroundColor, const Color(0xFFFEF2F2));
 
-      final reservedTable = occupiedTable.copyWith(status: 2);
+      final waitingTable = occupiedTable.copyWith(status: 2);
+      expect(waitingTable.isAvailable, false);
+      expect(waitingTable.isOccupied, true);
+      expect(waitingTable.isWaiting, true);
+      expect(waitingTable.isReserved, false);
+      expect(waitingTable.statusText, 'Chờ phục vụ');
+      expect(waitingTable.statusColor, const Color(0xFFD97706));
+      expect(waitingTable.statusBackgroundColor, const Color(0xFFFFFBEB));
+
+      final reservedTable = occupiedTable.copyWith(status: 3);
       expect(reservedTable.isAvailable, false);
       expect(reservedTable.isOccupied, false);
       expect(reservedTable.isReserved, true);
       expect(reservedTable.statusText, 'Đã đặt trước');
-      expect(reservedTable.statusColor, const Color(0xFFEF6C00));
-      expect(reservedTable.statusBackgroundColor, const Color(0xFFFFF3E0));
+      expect(reservedTable.statusColor, const Color(0xFF0284C7));
+      expect(reservedTable.statusBackgroundColor, const Color(0xFFE0F2FE));
     });
 
     test('DiningTable copyWith preserves unprovided properties', () {

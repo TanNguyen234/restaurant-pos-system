@@ -481,10 +481,24 @@ void main() {
     // Kích thước chuẩn màn hình điện thoại hiện đại (Pixel / iPhone 1080x2340)
     tester.view.physicalSize = const Size(1080, 2340);
     tester.view.devicePixelRatio = 2.0;
-    addTearDown(() {
+    addTearDown(() async {
+      await SessionManager.instance.logout();
       tester.view.resetPhysicalSize();
       tester.view.resetDevicePixelRatio();
     });
+
+    await SessionManager.instance.setSession(
+      UserAccount(
+        accountId: 4,
+        roleId: 4,
+        username: 'waiter_hung',
+        fullName: 'Trần Văn Hùng',
+        email: 'waiter@restaurantpos.vn',
+        phoneNumber: '0904567890',
+        role: 'WAITER',
+        roleName: 'Phục vụ bàn',
+      ),
+    );
 
     final screenKey = GlobalKey();
 
@@ -524,7 +538,7 @@ void main() {
     await tester.tap(find.text('Thực đơn'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Thực đơn & Danh mục'), findsOneWidget);
+    expect(find.text('Thực đơn món ăn & Đồ uống F&B'), findsOneWidget);
 
     // Thêm món vào SQLite giỏ hàng
     await DatabaseHelper().clearCart();
@@ -606,7 +620,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    expect(find.text('Màn hình Bếp & Pha chế (KDS)'), findsOneWidget);
+    expect(find.text('Bếp & Pha chế (KDS)'), findsOneWidget);
     expect(find.text('Chờ nấu'), findsOneWidget);
     expect(find.text('Đang làm'), findsOneWidget);
     expect(find.text('Cà Phê Sữa Đá Sài Gòn'), findsOneWidget);
@@ -657,20 +671,15 @@ void main() {
     );
     await tester.pumpAndSettle();
 
-    // Mở menu vận hành bằng FAB
-    await tester.tap(find.byType(FloatingActionButton));
+    // Chuyển sang tab Tài khoản (ProfilePage) để kiểm tra RBAC & Đăng xuất
+    await tester.tap(find.text('Tài khoản'));
     await tester.pumpAndSettle();
 
     // Kiểm tra tên tiếng Việt sạch (Bếp Trưởng KDS), vai trò sạch (Bộ phận bếp & pha chế (KDS))
-    expect(find.text('Bếp Trưởng KDS'), findsOneWidget);
-    expect(find.text('Bộ phận bếp & pha chế (KDS)'), findsOneWidget);
+    expect(find.text('Bếp Trưởng KDS'), findsAtLeastNWidgets(1));
+    expect(find.textContaining('Bộ phận bếp & pha chế (KDS)'), findsOneWidget);
     expect(find.text('Đăng xuất'), findsOneWidget);
     await _captureScreen(tester, screenKey, '../docs/acceptance/screenshots/step09_operations_menu_rbac_logout.png');
-
-    // Đóng bottom sheet
-    tester.binding.handlePointerEvent(const PointerDownEvent(position: Offset(50, 50)));
-    tester.binding.handlePointerEvent(const PointerUpEvent(position: Offset(50, 50)));
-    await tester.pumpAndSettle();
 
     // -------------------------------------------------------------
     // BƯỚC 10: QUẢN TRỊ NGƯỜI DÙNG & VAI TRÒ (ADMIN USER MANAGEMENT)
