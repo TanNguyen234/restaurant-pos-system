@@ -382,4 +382,57 @@ class OrderRepository {
       return {'success': false, 'message': 'Lỗi khi hủy món: $e'};
     }
   }
+
+  /// Đặt món tự phục vụ qua mã QR tại bàn (POST /api/order/qr-self-order)
+  Future<Map<String, dynamic>> createQrSelfOrder(Map<String, dynamic> orderData) async {
+    final payload = Map<String, dynamic>.from(orderData);
+    payload['idempotencyKey'] = (payload['idempotencyKey']?.toString().trim().isNotEmpty == true)
+        ? payload['idempotencyKey']
+        : _uuid.v4();
+    try {
+      final res = await ApiConfig.post(
+        Uri.parse('$baseUrl/qr-self-order'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(payload),
+      ).timeout(timeoutDuration);
+      final d = _decodeMap(res.bodyBytes);
+      return {
+        'success': res.statusCode == 200 && d['success'] == true,
+        'isOffline': false,
+        'orderId': d['orderId'],
+        'orderCode': d['orderCode'],
+        'totalAmount': d['totalAmount'],
+        'discountAmount': d['discountAmount'],
+        'finalAmount': d['finalAmount'],
+        'message': d['message']?.toString() ?? 'Gửi đơn QR thất bại (HTTP ${res.statusCode})',
+        'data': d['data'],
+      };
+    } catch (e) {
+      return {'success': false, 'isOffline': false, 'message': 'Không gửi được đơn QR: $e'};
+    }
+  }
+
+  /// Lấy dữ liệu biểu đồ phân tích doanh thu theo ngày/giờ/kênh thanh toán
+  Future<Map<String, dynamic>> getAnalytics({int days = 7}) async {
+    final res = await ApiConfig.get(Uri.parse('$baseUrl/analytics?days=$days')).timeout(timeoutDuration);
+    final d = _decodeMap(res.bodyBytes);
+    if (res.statusCode != 200) {
+      throw StateError(d['message']?.toString() ?? 'Không tải được dữ liệu phân tích');
+    }
+    return d;
+  }
+
+  /// Xuất báo cáo CSV đơn hàng
+  Future<String> exportOrdersCsv({DateTime? fromDate, DateTime? toDate, int? status}) async {
+    final q = <String, String>{};
+    if (fromDate != null) q['fromDate'] = fromDate.toIso8601String();
+    if (toDate != null) q['toDate'] = toDate.toIso8601String();
+    if (status != null) q['status'] = '$status';
+    final uri = Uri.parse('$baseUrl/export-csv').replace(queryParameters: q.isEmpty ? null : q);
+    final res = await ApiConfig.get(uri).timeout(timeoutDuration);
+    if (res.statusCode != 200) {
+      throw StateError('Không xuất được file CSV (HTTP ${res.statusCode})');
+    }
+    return utf8.decode(res.bodyBytes);
+  }
 }

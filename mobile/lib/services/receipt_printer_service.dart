@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/payment.dart';
+import 'escpos_printer_service.dart';
 
 class ReceiptPrinterService {
   static final _dateFormat = DateFormat('dd/MM/yyyy HH:mm:ss');
@@ -310,12 +311,26 @@ class _ReceiptPreviewSheetState extends State<_ReceiptPreviewSheet> {
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                           icon: const Icon(Icons.print_rounded, size: 18),
-                          label: Text('In ($_paperWidthMm mm)', style: const TextStyle(fontWeight: FontWeight.bold)),
-                          onPressed: () {
+                          label: Text('In LAN ($_paperWidthMm mm)', style: const TextStyle(fontWeight: FontWeight.bold)),
+                          onPressed: () async {
+                            final currentCfg = await EscPosPrinterService.loadConfig();
+                            await EscPosPrinterService.saveConfig(EscPosPrinterConfig(
+                              host: currentCfg.host,
+                              port: currentCfg.port,
+                              paperWidthMm: _paperWidthMm,
+                            ));
+                            final printRes = await EscPosPrinterService.printOrderOverLan(
+                              order,
+                              isPreCheck: widget.isPreCheckBill,
+                              isDuplicate: widget.isDuplicate,
+                            );
+                            if (!context.mounted) return;
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text('Đã gửi lệnh in $_paperWidthMm mm cho hóa đơn $orderCode!'),
-                                backgroundColor: const Color(0xFF059669),
+                                content: Text(printRes['message']?.toString() ?? 'Đã gửi lệnh in $_paperWidthMm mm cho hóa đơn $orderCode!'),
+                                backgroundColor: printRes['success'] == true
+                                    ? const Color(0xFF059669)
+                                    : (printRes['isWebFallback'] == true ? const Color(0xFF0284C7) : const Color(0xFFD97706)),
                                 behavior: SnackBarBehavior.floating,
                               ),
                             );

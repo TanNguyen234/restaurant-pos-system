@@ -1,7 +1,11 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../models/order.dart';
 import '../../repositories/order_repository.dart';
+import '../../services/realtime_service.dart';
+import '../../widgets/revenue_charts.dart';
 import '../../widgets/skeleton_loading.dart';
 import '../order/order_detail_page.dart';
 
@@ -19,6 +23,8 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
 
   List<OrderModel> _orders = [];
   List<Map<String, dynamic>> _topProducts = [];
+  Map<String, dynamic>? _analytics;
+  StreamSubscription<PosRealtimeEvent>? _rtSub;
   int _totalOrders = 0;
   double _totalRevenue = 0;
   bool _isLoading = true;
@@ -30,11 +36,18 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
   @override
   void initState() {
     super.initState();
+    PosRealtimeService.instance.ensureStarted();
+    _rtSub = PosRealtimeService.instance.events.listen((ev) {
+      if (mounted && ev.target == 'OrderEvent') {
+        _loadOrders();
+      }
+    });
     _loadOrders();
   }
 
   @override
   void dispose() {
+    _rtSub?.cancel();
     _searchController.dispose();
     super.dispose();
   }
@@ -52,11 +65,16 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
         status: _selectedStatus,
         search: _searchController.text.trim(),
       );
+      Map<String, dynamic>? analyticsData;
+      try {
+        analyticsData = await _orderRepo.getAnalytics(days: 7);
+      } catch (_) {}
 
       if (!mounted) return;
       setState(() {
         _orders = (res['orders'] as List<OrderModel>?) ?? [];
         _topProducts = (res['topProducts'] as List<Map<String, dynamic>>?) ?? [];
+        _analytics = analyticsData ?? _analytics;
         _totalOrders = (res['totalOrders'] as num?)?.toInt() ?? _orders.length;
         _totalRevenue = (res['totalRevenue'] as num? ?? 0).toDouble();
         _isLoading = false;
@@ -252,9 +270,52 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
               ),
             ),
           ],
+          if (_analytics != null) RevenueAnalyticsPanel(analytics: _analytics!),
         ],
       ),
     );
+  }
+
+  Future<void> _exportCsvDialog() async {
+    try {
+      final csv = await _orderRepo.exportOrdersCsv(
+        fromDate: _selectedDateRange?.start,
+        toDate: _selectedDateRange?.end,
+        status: _selectedStatus,
+      );
+      if (!mounted) return;
+      final lineCount = csv.trim().split('\n').length;
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text('Xuất báo cáo CSV ($lineCount dòng)'),
+          content: SizedBox(
+            width: 520,
+            height: 260,
+            child: SingleChildScrollView(
+              child: SelectableText(csv, style: const TextStyle(fontFamily: 'Courier', fontSize: 11.5)),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Đóng')),
+            FilledButton.icon(
+              icon: const Icon(Icons.copy, size: 16),
+              label: const Text('Sao chép CSV'),
+              onPressed: () {
+                Clipboard.setData(ClipboardData(text: csv));
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Đã sao chép dữ liệu CSV vào Clipboard!')),
+                );
+              },
+            ),
+          ],
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$e'), backgroundColor: Colors.red));
+    }
   }
 
   Widget _buildFiltersBar() {
@@ -410,7 +471,8 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
           ],
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.refresh_rounded), onPressed: _loadOrders),
+          IconButton(icon: const Icon(Icons.download_outlined), tooltip: 'Xuất CSV (Excel)', onPressed: _exportCsvDialog),
+          IconButton(icon: const Icon(Icons.refresh_rounded), tooltip: 'Tải lại', onPressed: _loadOrders),
         ],
       ),
       body: RefreshIndicator(

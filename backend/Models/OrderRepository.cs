@@ -305,6 +305,12 @@ public class OrderRepository : BaseRepository
                 await context.SaveChangesAsync();
             }
 
+            var invRepo = new InventoryRepository(context);
+            await invRepo.DeductForOrderItemsAsync(
+                order.OrderId,
+                validatedItems.Items.Select(x => (x.Detail.ProductId, x.Detail.Quantity)),
+                authenticatedAccountId ?? dto.AccountId);
+
             await transaction.CommitAsync();
 
             var createdDto = await GetOrderByIdAsync(order.OrderId);
@@ -813,6 +819,13 @@ public class OrderRepository : BaseRepository
 
             context.Orders.Update(order);
             await context.SaveChangesAsync();
+
+            var invRepo = new InventoryRepository(context);
+            await invRepo.DeductForOrderItemsAsync(
+                order.OrderId,
+                validated.Items.Select(x => (x.Detail.ProductId, x.Detail.Quantity)),
+                order.AccountId);
+
             await tx.CommitAsync();
 
             return (true, $"Đã thêm thành công {validated.Items.Count} món vào đơn #{order.OrderCode}", await GetOrderByIdAsync(orderId));
@@ -877,6 +890,7 @@ public class OrderRepository : BaseRepository
             if (detail.CookingStatus == 4)
                 return (false, "Món ăn này đã được hủy trước đó rồi!", null);
 
+            int actualVoidQty = (voidQuantity <= 0 || voidQuantity >= detail.Quantity) ? detail.Quantity : voidQuantity;
             if (voidQuantity <= 0 || voidQuantity >= detail.Quantity)
             {
                 detail.CookingStatus = 4; // Canonical 4: Voided
@@ -907,6 +921,9 @@ public class OrderRepository : BaseRepository
             order.FinalAmount = Math.Max(0, activeTotal - order.DiscountAmount);
 
             await context.SaveChangesAsync();
+            var invRepo = new InventoryRepository(context);
+            await invRepo.RestoreForVoidAsync(orderId, detail.ProductId, actualVoidQty, order.AccountId);
+
             await tx.CommitAsync();
 
             return (true, "Đã hủy món thành công", await GetOrderByIdAsync(orderId));
@@ -923,5 +940,110 @@ public class OrderRepository : BaseRepository
         var detail = await context.OrderDetails.FindAsync(orderDetailId);
         if (detail == null) return (false, "Không tìm thấy món ăn", null);
         return await VoidOrderItemAsync(detail.OrderId, orderDetailId, reason, voidQuantity);
+    }
+
+    public async Task<object> GetAnalyticsAsync(int days = 7, DateTime? fromDate = null, DateTime? toDate = null)
+    {
+        int windowDays = Math.Clamp(days, 1, 90);
+        DateTime end = (toDate?.Date ?? DateTime.Today).AddDays(1);
+        DateTime start = fromDate?.Date ?? end.AddDays(-windowDays);
+
+        var orders = await context.Orders
+            .Where(o => o.CreatedAt >= start && o.CreatedAt < end)
+            .ToListAsync();
+
+        var paidOrders = orders.Where(o => o.PaymentStatus == 1 && o.Status != 4).ToList();
+        decimal totalRevenue = paidOrders.Sum(o => o.FinalAmount);
+        int totalOrders = orders.Count;
+        decimal avgOrderValue = paidOrders.Count > 0 ? Math.Round(totalRevenue / paidOrders.Count, 0) : 0;
+
+        var dailyRevenue = new List<object>();
+        for (var dt = start.Date; dt < end.Date; dt = dt.AddDays(1))
+        {
+            var dayOrders = paidOrders.Where(o => o.CreatedAt.Date == dt).ToList();
+            dailyRevenue.Add(new
+            {
+                date = dt.ToString("yyyy-MM-dd"),
+                label = dt.ToString("dd/MM"),
+                revenue = dayOrders.Sum(o => o.FinalAmount),
+                orders = dayOrders.Count
+            });
+        }
+
+        var hourlyRevenue = Enumerable.Range(0, 24)
+            .Select(h => new
+            {
+                hour = h,
+                label = $"{h:D2}h",
+                revenue = paidOrders.Where(o => o.CreatedAt.Hour == h).Sum(o => o.FinalAmount),
+                orders = paidOrders.Count(o => o.CreatedAt.Hour == h)
+            })
+            .Where(x => (int)x.orders > 0)
+            .ToList();
+
+        var payments = await context.Payments
+            .Where(p => p.Status == 1 && p.PaymentTime >= start && p.PaymentTime < end)
+            .ToListAsync();
+        decimal totalPaidAmt = payments.Sum(p => p.Amount);
+        var paymentBreakdown = payments
+            .GroupBy(p => p.PaymentMethod)
+            .Select(g => new
+            {
+                method = g.Key,
+                amount = g.Sum(x => x.Amount),
+                count = g.Count(),
+                percent = totalPaidAmt > 0 ? Math.Round(g.Sum(x => x.Amount) * 100m / totalPaidAmt, 1) : 0
+            })
+            .OrderByDescending(x => x.amount)
+            .ToList();
+
+        int voidedItemCount = await context.OrderDetails
+            .Join(context.Orders, d => d.OrderId, o => o.OrderId, (d, o) => new { d, o })
+            .CountAsync(x => x.d.CookingStatus == 4 && x.o.CreatedAt >= start && x.o.CreatedAt < end);
+
+        int lowStockCount = await context.Ingredients.CountAsync(i => i.IsActive && i.CurrentStock <= i.MinThreshold);
+        var topProducts = await GetTopSellingProductsAsync(start, end.AddSeconds(-1), 5);
+
+        return new
+        {
+            statusCode = 200,
+            success = true,
+            days = windowDays,
+            totalRevenue,
+            totalOrders,
+            paidOrders = paidOrders.Count,
+            avgOrderValue,
+            voidedItemCount,
+            lowStockCount,
+            dailyRevenue,
+            hourlyRevenue,
+            paymentBreakdown,
+            topProducts
+        };
+    }
+
+    public async Task<string> ExportOrdersCsvAsync(DateTime? fromDate = null, DateTime? toDate = null, int? status = null)
+    {
+        var orders = await GetOrdersAsync(status, fromDate, toDate, null);
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("OrderId,OrderCode,CreatedAt,TableName,CustomerName,OrderType,TotalAmount,DiscountAmount,FinalAmount,PaidAmount,Status,PaymentStatus");
+        foreach (var o in orders)
+        {
+            string CsvEsc(string? val) => $"\"{(val ?? "").Replace("\"", "\"\"")}\"";
+            sb.AppendLine(string.Join(",",
+                o.OrderId,
+                CsvEsc(o.OrderCode),
+                CsvEsc(o.CreatedAt.ToString("yyyy-MM-dd HH:mm:ss")),
+                CsvEsc(o.TableName ?? "Mang về"),
+                CsvEsc(o.CustomerName),
+                CsvEsc(o.OrderTypeText),
+                o.TotalAmount,
+                o.DiscountAmount,
+                o.FinalAmount,
+                o.PaidAmount,
+                CsvEsc(o.StatusText),
+                CsvEsc(o.PaymentStatusText)));
+        }
+        return sb.ToString();
     }
 }

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/category.dart';
@@ -8,6 +9,7 @@ import '../../repositories/category_repository.dart';
 import '../../repositories/order_repository.dart';
 import '../../repositories/product_repository.dart';
 import '../../repositories/table_repository.dart';
+import '../../services/realtime_service.dart';
 import '../../services/receipt_printer_service.dart';
 import '../../widgets/skeleton_loading.dart';
 
@@ -42,11 +44,26 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
   double _discountAmount = 0.0;
   double _discountPercent = 0.0;
   double _alreadyPaidAmount = 0.0;
+  StreamSubscription<PosRealtimeEvent>? _rtSub;
 
   @override
   void initState() {
     super.initState();
+    PosRealtimeService.instance.ensureStarted();
+    _rtSub = PosRealtimeService.instance.events.listen((ev) {
+      if (mounted && (ev.target == 'OrderEvent' || ev.target == 'TableUpdated')) {
+        if (_selectedTable != null) {
+          _fetchTableOrder(_selectedTable!.id);
+        }
+      }
+    });
     _loadInitialData();
+  }
+
+  @override
+  void dispose() {
+    _rtSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _loadInitialData() async {
@@ -386,6 +403,131 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
       await _fetchTableOrder(_selectedTable!.id);
     }
     return newId;
+  }
+
+  Future<void> _showMergeTableModal() async {
+    final current = _selectedTable;
+    if (current == null || _activeOrder == null) return;
+    final candidates = _tables.where((t) => t.id != current.id && t.status == 1).toList();
+    if (candidates.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Không có bàn có khách khác để gộp vào bàn này')),
+      );
+      return;
+    }
+    DiningTable selected = candidates.first;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: Text('Gộp bàn sang ${current.name}'),
+          content: DropdownButtonFormField<int>(
+            initialValue: selected.id,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Chọn bàn nguồn cần gộp vào', border: OutlineInputBorder()),
+            items: candidates.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
+            onChanged: (v) {
+              if (v != null) setS(() => selected = candidates.firstWhere((t) => t.id == v));
+            },
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Hủy')),
+            FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Xác nhận gộp')),
+          ],
+        ),
+      ),
+    );
+    if (ok == true) {
+      final res = await TableRepository.mergeTables(selected.id, current.id);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message']?.toString() ?? 'Đã gộp bàn'),
+          backgroundColor: res['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+        ),
+      );
+      await _loadInitialData();
+    }
+  }
+
+  Future<void> _showSplitTableModal() async {
+    final current = _selectedTable;
+    if (current == null || _activeOrder == null) return;
+    final existingItems = _billItems.where((i) => i['isExisting'] == true && (i['orderDetailId'] as int? ?? 0) > 0).toList();
+    final freeTables = _tables.where((t) => t.id != current.id && t.status == 0).toList();
+    if (existingItems.isEmpty || freeTables.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cần ít nhất 1 món đã gửi bếp và 1 bàn trống để tách bàn')),
+      );
+      return;
+    }
+    DiningTable target = freeTables.first;
+    final selectedIds = <int>{};
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: Text('Tách món từ ${current.name}'),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<int>(
+                  initialValue: target.id,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Bàn đích (đang trống)', border: OutlineInputBorder()),
+                  items: freeTables.map((t) => DropdownMenuItem(value: t.id, child: Text(t.name))).toList(),
+                  onChanged: (v) {
+                    if (v != null) setS(() => target = freeTables.firstWhere((t) => t.id == v));
+                  },
+                ),
+                const SizedBox(height: 10),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 220),
+                  child: ListView(
+                    shrinkWrap: true,
+                    children: existingItems.map((it) {
+                      final did = it['orderDetailId'] as int;
+                      return CheckboxListTile(
+                        dense: true,
+                        value: selectedIds.contains(did),
+                        title: Text('${it['name']} (x${it['quantity']})'),
+                        onChanged: (v) => setS(() {
+                          if (v == true) {
+                            selectedIds.add(did);
+                          } else {
+                            selectedIds.remove(did);
+                          }
+                        }),
+                      );
+                    }).toList(),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Hủy')),
+            FilledButton(
+              onPressed: selectedIds.isEmpty ? null : () => Navigator.pop(ctx, true),
+              child: const Text('Tách sang bàn mới'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok == true && selectedIds.isNotEmpty) {
+      final res = await TableRepository.splitTable(current.id, target.id, selectedIds.toList());
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(res['message']?.toString() ?? 'Đã tách món'),
+          backgroundColor: res['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+        ),
+      );
+      await _loadInitialData();
+    }
   }
 
   Future<void> _showSplitPaymentModal() async {
@@ -875,15 +1017,38 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             color: const Color(0xFF0F172A),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Flexible(
+                Expanded(
                   child: Text(
                     'HÓA ĐƠN: ${_selectedTable?.name ?? "Mang về"}',
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                if (_selectedTable != null && _activeOrder != null) ...[
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFFC084FC),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: _showMergeTableModal,
+                    child: const Text('Gộp bàn', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 4),
+                  TextButton(
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF38BDF8),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: _showSplitTableModal,
+                    child: const Text('Tách món', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                  const SizedBox(width: 6),
+                ],
                 Text('${_billItems.length} món', style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
               ],
             ),

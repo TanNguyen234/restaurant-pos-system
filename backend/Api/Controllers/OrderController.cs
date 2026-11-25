@@ -1,7 +1,10 @@
+using System.Collections.Concurrent;
 using System.Security.Claims;
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
+using WebApi.Services;
 
 namespace WebApi.Api.Controllers;
 
@@ -9,6 +12,13 @@ namespace WebApi.Api.Controllers;
 [Route("api/[controller]")]
 public class OrderController : BaseController
 {
+    private readonly PosRealtimeNotifier _realtime;
+    private static readonly ConcurrentDictionary<string, Queue<DateTime>> _qrRateLimits = new();
+
+    public OrderController(PosRealtimeNotifier realtime)
+    {
+        _realtime = realtime;
+    }
     private int? GetCallerAccountId()
     {
         var claim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
@@ -31,6 +41,13 @@ public class OrderController : BaseController
         if (!result.Success)
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message, error = result.Message });
+        }
+
+        await _realtime.NotifyOrderChangedAsync("OrderCreated", result.Order);
+        await _realtime.NotifyKdsChangedAsync(new { orderId = result.Order?.OrderId });
+        if (result.Order?.TableId != null)
+        {
+            await _realtime.NotifyTableChangedAsync(new { tableId = result.Order.TableId });
         }
 
         return Ok(new
@@ -185,6 +202,9 @@ public class OrderController : BaseController
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
 
+        await _realtime.NotifyOrderChangedAsync("OrderUpdated", result.Order);
+        await _realtime.NotifyKdsChangedAsync(new { orderId = id });
+
         return Ok(new
         {
             statusCode = 200,
@@ -210,11 +230,116 @@ public class OrderController : BaseController
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
 
+        await _realtime.NotifyOrderChangedAsync("OrderVoided", result.Order);
+        await _realtime.NotifyKdsChangedAsync(new { orderId = id });
+
         return Ok(new
         {
             statusCode = 200,
             success = true,
             message = result.Message,
+            data = result.Order
+        });
+    }
+
+    [HttpGet("analytics")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
+    public async Task<IActionResult> GetAnalytics(
+        [FromQuery] int days = 7,
+        [FromQuery] DateTime? fromDate = null,
+        [FromQuery] DateTime? toDate = null)
+    {
+        var analytics = await Provider.Order.GetAnalyticsAsync(days, fromDate, toDate);
+        return Ok(analytics);
+    }
+
+    [HttpGet("export-csv")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
+    public async Task<IActionResult> ExportCsv(
+        [FromQuery] DateTime? fromDate = null,
+        [FromQuery] DateTime? toDate = null,
+        [FromQuery] int? status = null)
+    {
+        var csv = await Provider.Order.ExportOrdersCsvAsync(fromDate, toDate, status);
+        var bom = new byte[] { 0xEF, 0xBB, 0xBF };
+        var body = Encoding.UTF8.GetBytes(csv);
+        var bytes = new byte[bom.Length + body.Length];
+        Buffer.BlockCopy(bom, 0, bytes, 0, bom.Length);
+        Buffer.BlockCopy(body, 0, bytes, bom.Length, body.Length);
+        return File(bytes, "text/csv; charset=utf-8", $"orders_report_{DateTime.Now:yyyyMMdd_HHmm}.csv");
+    }
+
+    [HttpPost("qr-self-order")]
+    [AllowAnonymous]
+    public async Task<IActionResult> CreateQrSelfOrder([FromBody] CreateOrderDto dto)
+    {
+        if (dto == null || !dto.TableId.HasValue || dto.TableId.Value <= 0)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = "Thiếu mã bàn QR hợp lệ" });
+        }
+        if (dto.Items == null || dto.Items.Count == 0)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = "Vui lòng chọn ít nhất 1 món để gọi tại bàn" });
+        }
+
+        string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+        string rateKey = $"{clientIp}:T{dto.TableId.Value}";
+        var q = _qrRateLimits.GetOrAdd(rateKey, _ => new Queue<DateTime>());
+        lock (q)
+        {
+            var cutoff = DateTime.UtcNow.AddMinutes(-1);
+            while (q.Count > 0 && q.Peek() < cutoff) q.Dequeue();
+            if (q.Count >= 8)
+            {
+                return StatusCode(429, new { statusCode = 429, success = false, message = "Bạn gửi đơn QR quá nhanh, vui lòng đợi 1 phút." });
+            }
+            q.Enqueue(DateTime.UtcNow);
+        }
+
+        var table = Provider.Table.GetById(dto.TableId.Value);
+        if (table == null)
+        {
+            return NotFound(new { statusCode = 404, success = false, message = $"Không tìm thấy bàn #{dto.TableId.Value}" });
+        }
+
+        var activeOrder = await Provider.Order.GetActiveOrderByTableIdAsync(table.TableId);
+        (bool Success, string Message, OrderDto? Order) result;
+        if (activeOrder != null)
+        {
+            result = await Provider.Order.AddItemsToOrderAsync(activeOrder.OrderId, dto.Items);
+        }
+        else
+        {
+            dto.OrderType = 1;
+            dto.CustomerName = string.IsNullOrWhiteSpace(dto.CustomerName)
+                ? $"Khách QR - {table.TableName}"
+                : dto.CustomerName.Trim();
+            dto.Note = string.IsNullOrWhiteSpace(dto.Note)
+                ? "[QR Self-Order]"
+                : $"[QR Self-Order] {dto.Note.Trim()}";
+            result = await Provider.Order.CreateOrderAsync(dto, GetCallerAccountId());
+        }
+
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        await _realtime.NotifyOrderChangedAsync("QrSelfOrder", result.Order);
+        await _realtime.NotifyKdsChangedAsync(new { orderId = result.Order?.OrderId, tableId = table.TableId });
+        await _realtime.NotifyTableChangedAsync(new { tableId = table.TableId });
+
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = $"Đã gửi đơn QR cho {table.TableName} xuống Bếp KDS!",
+            orderId = result.Order?.OrderId,
+            orderCode = result.Order?.OrderCode,
+            totalAmount = result.Order?.TotalAmount,
+            discountAmount = result.Order?.DiscountAmount,
+            finalAmount = result.Order?.FinalAmount,
+            tableId = table.TableId,
             data = result.Order
         });
     }
