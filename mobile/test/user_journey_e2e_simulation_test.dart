@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:restaurant_pos_app/main.dart';
 import 'package:restaurant_pos_app/models/user.dart';
+import 'package:restaurant_pos_app/services/realtime_service.dart';
 import 'package:restaurant_pos_app/services/session_manager.dart';
 import 'package:restaurant_pos_app/utils/database_helper.dart';
 import 'package:restaurant_pos_app/views/admin/admin_category_page.dart';
@@ -469,6 +470,7 @@ void main() {
 
   setUpAll(() async {
     await _loadTestFonts();
+    PosRealtimeService.isTestingMode = true;
     DatabaseHelper.isTestingMode = true;
     HttpOverrides.global = _E2ETestHttpOverrides();
   });

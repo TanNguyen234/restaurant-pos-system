@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:restaurant_pos_app/repositories/table_repository.dart';
+import 'package:restaurant_pos_app/services/realtime_service.dart';
 import 'package:restaurant_pos_app/utils/database_helper.dart';
 import 'package:restaurant_pos_app/views/table/floor_table_page.dart';
 
@@ -189,11 +190,14 @@ class ChallengeFakeHttpClientResponse extends Fake implements HttpClientResponse
 
 void main() {
   setUp(() {
+    PosRealtimeService.isTestingMode = true;
     DatabaseHelper.setDatabaseForTesting(ChallengeFakeDatabase());
     TableRepository.timeoutDuration = const Duration(milliseconds: 200);
   });
 
   tearDown(() {
+    PosRealtimeService.instance.dispose();
+    PosRealtimeService.isTestingMode = false;
     DatabaseHelper.setDatabaseForTesting(null);
     HttpOverrides.global = null;
   });

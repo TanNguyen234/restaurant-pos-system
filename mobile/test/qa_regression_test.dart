@@ -1,8 +1,12 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:restaurant_pos_app/models/order.dart';
 import 'package:restaurant_pos_app/models/user.dart';
 import 'package:restaurant_pos_app/repositories/order_repository.dart';
+import 'package:restaurant_pos_app/services/escpos_printer_service.dart';
+import 'package:restaurant_pos_app/services/qr_table_session.dart';
+import 'package:restaurant_pos_app/services/realtime_service.dart';
 import 'package:restaurant_pos_app/services/session_manager.dart';
 import 'package:restaurant_pos_app/utils/database_helper.dart';
 
@@ -17,6 +21,7 @@ UserAccount _userWithRole(String role) => UserAccount(
 
 void main() {
   setUp(() async {
+    PosRealtimeService.isTestingMode = true;
     DatabaseHelper.isTestingMode = true;
     await DatabaseHelper().clearCart();
     await SessionManager.instance.logout();
@@ -192,6 +197,57 @@ void main() {
       expect(key1.length, greaterThanOrEqualTo(32));
       expect(key2.length, greaterThanOrEqualTo(32));
       expect(key1, isNot(equals(key2)));
+    });
+  });
+
+  group('Upgrades 1-6 regression tests', () {
+    test('EscPosPrinterService builds 58mm/80mm binary ESC/POS buffer with Vietnamese folding & cut', () {
+      final order = {
+        'orderCode': 'ORD-20261125-001',
+        'tableName': 'Bàn T1-02',
+        'customerName': 'Bùi Vĩnh Khang',
+        'totalAmount': 80000,
+        'discountAmount': 8000,
+        'finalAmount': 72000,
+        'details': [
+          {'quantity': 2, 'productName': 'Cà phê sữa đá', 'subTotal': 58000, 'cookingStatus': 1},
+          {'quantity': 1, 'productName': 'Món hủy', 'subTotal': 22000, 'cookingStatus': 4},
+        ],
+      };
+
+      final bytes80 = EscPosPrinterService.buildReceiptBytes(order, paperWidthMm: 80);
+      final bytes58 = EscPosPrinterService.buildReceiptBytes(order, paperWidthMm: 58, isPreCheck: true);
+
+      // Starts with ESC @ (0x1B, 0x40) and ends with GS V B 0 (0x1D, 0x56, 0x42, 0x00)
+      expect(bytes80.sublist(0, 2), equals([0x1B, 0x40]));
+      expect(bytes80.sublist(bytes80.length - 4), equals([0x1D, 0x56, 0x42, 0x00]));
+      expect(bytes58.sublist(0, 2), equals([0x1B, 0x40]));
+
+      final decoded80 = ascii.decode(bytes80, allowInvalid: true);
+      expect(decoded80, contains('Ca phe sua da'));
+      expect(decoded80, isNot(contains('Mon huy')));
+      expect(ascii.decode(bytes58, allowInvalid: true), contains('PHIEU TAM TINH'));
+    });
+
+    test('QrTableSession parses ?tableId= from both query string and hash fragment', () {
+      expect(QrTableSession.parseTableIdFromUri(Uri.parse('http://localhost:8088/?tableId=4')), 4);
+      expect(QrTableSession.parseTableIdFromUri(Uri.parse('http://localhost:8088/#/?tableId=9')), 9);
+      expect(QrTableSession.parseTableIdFromUri(Uri.parse('http://localhost:8088/')), isNull);
+      expect(QrTableSession.parseTableIdFromUri(Uri.parse('http://localhost:8088/?tableId=-1')), isNull);
+    });
+
+    test('PosRealtimeService parses multi-frame SignalR Hub JSON payloads', () {
+      const sep = '\u001e';
+      const raw =
+          '{"type":1,"target":"OrderEvent","arguments":[{"eventType":"OrderCreated","orderId":55}]}$sep'
+          '{"type":6}$sep'
+          '{"type":1,"target":"KdsUpdated","arguments":[{"orderDetailId":12}]}$sep';
+
+      final events = PosRealtimeService.parseFrames(raw);
+      expect(events.length, 2);
+      expect(events[0].target, 'OrderEvent');
+      expect((events[0].payload as Map)['eventType'], 'OrderCreated');
+      expect(events[1].target, 'KdsUpdated');
     });
   });
 }

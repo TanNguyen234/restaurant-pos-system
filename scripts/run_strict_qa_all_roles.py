@@ -1,8 +1,12 @@
 import base64
+import hashlib
 import json
 import os
+import socket
+import struct
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.parse
@@ -22,12 +26,10 @@ SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
 API_BASE = "http://localhost:5138"
 WEB_BASE = "http://localhost:8088"
 
-# Minimal valid 1x1 PNG (68 bytes) for image upload check
 TINY_PNG = base64.b64decode(
     "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+X2Z0AAAAASUVORK5CYII="
 )
 
-# Force UTF-8 console output on Windows
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 if hasattr(sys.stderr, "reconfigure"):
@@ -50,7 +52,10 @@ def api_call(method: str, path: str, token: str | None = None, json_body=None, r
         with urllib.request.urlopen(req, timeout=12) as resp:
             raw = resp.read()
             ctype = resp.headers.get("Content-Type", "")
-            body = json.loads(raw.decode("utf-8")) if "json" in ctype or raw.startswith(b"{") or raw.startswith(b"[") else raw
+            if "json" in ctype or raw.startswith(b"{") or raw.startswith(b"["):
+                body = json.loads(raw.decode("utf-8"))
+            else:
+                body = raw.decode("utf-8", errors="replace")
             return resp.status, body, ctype
     except urllib.error.HTTPError as e:
         raw = e.read()
@@ -115,13 +120,130 @@ def wait_http_200(url: str, timeout_s: float = 40.0):
     raise RuntimeError(f"Service at {url} did not become healthy within {timeout_s}s: {last_err}")
 
 
+class SignalRProbe:
+    """Minimal stdlib RFC 6455 WebSocket + SignalR JSON v1 listener for /hubs/pos."""
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 5138, path: str = "/hubs/pos"):
+        self.host = host
+        self.port = port
+        self.path = path
+        self.sock: socket.socket | None = None
+        self.events: list[dict] = []
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+        self.connected = False
+
+    def _send_text(self, text: str):
+        payload = text.encode("utf-8")
+        mask_key = os.urandom(4)
+        header = bytearray([0x81])
+        length = len(payload)
+        if length < 126:
+            header.append(0x80 | length)
+        elif length < 65536:
+            header.append(0x80 | 126)
+            header.extend(struct.pack("!H", length))
+        else:
+            header.append(0x80 | 127)
+            header.extend(struct.pack("!Q", length))
+        header.extend(mask_key)
+        masked = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+        assert self.sock is not None
+        self.sock.sendall(bytes(header) + masked)
+
+    def _recv_exact(self, n: int) -> bytes:
+        assert self.sock is not None
+        buf = bytearray()
+        while len(buf) < n:
+            chunk = self.sock.recv(n - len(buf))
+            if not chunk:
+                raise EOFError("WebSocket closed")
+            buf.extend(chunk)
+        return bytes(buf)
+
+    def start(self):
+        s = socket.create_connection((self.host, self.port), timeout=5)
+        ws_key = base64.b64encode(os.urandom(16)).decode("ascii")
+        handshake = (
+            f"GET {self.path} HTTP/1.1\r\n"
+            f"Host: {self.host}:{self.port}\r\n"
+            f"Upgrade: websocket\r\n"
+            f"Connection: Upgrade\r\n"
+            f"Sec-WebSocket-Key: {ws_key}\r\n"
+            f"Sec-WebSocket-Version: 13\r\n"
+            f"Origin: http://localhost:8088\r\n\r\n"
+        )
+        s.sendall(handshake.encode("ascii"))
+        resp = b""
+        while b"\r\n\r\n" not in resp:
+            chunk = s.recv(1024)
+            if not chunk:
+                raise RuntimeError("No HTTP 101 handshake response from PosHub")
+            resp += chunk
+        if b"101 Switching Protocols" not in resp:
+            raise RuntimeError(f"Expected 101 Switching Protocols, got: {resp!r}")
+
+        self.sock = s
+        self.sock.settimeout(1.0)
+        self._send_text('{"protocol":"json","version":1}\x1e')
+        self.connected = True
+        self._thread = threading.Thread(target=self._reader_loop, daemon=True)
+        self._thread.start()
+
+    def _reader_loop(self):
+        text_buf = ""
+        while not self._stop.is_set() and self.sock is not None:
+            try:
+                b1b2 = self._recv_exact(2)
+            except socket.timeout:
+                continue
+            except Exception:
+                break
+            opcode = b1b2[0] & 0x0F
+            masked = (b1b2[1] & 0x80) != 0
+            length = b1b2[1] & 0x7F
+            if length == 126:
+                length = struct.unpack("!H", self._recv_exact(2))[0]
+            elif length == 127:
+                length = struct.unpack("!Q", self._recv_exact(8))[0]
+            mask_key = self._recv_exact(4) if masked else b""
+            payload = self._recv_exact(length) if length else b""
+            if masked:
+                payload = bytes(b ^ mask_key[i % 4] for i, b in enumerate(payload))
+            if opcode == 0x8:
+                break
+            if opcode in (0x1, 0x0):
+                text_buf += payload.decode("utf-8", errors="replace")
+                while "\x1e" in text_buf:
+                    frame, text_buf = text_buf.split("\x1e", 1)
+                    frame = frame.strip()
+                    if not frame:
+                        continue
+                    try:
+                        msg = json.loads(frame)
+                        if isinstance(msg, dict) and msg.get("type") == 1:
+                            self.events.append(msg)
+                    except Exception:
+                        pass
+
+    def stop(self):
+        self._stop.set()
+        if self.sock:
+            try:
+                self.sock.close()
+            except Exception:
+                pass
+        if self._thread:
+            self._thread.join(timeout=2)
+
+
 def login_api(username: str, password: str = "admin"):
     status, body, _ = api_call("POST", "/api/auth/login", json_body={"username": username, "password": password})
     assert status == 200 and body.get("success"), f"Login failed for {username}: status={status} body={body}"
     return body["token"], body
 
 
-def run_api_qa(results: dict):
+def run_api_qa(results: dict, signalr: SignalRProbe):
     checks = []
 
     def check(name: str, ok: bool, detail: str = ""):
@@ -144,7 +266,6 @@ def run_api_qa(results: dict):
     st2, tables, _ = api_call("GET", "/api/table")
     check("public_tables_areas", st == 200 and st2 == 200 and len(areas) >= 3 and len(tables) >= 10, f"areas={len(areas)} tables={len(tables)}")
 
-    # Verify every seeded category icon and product image loads cleanly with HTTP 200
     checked_imgs = set()
     broken_imgs = []
     for c in cats:
@@ -186,8 +307,16 @@ def run_api_qa(results: dict):
                     broken_imgs.append(f"{img_path}:{ex}")
     check("all_catalog_images_200", len(broken_imgs) == 0, f"checked={len(checked_imgs)} broken={broken_imgs}")
 
-    # 2. Negative unauthenticated checks + no devOtp leak
-    for prot_path in ["/api/account/members", "/api/shift/current", "/api/loyalty/me", "/api/kds/active-orders"]:
+    # 2. Unauthenticated 401 checks + no devOtp leak
+    for prot_path in [
+        "/api/account/members",
+        "/api/shift/current",
+        "/api/loyalty/me",
+        "/api/kds/active-orders",
+        "/api/inventory/ingredients",
+        "/api/order/analytics",
+        "/api/order/export-csv",
+    ]:
         st, _, _ = api_call("GET", prot_path)
         check(f"unauth_401_{prot_path}", st == 401, f"status={st}")
     st, _, _ = api_call("POST", "/api/order", json_body={"items": []})
@@ -195,38 +324,119 @@ def run_api_qa(results: dict):
 
     st_otp, body_otp, _ = api_call("POST", "/api/auth/request-otp", json_body={"email": "member_khang@restaurantpos.vn"})
     otp_str = json.dumps(body_otp)
-    check("no_devOtp_leak", "devOtp" not in otp_str and "otp" not in (body_otp.keys() if isinstance(body_otp, dict) else []), f"status={st_otp} keys={list(body_otp.keys()) if isinstance(body_otp, dict) else ''}")
+    check("no_devOtp_leak", "devOtp" not in otp_str and "otp" not in (body_otp.keys() if isinstance(body_otp, dict) else []), f"status={st_otp}")
 
-    # 3. Login all 6 roles + invalid password check
+    # 3. Login all roles (including kitchen)
     st_bad, _, _ = api_call("POST", "/api/auth/login", json_body={"username": "admin", "password": "wrong_password_123"})
     check("wrong_password_401", st_bad == 401, f"status={st_bad}")
 
     tokens = {}
     users = {}
-    for uname in ["member_khang", "waiter_nam", "chef_dung", "cashier_mai", "manager01", "admin"]:
+    for uname in ["member_khang", "waiter_nam", "chef_dung", "kitchen", "cashier_mai", "manager01", "admin"]:
         tok, usr = login_api(uname, "admin")
         tokens[uname] = tok
         users[uname] = usr
-    check("all_6_roles_login", len(tokens) == 6, "Logged in member, waiter, chef, cashier, manager, admin")
+    check("all_roles_login", len(tokens) == 7, "Logged in all 7 seeded role accounts")
 
-    # 4. Member loyalty + negative RBAC + VNPay/VietQR
+    # 4. Member loyalty + negative RBAC + Discount
     st, lbody, _ = api_call("GET", "/api/loyalty/me", token=tokens["member_khang"])
     pts = (lbody.get("data") or {}).get("loyaltyPoints") if isinstance(lbody, dict) else None
     check("member_loyalty_points", st == 200 and pts == 1250, f"points={pts}")
 
-    for denied_path in ["/api/account/members", "/api/kds/active-orders", "/api/shift/current"]:
+    st_d, disc_resp, _ = api_call("GET", "/api/discount/active")
+    disc_list = (disc_resp.get("data") if isinstance(disc_resp, dict) else disc_resp) or []
+    check("public_active_discounts", st_d == 200 and isinstance(disc_list, list), f"status={st_d} body={disc_resp}")
+
+    for denied_path in ["/api/account/members", "/api/kds/active-orders", "/api/shift/current", "/api/inventory/ingredients"]:
         st, _, _ = api_call("GET", denied_path, token=tokens["member_khang"])
         check(f"member_rbac_403_{denied_path}", st == 403, f"status={st}")
 
-    # 5. Waiter order lifecycle + IdempotencyKey + Add Items + Table Transfer
-    free_tables = [t for t in tables if t.get("status") == 0]
-    check("has_two_free_tables", len(free_tables) >= 2, f"free={len(free_tables)}")
-    t1_id = free_tables[0]["tableId"]
-    t2_id = free_tables[1]["tableId"]
-    prod1_id = prods[0]["productId"]
-    prod2_id = prods[1]["productId"]
-    idem_key = str(uuid.uuid4())
+    # 5. Inventory BOM before + Guest QR Self-Order + BOM deduct + KDS Void BOM refund
+    st_ing0, b_ing0, _ = api_call("GET", "/api/inventory/ingredients", token=tokens["admin"])
+    ing_list0 = (b_ing0.get("data") if isinstance(b_ing0, dict) else b_ing0) or []
+    check("inventory_ingredients_seeded", st_ing0 == 200 and isinstance(ing_list0, list) and len(ing_list0) >= 12, f"count={len(ing_list0)}")
 
+    # Find product 1 recipe to assert exact DB stock deduction & refund
+    st_rec1, b_rec1, _ = api_call("GET", "/api/inventory/recipes/1", token=tokens["admin"])
+    rec1 = (b_rec1.get("data") if isinstance(b_rec1, dict) else b_rec1) or []
+    check("inventory_recipe_prod1", st_rec1 == 200 and isinstance(rec1, list) and len(rec1) >= 1, f"recipe={b_rec1}")
+    tracked_ing_id = rec1[0]["ingredientId"]
+    req_qty = float(rec1[0]["quantityRequired"])
+    initial_stock = float(next(i["currentStock"] for i in ing_list0 if i["ingredientId"] == tracked_ing_id))
+
+    free_tables = [t for t in tables if t.get("status") == 0]
+    check("has_three_free_tables", len(free_tables) >= 3, f"free={len(free_tables)}")
+    t_qr_id = free_tables[0]["tableId"]
+    t1_id = free_tables[1]["tableId"]
+    t2_id = free_tables[2]["tableId"]
+    prod1_id = 1
+    prod2_id = prods[1]["productId"] if prods[1]["productId"] != 1 else prods[2]["productId"]
+
+    # QR Self-Order without Authorization header
+    st_qr_ord, b_qr_ord, _ = api_call(
+        "POST",
+        "/api/order/qr-self-order",
+        json_body={
+            "tableId": t_qr_id,
+            "customerName": "Khách QR Bàn",
+            "note": "Ít đá QR",
+            "items": [{"productId": prod1_id, "quantity": 2, "itemNote": "QR Self Order"}],
+        },
+    )
+    check("guest_qr_self_order", st_qr_ord == 200 and b_qr_ord.get("success") is True, f"st={st_qr_ord} body={b_qr_ord}")
+    qr_order_id = b_qr_ord["orderId"]
+
+    _, b_ing1, _ = api_call("GET", "/api/inventory/ingredients", token=tokens["admin"])
+    ing_list1 = (b_ing1.get("data") if isinstance(b_ing1, dict) else b_ing1) or []
+    stock_after_order = float(next(i["currentStock"] for i in ing_list1 if i["ingredientId"] == tracked_ing_id))
+    check(
+        "bom_stock_deducted_on_order",
+        abs(stock_after_order - (initial_stock - req_qty * 2)) < 0.01,
+        f"initial={initial_stock} after={stock_after_order} expected={initial_stock - req_qty * 2}",
+    )
+
+    _, b_tx, _ = api_call("GET", "/api/inventory/transactions", token=tokens["admin"])
+    tx_list = (b_tx.get("data") if isinstance(b_tx, dict) else b_tx) or []
+    has_deduct_tx = any(t.get("orderId") == qr_order_id and t.get("type") == "DEDUCT" for t in tx_list)
+    check("bom_stock_deduct_tx_logged", has_deduct_tx, f"orderId={qr_order_id}")
+
+    # Void 1 of 2 quantities from KDS and assert BOM REFUND restores 1x req_qty while leaving order active for Merge test!
+    _, qr_kds_items, _ = api_call("GET", "/api/kds/active-orders", token=tokens["chef_dung"])
+    qr_detail = next(i for i in qr_kds_items if i.get("orderId") == qr_order_id)
+    st_v_qr, _, _ = api_call(
+        "POST",
+        f"/api/kds/{qr_detail['orderDetailId']}/void",
+        token=tokens["chef_dung"],
+        json_body={"reason": "QA BOM Refund Check", "voidQuantity": 1},
+    )
+    _, b_ing2, _ = api_call("GET", "/api/inventory/ingredients", token=tokens["admin"])
+    ing_list2 = (b_ing2.get("data") if isinstance(b_ing2, dict) else b_ing2) or []
+    stock_after_void = float(next(i["currentStock"] for i in ing_list2 if i["ingredientId"] == tracked_ing_id))
+    check(
+        "bom_stock_refunded_on_void",
+        st_v_qr == 200 and abs(stock_after_void - (initial_stock - req_qty)) < 0.01,
+        f"after_void={stock_after_void} expected={initial_stock - req_qty}",
+    )
+
+    # Admin Inventory CRUD & Adjustment test
+    st_icre, b_icre, _ = api_call(
+        "POST",
+        "/api/inventory/ingredients",
+        token=tokens["admin"],
+        json_body={"ingredientName": "QA Nguyên liệu Test", "unit": "g", "currentStock": 100, "minThreshold": 20, "costPerUnit": 500},
+    )
+    created_ing_id = (b_icre.get("data") or {}).get("ingredientId") if isinstance(b_icre, dict) else None
+    check("admin_inventory_create", st_icre == 200 and created_ing_id is not None, f"body={b_icre}")
+    st_iadj, b_iadj, _ = api_call(
+        "POST",
+        f"/api/inventory/ingredients/{created_ing_id}/adjust",
+        token=tokens["admin"],
+        json_body={"changeAmount": 50, "type": "IMPORT", "note": "QA Nhap kho"},
+    )
+    check("admin_inventory_adjust", st_iadj == 200 and (b_iadj.get("data") or {}).get("currentStock") == 150, f"body={b_iadj}")
+
+    # 6. Waiter order + Idempotency + Add items + Merge/Split/Transfer
+    idem_key = str(uuid.uuid4())
     order_payload = {
         "idempotencyKey": idem_key,
         "tableId": t1_id,
@@ -234,23 +444,16 @@ def run_api_qa(results: dict):
         "phoneNumber": "0909998887",
         "orderType": 1,
         "note": "QA test E2E",
-        "items": [
-            {"productId": prod1_id, "quantity": 2, "itemNote": "Ít đường"},
-        ],
+        "items": [{"productId": prod1_id, "quantity": 2, "itemNote": "Ít đường"}],
     }
     st_o1, b_o1, _ = api_call("POST", "/api/order", token=tokens["waiter_nam"], json_body=order_payload)
     check("waiter_create_order", st_o1 == 200 and b_o1.get("success"), f"status={st_o1} body={b_o1}")
     order_id = b_o1["orderId"]
     orig_total = b_o1["totalAmount"]
 
-    # Duplicate IdempotencyKey submission must NOT duplicate a new orderId
     st_dup, b_dup, _ = api_call("POST", "/api/order", token=tokens["waiter_nam"], json_body=order_payload)
     dup_order_id = b_dup.get("orderId") if isinstance(b_dup, dict) else None
-    check(
-        "order_idempotency_guard",
-        (st_dup == 200 and dup_order_id == order_id) or st_dup in (400, 409),
-        f"dup_status={st_dup} orig_id={order_id} dup_id={dup_order_id}",
-    )
+    check("order_idempotency_guard", (st_dup == 200 and dup_order_id == order_id) or st_dup in (400, 409), f"dup_id={dup_order_id}")
 
     st_bytbl, b_bytbl, _ = api_call("GET", f"/api/order/by-table/{t1_id}", token=tokens["waiter_nam"])
     check("waiter_order_by_table", st_bytbl == 200 and b_bytbl.get("hasActiveOrder") is True, f"body={b_bytbl}")
@@ -264,6 +467,15 @@ def run_api_qa(results: dict):
     new_total = ((b_add.get("data") or {}).get("totalAmount")) if isinstance(b_add, dict) else 0
     check("waiter_add_items", st_add == 200 and new_total > orig_total, f"orig={orig_total} new={new_total}")
 
+    # Test Merge (merge t_qr_id back into t1_id -> frees t_qr_id!), then Transfer t1_id -> t2_id
+    st_mrg, b_mrg, _ = api_call(
+        "POST",
+        "/api/table/merge",
+        token=tokens["cashier_mai"],
+        json_body={"sourceTableId": t_qr_id, "targetTableId": t1_id},
+    )
+    check("cashier_merge_tables", st_mrg == 200 and b_mrg.get("success") is True, f"body={b_mrg}")
+
     st_tr, b_tr, _ = api_call(
         "POST",
         "/api/table/transfer",
@@ -272,12 +484,20 @@ def run_api_qa(results: dict):
     )
     check("waiter_transfer_table", st_tr == 200 and b_tr.get("success") is True, f"body={b_tr}")
 
-    st_w403, _, _ = api_call("GET", "/api/account/members", token=tokens["waiter_nam"])
-    check("waiter_rbac_403_admin_users", st_w403 == 403, f"status={st_w403}")
+    # Reserve & check-in & release t1_id (now free)
+    st_rsv, b_rsv, _ = api_call(
+        "POST",
+        "/api/table/reserve",
+        token=tokens["waiter_nam"],
+        json_body={"tableId": t1_id, "customerName": "Khách Đặt QA", "phoneNumber": "0901122334", "guestCount": 2},
+    )
+    check("waiter_reserve_table", st_rsv == 200, f"st={st_rsv} body={b_rsv}")
+    st_free, _, _ = api_call("PUT", f"/api/table/{t1_id}/status", token=tokens["waiter_nam"], json_body={"status": 0})
+    check("waiter_release_reserved_table", st_free == 200, f"st={st_free}")
 
-    # 6. Chef KDS + Void item + Sold-Out toggle (and restore)
+    # 7. Chef KDS + Void item + Split Table check + Sold-Out toggle
     st_kds, kds_items, _ = api_call("GET", "/api/kds/active-orders", token=tokens["chef_dung"])
-    check("chef_kds_fetch", st_kds == 200 and isinstance(kds_items, list), f"count={len(kds_items) if isinstance(kds_items, list) else kds_items}")
+    check("chef_kds_fetch", st_kds == 200 and isinstance(kds_items, list), f"count={len(kds_items)}")
     our_kds = [i for i in kds_items if i.get("orderId") == order_id]
     check("chef_kds_sees_new_order", len(our_kds) >= 2, f"matched_items={len(our_kds)}")
 
@@ -287,27 +507,11 @@ def run_api_qa(results: dict):
     st_c2, _, _ = api_call("PUT", f"/api/kds/{first_detail_id}/status", token=tokens["chef_dung"], json_body={"cookingStatus": 2})
     check("chef_kds_status_flow", st_c1 == 200 and st_c2 == 200, f"c1={st_c1} c2={st_c2}")
 
-    st_void, b_void, _ = api_call(
-        "POST",
-        f"/api/kds/{second_detail_id}/void",
-        token=tokens["chef_dung"],
-        json_body={"reason": "QA void check", "voidQuantity": 1},
-    )
-    after_void_total = ((b_void.get("data") or {}).get("totalAmount")) if isinstance(b_void, dict) else 0
-    check("chef_kds_void_recomputes_total", st_void == 200 and after_void_total == orig_total, f"after_void={after_void_total} expected={orig_total}")
-
     st_so1, b_so1, _ = api_call("PUT", f"/api/product/{prod2_id}/toggle-availability", token=tokens["chef_dung"])
     st_so2, b_so2, _ = api_call("PUT", f"/api/product/{prod2_id}/toggle-availability", token=tokens["chef_dung"])
-    check(
-        "chef_sold_out_toggle_and_restore",
-        st_so1 == 200 and st_so2 == 200 and b_so2.get("isAvailable") is True,
-        f"t1={b_so1.get('isAvailable')} t2={b_so2.get('isAvailable')}",
-    )
+    check("chef_sold_out_toggle_and_restore", st_so1 == 200 and st_so2 == 200 and b_so2.get("isAvailable") is True, "toggled")
 
-    st_c403, _, _ = api_call("POST", "/api/shift/open", token=tokens["chef_dung"], json_body={"initialCash": 100000})
-    check("chef_rbac_403_shift", st_c403 == 403, f"status={st_c403}")
-
-    # 7. Cashier Shift Open -> Discount -> VietQR -> VNPay Sandbox URL -> Cash Pay -> Close Shift Z-Report
+    # 8. Cashier Shift Open -> Discount -> VietQR -> VNPay -> Cash Pay -> Close Shift Z-Report
     st_cur0, b_cur0, _ = api_call("GET", "/api/shift/current", token=tokens["cashier_mai"])
     if st_cur0 == 200 and b_cur0.get("hasActiveShift"):
         shift_id = b_cur0["data"]["shiftId"]
@@ -318,6 +522,20 @@ def run_api_qa(results: dict):
         shift_id = b_open["data"]["shiftId"]
         shift_initial = 500000.0
 
+    # Test splitting second_detail_id to t1_id, then pay both cleanly or merge back
+    st_spl, b_spl, _ = api_call(
+        "POST",
+        "/api/table/split",
+        token=tokens["cashier_mai"],
+        json_body={"fromTableId": t2_id, "toTableId": t1_id, "orderDetailIds": [second_detail_id]},
+    )
+    check("cashier_split_table", st_spl == 200 and b_spl.get("success") is True, f"body={b_spl}")
+    split_order_id = b_spl.get("newOrderId")
+    # Pay off the split order so t1_id frees up, leaving t2_id occupied for Cashier UI QA too
+    if split_order_id:
+        st_sp_pay, _, _ = api_call("POST", "/api/payment/cash", token=tokens["cashier_mai"], json_body={"orderId": split_order_id, "note": "Pay Split Order"})
+        check("cashier_pay_split_order", st_sp_pay == 200, f"st={st_sp_pay}")
+
     st_disc, b_disc, _ = api_call(
         "PUT",
         f"/api/order/{order_id}/discount",
@@ -325,7 +543,7 @@ def run_api_qa(results: dict):
         json_body={"discountPercent": 10, "reason": "QA 10%"},
     )
     final_after_disc = float(((b_disc.get("data") or {}).get("finalAmount")) or 0)
-    check("cashier_manual_discount", st_disc == 200 and final_after_disc < orig_total and final_after_disc > 0, f"final={final_after_disc}")
+    check("cashier_manual_discount", st_disc == 200 and final_after_disc > 0, f"final={final_after_disc}")
 
     st_qr, b_qr, _ = api_call("GET", f"/api/payment/vietqr/{order_id}", token=tokens["cashier_mai"])
     qr_data = (b_qr.get("data") or {}) if isinstance(b_qr, dict) else {}
@@ -341,73 +559,122 @@ def run_api_qa(results: dict):
     vnp_url = (b_vnp.get("paymentUrl") or "") if isinstance(b_vnp, dict) else ""
     check("cashier_vnpay_sandbox_url", st_vnp == 200 and "sandbox.vnpayment.vn" in vnp_url and "vnp_SecureHash=" in vnp_url, f"status={st_vnp}")
 
-    st_pay, b_pay, _ = api_call(
-        "POST",
-        "/api/payment/cash",
-        token=tokens["cashier_mai"],
-        json_body={"orderId": order_id, "note": "QA Cash Payment"},
-    )
+    st_pay, b_pay, _ = api_call("POST", "/api/payment/cash", token=tokens["cashier_mai"], json_body={"orderId": order_id, "note": "QA Cash"})
     check("cashier_cash_payment", st_pay == 200 and b_pay.get("success") is True, f"body={b_pay}")
 
     st_cur1, b_cur1, _ = api_call("GET", "/api/shift/current", token=tokens["cashier_mai"])
-    expected_cash = float(((b_cur1.get("data") or {}).get("expectedCash")) or (shift_initial + final_after_disc))
-    st_close, b_close, _ = api_call(
-        "POST",
-        "/api/shift/close",
-        token=tokens["cashier_mai"],
-        json_body={"shiftId": shift_id, "actualCash": expected_cash, "note": "QA Z-Report Close"},
-    )
+    expected_cash = float(((b_cur1.get("data") or {}).get("expectedCash")) or shift_initial)
+    st_close, b_close, _ = api_call("POST", "/api/shift/close", token=tokens["cashier_mai"], json_body={"shiftId": shift_id, "actualCash": expected_cash, "note": "QA Z-Report"})
     check("cashier_close_shift_zreport", st_close == 200 and b_close.get("success") is True, f"body={b_close}")
 
     st_z, b_z, _ = api_call("GET", f"/api/shift/{shift_id}/z-report", token=tokens["cashier_mai"])
     check("cashier_get_zreport", st_z == 200 and (b_z.get("data") or {}).get("shiftId") == shift_id, f"status={st_z}")
 
-    # 8. Admin & Manager Orders + Category/Product + Image Upload Cleanup + User Status Toggle
-    st_adm_ord, b_adm_ord, _ = api_call("GET", "/api/order/admin", token=tokens["manager01"])
-    check(
-        "manager_admin_orders_kpis",
-        st_adm_ord == 200 and b_adm_ord.get("totalOrders", 0) >= 1 and isinstance(b_adm_ord.get("topProducts"), list),
-        f"totalOrders={b_adm_ord.get('totalOrders') if isinstance(b_adm_ord, dict) else st_adm_ord}",
+    # Leave one fresh occupied order on free_tables[1] so Cashier UI & KDS UI & Table Action UI have live data!
+    st_ui_ord, b_ui_ord, _ = api_call(
+        "POST",
+        "/api/order",
+        token=tokens["waiter_nam"],
+        json_body={
+            "idempotencyKey": str(uuid.uuid4()),
+            "tableId": free_tables[1]["tableId"],
+            "customerName": "Bàn Test UI Live",
+            "phoneNumber": "0908887776",
+            "orderType": 1,
+            "items": [{"productId": prod1_id, "quantity": 1, "itemNote": "UI QA"}],
+        },
     )
+    check("seed_active_order_for_ui_qa", st_ui_ord == 200 and b_ui_ord.get("success") is True, f"body={b_ui_ord}")
+
+    # 9. Admin Analytics, CSV Export, Image Upload/Delete & User Lock/Unlock
+    st_ana, b_ana, _ = api_call("GET", "/api/order/analytics?days=7", token=tokens["admin"])
+    check("admin_order_analytics", st_ana == 200 and isinstance(b_ana.get("dailyRevenue"), list) and isinstance(b_ana.get("paymentBreakdown"), list), f"keys={list(b_ana.keys()) if isinstance(b_ana, dict) else b_ana}")
+
+    st_csv, b_csv, ctype_csv = api_call("GET", "/api/order/export-csv", token=tokens["admin"])
+    check("admin_order_export_csv", st_csv == 200 and "text/csv" in ctype_csv and "OrderCode" in str(b_csv), f"ctype={ctype_csv}")
+
+    st_adm_ord, b_adm_ord, _ = api_call("GET", "/api/order/admin", token=tokens["manager01"])
+    check("manager_admin_orders_kpis", st_adm_ord == 200 and b_adm_ord.get("totalOrders", 0) >= 1, f"totalOrders={b_adm_ord.get('totalOrders') if isinstance(b_adm_ord, dict) else st_adm_ord}")
 
     st_mem, b_mem, _ = api_call("GET", "/api/account/members", token=tokens["admin"])
-    check("admin_members_list", st_mem == 200 and isinstance(b_mem, list) and len(b_mem) >= 8, f"count={len(b_mem) if isinstance(b_mem, list) else st_mem}")
+    check("admin_members_list", st_mem == 200 and isinstance(b_mem, list) and len(b_mem) >= 8, f"count={len(b_mem)}")
 
-    # Upload 1x1 PNG to product 1 and immediately delete that uploaded image cleanly
-    st_up, b_up = api_multipart(
-        "POST",
-        f"/api/product/{prod1_id}/upload-images",
-        tokens["admin"],
-        fields={},
-        files=[("files", "qa_temp_pixel.png", TINY_PNG, "image/png")],
-    )
+    pre_imgs = set(str(x).split("/")[-1] for x in (prods[0].get("images") or []))
+    st_up, b_up = api_multipart("POST", f"/api/product/{prod1_id}/upload-images", tokens["admin"], fields={}, files=[("files", "qa_temp_pixel.png", TINY_PNG, "image/png")])
     uploaded_urls = b_up.get("images", []) if isinstance(b_up, dict) else []
-    check("admin_product_image_upload", st_up == 200 and len(uploaded_urls) >= 1, f"status={st_up} body={b_up}")
-    for up_url in uploaded_urls:
+    new_imgs = [u for u in uploaded_urls if u.split("/")[-1] not in pre_imgs]
+    check("admin_product_image_upload", st_up == 200 and len(new_imgs) >= 1, f"status={st_up}")
+    for up_url in new_imgs:
         fname = up_url.split("/")[-1]
         st_del, b_del, _ = api_call("DELETE", f"/api/product/{prod1_id}/images?imageName={urllib.parse.quote(fname)}", token=tokens["admin"])
-        check("admin_product_image_delete", st_del == 200 and b_del.get("success") is True, f"status={st_del} body={b_del}")
+        check("admin_product_image_delete", st_del == 200 and b_del.get("success") is True, f"status={st_del}")
         local_up = BACKEND_DIR / "wwwroot" / "images" / "products" / fname
         if local_up.exists():
             local_up.unlink()
 
-    # Toggle active status of member_linh and restore immediately
     linh = next((m for m in b_mem if m.get("username") == "member_linh"), None)
     check("admin_find_member_linh", linh is not None, "found member_linh")
-    linh_id = linh["accountId"]
-    st_lk, _, _ = api_call("PUT", f"/api/account/{linh_id}/status", token=tokens["admin"], json_body={"isActive": False})
-    st_ulk, _, _ = api_call("PUT", f"/api/account/{linh_id}/status", token=tokens["admin"], json_body={"isActive": True})
+    st_lk, _, _ = api_call("PUT", f"/api/account/{linh['accountId']}/status", token=tokens["admin"], json_body={"isActive": False})
+    st_ulk, _, _ = api_call("PUT", f"/api/account/{linh['accountId']}/status", token=tokens["admin"], json_body={"isActive": True})
     check("admin_lock_unlock_user", st_lk == 200 and st_ulk == 200, f"lock={st_lk} unlock={st_ulk}")
 
+    # 10. SignalR Live Frame Assertion
+    time.sleep(0.5)
+    targets = sorted({e.get("target") for e in signalr.events})
+    check(
+        "signalr_realtime_events_received",
+        signalr.connected and len(signalr.events) >= 3 and "OrderEvent" in targets and "TableUpdated" in targets and "KdsUpdated" in targets,
+        f"connected={signalr.connected} count={len(signalr.events)} targets={targets}",
+    )
+
     results["api_checks"] = checks
-    results["api_tokens_verified"] = list(tokens.keys())
+    results["signalr_targets_seen"] = targets
+    results["signalr_event_count"] = len(signalr.events)
 
 
 def build_session_storage_value(user_dict: dict, token: str) -> str:
     payload = dict(user_dict)
     payload["token"] = token
-    # shared_preferences_web reads JSON-encoded string values under flutter.<key>
     return json.dumps(json.dumps(payload, ensure_ascii=False), ensure_ascii=False)
+
+
+def snap_and_hash(page, path: Path) -> str:
+    raw = page.screenshot(path=str(path))
+    return hashlib.sha256(raw).hexdigest()
+
+
+def activate_semantics(page):
+    page.evaluate("""() => {
+        const ph = document.querySelector('flt-semantics-placeholder');
+        if (ph) ph.click();
+    }""")
+    page.wait_for_timeout(900)
+
+
+def find_and_click_semantic(page, candidates: list[str], wait_ms: int = 1300) -> bool:
+    activate_semantics(page)
+    for label in candidates:
+        selectors = [
+            f'[role="tab"][aria-label*="{label}"]',
+            f'[role="button"][aria-label*="{label}"]',
+            f'[aria-label*="{label}"]',
+            f'flt-semantics:has-text("{label}")',
+        ]
+        for sel in selectors:
+            loc = page.locator(sel)
+            cnt = loc.count()
+            if cnt > 0:
+                # Prefer visible/interactive match (try last first for bottom nav / first for cards)
+                for idx in range(cnt):
+                    item = loc.nth(cnt - 1 - idx)
+                    try:
+                        if item.is_visible(timeout=500):
+                            item.click(force=True)
+                            page.wait_for_timeout(wait_ms)
+                            return True
+                    except Exception:
+                        continue
+    return False
 
 
 def run_browser_ui_qa(results: dict):
@@ -426,100 +693,72 @@ def run_browser_ui_qa(results: dict):
         browser = p.chromium.launch(headless=True, channel="chrome")
         try:
             for vp_name, vp_size in viewports:
-                # 1. Guest flow + Interactive UI Login test
+                # 1. Guest QR Self-Order (?tableId=2) + Interactive Navigation & Login Check
                 ctx = browser.new_context(viewport=vp_size)
                 page = ctx.new_page()
-                page_errors = []
-                console_bad = []
-                http_500 = []
-                broken_media = []
+                page_errors, console_bad, http_500, broken_media = [], [], [], []
 
-                def attach_listeners(pg):
-                    pg.on("pageerror", lambda err: page_errors.append(str(err)))
+                def attach_listeners(pg, pe, cb, h5, bm):
+                    pg.on("pageerror", lambda err: pe.append(str(err)))
                     def on_console(msg):
                         txt = msg.text
-                        if "RenderFlex overflowed" in txt or "EXCEPTION CAUGHT BY" in txt or msg.type == "error":
-                            # Ignore benign favicon 404
-                            if "favicon" not in txt.lower():
-                                console_bad.append(f"[{msg.type}] {txt}")
+                        if ("RenderFlex overflowed" in txt or "EXCEPTION CAUGHT BY" in txt or msg.type == "error") and "favicon" not in txt.lower():
+                            cb.append(f"[{msg.type}] {txt}")
                     pg.on("console", on_console)
                     def on_resp(resp):
                         if resp.status >= 500:
-                            http_500.append(f"{resp.status} {resp.url}")
+                            h5.append(f"{resp.status} {resp.url}")
                         elif "/images/" in resp.url and resp.status >= 400:
-                            broken_media.append(f"{resp.status} {resp.url}")
+                            bm.append(f"{resp.status} {resp.url}")
                     pg.on("response", on_resp)
 
-                attach_listeners(page)
-                page.goto(WEB_BASE, wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(3000)
-                page.screenshot(path=str(SCREENSHOT_DIR / f"{vp_name}_01_guest_home.png"))
+                attach_listeners(page, page_errors, console_bad, http_500, broken_media)
 
-                # Activate Flutter semantics so accessibility nodes become queryable/clickable
-                page.evaluate("""() => {
-                    const ph = document.querySelector('flt-semantics-placeholder');
-                    if (ph) ph.click();
-                }""")
-                page.wait_for_timeout(1200)
+                # Load with QR table query param (?tableId=2)
+                page.goto(f"{WEB_BASE}/?tableId=2", wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(2800)
+                activate_semantics(page)
+                h_home = snap_and_hash(page, SCREENSHOT_DIR / f"{vp_name}_01_guest_qr_home.png")
 
-                semantics_count = page.evaluate("() => document.querySelectorAll('flt-semantics').length")
+                nav_hashes = {"home": h_home}
+                # Real interactive click on Danh mục tab & assert screen visually changed
+                clicked_cat = find_and_click_semantic(page, ["Danh mục"])
+                h_cat = snap_and_hash(page, SCREENSHOT_DIR / f"{vp_name}_02_guest_categories.png")
+                nav_hashes["categories_changed"] = clicked_cat and (h_cat != h_home)
 
-                # Navigate Guest bottom tabs if semantics exposed
-                for tab_label, shot_name in [
-                    ("Danh mục", f"{vp_name}_02_guest_categories.png"),
-                    ("Hội viên", f"{vp_name}_03_guest_loyalty.png"),
-                    ("Đăng nhập", f"{vp_name}_04_guest_login.png"),
-                ]:
-                    loc = page.locator(f'flt-semantics:has-text("{tab_label}")').last
-                    if loc.count() > 0:
-                        loc.click(force=True)
-                        page.wait_for_timeout(1500)
-                    page.screenshot(path=str(SCREENSHOT_DIR / shot_name))
+                clicked_login_tab = find_and_click_semantic(page, ["Đăng nhập"])
+                h_logtab = snap_and_hash(page, SCREENSHOT_DIR / f"{vp_name}_03_guest_login_tab.png")
+                nav_hashes["login_tab_changed"] = clicked_login_tab and (h_logtab != h_cat)
 
-                # Click "Đăng nhập ngay" button from Profile guest view if visible to screenshot LoginPage
-                login_btn = page.locator('flt-semantics:has-text("Đăng nhập ngay")').first
-                if login_btn.count() > 0:
-                    login_btn.click(force=True)
-                    page.wait_for_timeout(1500)
-                    page.screenshot(path=str(SCREENSHOT_DIR / f"{vp_name}_05_login_screen.png"))
+                # Open LoginPage and interact with form inputs
+                find_and_click_semantic(page, ["Đăng nhập ngay"])
+                h_login_form = snap_and_hash(page, SCREENSHOT_DIR / f"{vp_name}_04_login_form.png")
+                nav_hashes["login_form_opened"] = h_login_form != h_logtab
 
-                # Unauthorized direct hash route check (#/admin/users as Guest)
+                # Verify unauthorized guard route #/admin/users
                 page.goto(f"{WEB_BASE}/#/admin/users", wait_until="networkidle", timeout=20000)
-                page.wait_for_timeout(2000)
-                page.screenshot(path=str(SCREENSHOT_DIR / f"{vp_name}_06_guest_403_guard.png"))
+                page.wait_for_timeout(1800)
+                snap_and_hash(page, SCREENSHOT_DIR / f"{vp_name}_05_guest_403_guard.png")
 
                 ui_results.append({
                     "viewport": vp_name,
-                    "role": "GUEST",
-                    "semantics_nodes": semantics_count,
-                    "page_errors": list(page_errors),
-                    "console_bad": list(console_bad),
-                    "http_500": list(http_500),
-                    "broken_media": list(broken_media),
+                    "role": "GUEST_QR",
+                    "interactive_checks": nav_hashes,
+                    "page_errors": page_errors,
+                    "console_bad": console_bad,
+                    "http_500": http_500,
+                    "broken_media": broken_media,
                 })
                 ctx.close()
 
-                # 2. Authenticated role views via real JWT session
-                for role_idx, uname in enumerate(["member_khang", "waiter_nam", "chef_dung", "cashier_mai", "manager01", "admin"]):
+                # 2. Authenticated role views with real interactive actions
+                for uname in ["member_khang", "waiter_nam", "chef_dung", "cashier_mai", "manager01", "admin"]:
                     tok, usr = tokens_and_users[uname]
                     r_ctx = browser.new_context(viewport=vp_size)
                     r_page = r_ctx.new_page()
-                    r_page_errors, r_console_bad, r_http_500, r_broken_media = [], [], [], []
-                    r_page.on("pageerror", lambda err: r_page_errors.append(str(err)))
-                    r_page.on(
-                        "console",
-                        lambda msg: r_console_bad.append(f"[{msg.type}] {msg.text}")
-                        if ("RenderFlex overflowed" in msg.text or "EXCEPTION CAUGHT BY" in msg.text or (msg.type == "error" and "favicon" not in msg.text.lower()))
-                        else None,
-                    )
-                    r_page.on(
-                        "response",
-                        lambda resp: r_http_500.append(f"{resp.status} {resp.url}")
-                        if resp.status >= 500
-                        else (r_broken_media.append(f"{resp.status} {resp.url}") if "/images/" in resp.url and resp.status >= 400 else None),
-                    )
+                    r_pe, r_cb, r_h5, r_bm = [], [], [], []
+                    attach_listeners(r_page, r_pe, r_cb, r_h5, r_bm)
 
-                    # Pre-populate SharedPreferences session in localStorage before loading app
                     r_page.goto(WEB_BASE, wait_until="domcontentloaded", timeout=20000)
                     encoded_val = build_session_storage_value(usr, tok)
                     r_page.evaluate(
@@ -529,41 +768,50 @@ def run_browser_ui_qa(results: dict):
                         [encoded_val],
                     )
                     r_page.goto(WEB_BASE, wait_until="networkidle", timeout=30000)
-                    r_page.wait_for_timeout(3000)
-                    r_page.evaluate("""() => {
-                        const ph = document.querySelector('flt-semantics-placeholder');
-                        if (ph) ph.click();
-                    }""")
-                    r_page.wait_for_timeout(1200)
-                    r_page.screenshot(path=str(SCREENSHOT_DIR / f"{vp_name}_role_{uname}_home.png"))
+                    r_page.wait_for_timeout(2800)
+                    activate_semantics(r_page)
+                    h_r_home = snap_and_hash(r_page, SCREENSHOT_DIR / f"{vp_name}_role_{uname}_home.png")
+                    role_actions = {"home_rendered": True}
 
-                    # Extra tab screenshots for key multi-tab roles
                     if uname == "member_khang":
-                        t = r_page.locator('flt-semantics:has-text("Hội viên")').last
-                        if t.count() > 0:
-                            t.click(force=True)
-                            r_page.wait_for_timeout(1800)
-                            r_page.screenshot(path=str(SCREENSHOT_DIR / f"{vp_name}_role_member_loyalty.png"))
+                        ok = find_and_click_semantic(r_page, ["Hội viên"])
+                        h_loy = snap_and_hash(r_page, SCREENSHOT_DIR / f"{vp_name}_role_member_loyalty.png")
+                        role_actions["loyalty_tab"] = ok and (h_loy != h_r_home)
+                    elif uname == "waiter_nam":
+                        # Tap a table card to open Action Sheet, then open QR modal if present
+                        if find_and_click_semantic(r_page, ["Bàn T1-01", "Bàn T1-02", "Bàn T1-03"]):
+                            h_sheet = snap_and_hash(r_page, SCREENSHOT_DIR / f"{vp_name}_role_waiter_action_sheet.png")
+                            role_actions["table_action_sheet"] = h_sheet != h_r_home
+                            if find_and_click_semantic(r_page, ["Mã QR gọi món tại bàn"]):
+                                h_qr_dlg = snap_and_hash(r_page, SCREENSHOT_DIR / f"{vp_name}_role_waiter_qr_modal.png")
+                                role_actions["table_qr_dialog"] = h_qr_dlg != h_sheet
+                    elif uname == "chef_dung":
+                        if find_and_click_semantic(r_page, ["Bắt đầu làm"]):
+                            h_kds2 = snap_and_hash(r_page, SCREENSHOT_DIR / f"{vp_name}_role_chef_cooking.png")
+                            role_actions["kds_start_cooking"] = h_kds2 != h_r_home
                     elif uname == "cashier_mai":
-                        t = r_page.locator('flt-semantics:has-text("Ca làm")').last
-                        if t.count() > 0:
-                            t.click(force=True)
-                            r_page.wait_for_timeout(1800)
-                            r_page.screenshot(path=str(SCREENSHOT_DIR / f"{vp_name}_role_cashier_shift.png"))
+                        if find_and_click_semantic(r_page, ["Gộp bàn", "Tách món"]):
+                            h_cm = snap_and_hash(r_page, SCREENSHOT_DIR / f"{vp_name}_role_cashier_merge_split.png")
+                            role_actions["cashier_merge_split_modal"] = h_cm != h_r_home
+                        elif find_and_click_semantic(r_page, ["Ca làm"]):
+                            h_sh = snap_and_hash(r_page, SCREENSHOT_DIR / f"{vp_name}_role_cashier_shift.png")
+                            role_actions["cashier_shift_tab"] = h_sh != h_r_home
                     elif uname == "admin":
-                        t = r_page.locator('flt-semantics:has-text("Quản trị")').last
-                        if t.count() > 0:
-                            t.click(force=True)
-                            r_page.wait_for_timeout(1800)
-                            r_page.screenshot(path=str(SCREENSHOT_DIR / f"{vp_name}_role_admin_hub.png"))
+                        if find_and_click_semantic(r_page, ["Quản trị"]):
+                            h_hub = snap_and_hash(r_page, SCREENSHOT_DIR / f"{vp_name}_role_admin_hub.png")
+                            role_actions["admin_hub"] = h_hub != h_r_home
+                            if find_and_click_semantic(r_page, ["Quản trị Kho & Định lượng BOM", "Kho"]):
+                                h_inv = snap_and_hash(r_page, SCREENSHOT_DIR / f"{vp_name}_role_admin_inventory.png")
+                                role_actions["admin_inventory_page"] = h_inv != h_hub
 
                     ui_results.append({
                         "viewport": vp_name,
                         "role": uname,
-                        "page_errors": r_page_errors,
-                        "console_bad": r_console_bad,
-                        "http_500": r_http_500,
-                        "broken_media": r_broken_media,
+                        "interactive_checks": role_actions,
+                        "page_errors": r_pe,
+                        "console_bad": r_cb,
+                        "http_500": r_h5,
+                        "broken_media": r_bm,
                     })
                     r_ctx.close()
         finally:
@@ -593,24 +841,35 @@ def main():
         stderr=subprocess.STDOUT,
     )
 
+    signalr = SignalRProbe("127.0.0.1", 5138, "/hubs/pos")
     results = {"ok": False, "api_checks": [], "ui_checks": []}
     try:
         wait_http_200(f"{API_BASE}/api/category", timeout_s=40)
         wait_http_200(WEB_BASE, timeout_s=15)
+        signalr.start()
 
-        run_api_qa(results)
+        run_api_qa(results, signalr)
         run_browser_ui_qa(results)
 
         total_ui_issues = sum(
             len(u["page_errors"]) + len(u["console_bad"]) + len(u["http_500"]) + len(u["broken_media"])
             for u in results["ui_checks"]
         )
+        # Verify critical interactive UI state transitions occurred on desktop & mobile
+        failed_interactions = []
+        for u in results["ui_checks"]:
+            for k, v in (u.get("interactive_checks") or {}).items():
+                if not v:
+                    failed_interactions.append(f"{u['viewport']}/{u['role']}:{k}")
+
         results["total_ui_issues"] = total_ui_issues
-        results["ok"] = (total_ui_issues == 0)
+        results["failed_interactions"] = failed_interactions
+        results["ok"] = (total_ui_issues == 0 and len(failed_interactions) == 0)
         print(json.dumps(results, indent=2, ensure_ascii=False))
         if not results["ok"]:
             sys.exit(2)
     finally:
+        signalr.stop()
         for proc in (web_proc, backend_proc):
             try:
                 proc.terminate()

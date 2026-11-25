@@ -7,6 +7,7 @@ import 'package:restaurant_pos_app/main.dart';
 import 'package:restaurant_pos_app/models/category.dart';
 import 'package:restaurant_pos_app/models/user.dart';
 import 'package:restaurant_pos_app/repositories/table_repository.dart';
+import 'package:restaurant_pos_app/services/realtime_service.dart';
 import 'package:restaurant_pos_app/services/session_manager.dart';
 import 'package:restaurant_pos_app/utils/database_helper.dart';
 
@@ -197,6 +198,7 @@ class _WidgetFakeHttpClientResponse extends Fake implements HttpClientResponse {
 
 void main() {
   setUpAll(() {
+    PosRealtimeService.isTestingMode = true;
     TableRepository.timeoutDuration = const Duration(milliseconds: 50);
     HttpOverrides.global = _WidgetTestHttpOverrides();
   });
