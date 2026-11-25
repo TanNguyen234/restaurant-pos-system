@@ -6,21 +6,21 @@ flowchart LR
     Root --> Manager["MANAGER (Quản lý)"]
     Root --> Admin["ADMIN (Quản trị tối cao)"]
 
-    Guest --> G1["Menu, Category Filter, Cart, Checkout"]
+    Guest --> G1["Menu, Category Filter, Cart, Checkout & QR Self-Order (?tableId=X)"]
     Guest --> G2["Loyalty Points, Redeem Voucher, Order Lookup"]
     Guest --> G3["Profile, Email OTP, OAuth Sign-In"]
 
-    Waiter --> W1["Floor & Table Map (Open/Transfer/Merge/Split/Reserve)"]
-    Waiter --> W2["Menu + Add Items + Offline Queue Sync"]
+    Waiter --> W1["Floor & Table Map (Open/Transfer/Merge/Split/Reserve/Table QR)"]
+    Waiter --> W2["Menu + Add Items + Offline Queue + SignalR Realtime Sync"]
 
-    Kitchen --> K1["KDS Screen (Pending -> Cooking -> Ready -> Served)"]
-    Kitchen --> K2["Kitchen Void Item & 1-Tap Toggle Sold-Out"]
+    Kitchen --> K1["KDS Screen (SignalR Instant Alert + 0->1->2->3)"]
+    Kitchen --> K2["Kitchen Void Item (BOM Stock Refund) & 1-Tap Sold-Out"]
 
-    Cashier --> C1["POS Split-Screen / Mobile Tab Terminal"]
-    Cashier --> C2["Manual Discount + Cash / VietQR / Split Pay / VNPay"]
+    Cashier --> C1["POS Split-Screen / Mobile Tab + Merge/Split Table Modals"]
+    Cashier --> C2["Manual Discount + Cash / VietQR / Split / VNPay + ESC/POS LAN Print"]
     Cashier --> C3["Shift Open Float / Close & Print Z-Report"]
 
-    Manager --> M1["All Ops + Category & Product CRUD + Image Upload"]
-    Manager --> M2["Order Analytics Dashboard + Non-Admin Role Assignment"]
+    Manager --> M1["All Ops + Category & Product CRUD + BOM Inventory Management"]
+    Manager --> M2["Revenue Analytics Charts + CSV Export + Non-Admin Role Assignment"]
 
     Admin --> A1["Full Manager Access + Lock/Unlock Any Account + Assign ADMIN"]

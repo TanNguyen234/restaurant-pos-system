@@ -1,23 +1,24 @@
-# 05 — Đề Xuất Nâng Cấp Hoàn Thiện Dự Án (Chờ Phê Duyệt)
+# 05 — Tổng Kết 6 Nâng Cấp Đã Hoàn Thành & Lộ Trình Mở Rộng (v3)
 
-> **Trạng thái:** Đây là lộ trình **đề xuất nâng cấp sau khi đã hoàn thành 100% Core Barem & sửa toàn bộ lỗi kiểm thử**. Chưa triển khai code cho các mục dưới đây cho tới khi bạn duyệt chọn ưu tiên.
-
----
-
-## 1. Bảng Đề Xuất Nâng Cấp Theo Mức Độ Ưu Tiên
-
-| Mức ưu tiên | Tên tính năng đề xuất | Giá trị thực tế cho đồ án & doanh nghiệp F&B | Phạm vi chỉnh sửa dự kiến |
-| :---: | :--- | :--- | :--- |
-| **P1 (Rất nên làm)** | **1. Real-Time Push bằng ASP.NET Core SignalR** | Thay vì KDS và Sơ đồ bàn phải polling định kỳ, khi Phục vụ gửi đơn hoặc Bếp bấm "Xong món", màn hình Bếp / Phục vụ / Thu ngân **nhảy trạng thái tức thì < 0.5 giây** kèm âm thanh chuông thông báo. | Backend: `PosHub` SignalR + inject vào `OrderController`/`KdsController`/`TableController`; Flutter: `signalr_netcore` listener trên KDS & FloorTable. |
-| **P1 (Rất nên làm)** | **2. Quản lý Kho & Định lượng Nguyên liệu (BOM / Recipe)** | Mỗi món ăn gắn công thức định lượng (VD: *1 Cà phê sữa đá = 25g bột cafe + 30ml sữa đặc*). Khi thanh toán/chế biến sẽ tự động trừ tồn kho, cảnh báo nguyên liệu sắp hết cho Manager. | SQL Server: thêm `Ingredients`, `ProductRecipes`, `StockTransactions`; Backend: `InventoryController` + hook vào `OrderRepository`; Flutter: trang quản lý kho & cảnh báo ngưỡng tối thiểu. |
-| **P2 (Nâng tầm UX)** | **3. Giao diện Trực quan Tách/Gộp Bàn & Chuyển Món trên POS** | Hiện Backend đã có sẵn API `/api/table/merge` và `/api/table/split` nhưng giao diện Flutter mới khai thác đầy đủ Chuyển bàn & Chờ bổ sung modal chọn từng món để **Tách hóa đơn theo nhóm khách** ngay trên màn hình bàn/POS. | Flutter: nâng cấp action sheet ở [floor_table_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/table/floor_table_page.dart) & [cashier_pos_terminal_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/cashier/cashier_pos_terminal_page.dart). |
-| **P2 (Nâng tầm UX)** | **4. Dashboard Biểu Đồ Doanh Thu & Xuất Báo Cáo Excel/PDF** | Bổ sung biểu đồ doanh thu theo ngày/giờ/phương thức thanh toán (`fl_chart`) và nút xuất file Excel/PDF báo cáo Z-Report & đơn hàng phục vụ kế toán nhà hàng. | Backend: endpoint tổng hợp doanh thu theo khung giờ/ngày; Flutter Admin: biểu đồ trực quan + export CSV/PDF (`printing`/`pdf`). |
-| **P2 (Thực chiến)** | **5. In Bill & In Phiếu Bếp ESC/POS Thật qua LAN/Bluetooth** | Hiện [receipt_printer_service.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/services/receipt_printer_service.dart) đã hỗ trợ preview & in PDF hệ thống (`printing`). Có thể mở rộng kết nối thẳng máy in nhiệt khổ 58mm/80mm qua TCP/IP cổng 9100 hoặc Bluetooth. | Flutter: thêm driver ESC/POS network socket cho Windows Desktop & Android + cấu hình IP máy in quầy/bếp. |
-| **P3 (Mở rộng)** | **6. QR Self-Order Tại Bàn Cho Thực Khách** | Mỗi bàn có mã QR dẫn tới Flutter Web kèm `?tableId=...` để khách tự quét mã gọi món tại bàn (vào trạng thái chờ Phục vụ/Bếp duyệt), giảm tải nhân viên giờ cao điểm. | Flutter Web: đọc query parameter `tableId` trong `main.dart` + khóa giỏ hàng theo bàn QR; Backend: rate-limit chống spam đơn QR. |
+> **Trạng thái hiện tại:** Toàn bộ **6 tính năng nâng cấp trọng điểm** đã được thiết kế, lập trình đầy đủ ở cả SQL Server (18 bảng), ASP.NET Core 10 Web API (+ SignalR Hub) và Flutter Client (Mobile / Web / Windows Desktop).
 
 ---
 
-## 2. Gợi ý lựa chọn nhanh để vấn đáp xuất sắc nhất
+## 1. Bảng 6 Nâng Cấp Đã Triển Khai Hoàn Chỉnh
 
-- Nếu bạn còn **1–2 ngày** trước ngày bảo vệ: đề xuất làm **Mục 1 (SignalR Real-Time cho KDS & Bàn)** + **Mục 3 (Hoàn thiện UI Tách/Gộp bàn)**. Hai tính năng này rất "ăn hình" khi demo trực tiếp trước giảng viên và chạm đúng câu hỏi về tính thời gian thực của POS.
-- Nếu còn **nhiều thời gian hơn**: làm thêm **Mục 2 (Định lượng nguyên liệu BOM & Tồn kho)** hoặc **Mục 4 (Biểu đồ doanh thu + Xuất báo cáo)** để hoàn thiện vòng đời ERP nhà hàng.
+| Hạng mục | Tên tính năng | Implementation thực tế trong source code |
+| :---: | :--- | :--- |
+| **Đã xong #1** | **Real-Time Push bằng ASP.NET Core SignalR** | Backend: [PosHub.cs](file:///d:/Download/restaurant_pos_app/backend/Hubs/PosHub.cs) (`/hubs/pos`) + [PosRealtimeNotifier.cs](file:///d:/Download/restaurant_pos_app/backend/Services/PosRealtimeNotifier.cs) gắn vào `Order`, `Kds`, `Table`, `Payment`, `Product`, `Inventory` Controllers.<br/>Flutter: [realtime_service.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/services/realtime_service.dart) (`web_socket_channel` JSON Protocol v1) tự reload `KitchenDisplayPage`, `FloorTablePage`, `CashierPosTerminalPage` < 0.5s. |
+| **Đã xong #2** | **Quản lý Kho & Định lượng Nguyên liệu (BOM / Recipe)** | SQL Server: thêm 3 bảng `Ingredients`, `ProductRecipes`, `StockTransactions` (12 nguyên liệu, 24 công thức, 3 phiếu nhập mẫu).<br/>Backend: [InventoryRepository.cs](file:///d:/Download/restaurant_pos_app/backend/Models/InventoryRepository.cs) + [InventoryController.cs](file:///d:/Download/restaurant_pos_app/backend/Api/Controllers/InventoryController.cs) + trừ kho `DEDUCT` khi tạo/thêm món & hoàn kho `REFUND` khi hủy món trong [OrderRepository.cs](file:///d:/Download/restaurant_pos_app/backend/Models/OrderRepository.cs).<br/>Flutter: [admin_inventory_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/admin/admin_inventory_page.dart) cảnh báo tồn thấp, nhập/xuất/kiểm kê & gán công thức món. |
+| **Đã xong #3** | **UI Tách/Gộp Bàn & Chuyển Món trực tiếp trên POS** | Flutter: bổ sung `_showMergeTableModal()` và `_showSplitTableModal()` trong [cashier_pos_terminal_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/cashier/cashier_pos_terminal_page.dart) bên cạnh action sheet bàn ở [floor_table_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/table/floor_table_page.dart), gọi thẳng `POST /api/table/merge` và `POST /api/table/split`. |
+| **Đã xong #4** | **Biểu đồ Doanh thu Trực quan & Xuất CSV Kế toán** | Backend: `GET /api/order/analytics?days=7` và `GET /api/order/export-csv` (UTF-8 BOM) trong [OrderController.cs](file:///d:/Download/restaurant_pos_app/backend/Api/Controllers/OrderController.cs).<br/>Flutter: [revenue_charts.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/widgets/revenue_charts.dart) (`RevenueAnalyticsPanel`) tích hợp vào [admin_order_list_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/admin/admin_order_list_page.dart). |
+| **Đã xong #5** | **In Bill Nhiệt ESC/POS 80mm Qua Mạng LAN (TCP 9100)** | Flutter: [escpos_printer_service.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/services/escpos_printer_service.dart) + [escpos_socket_io.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/services/escpos_socket_io.dart) / [escpos_socket_stub.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/services/escpos_socket_stub.dart) tích hợp nút **In LAN** trong [receipt_printer_service.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/services/receipt_printer_service.dart) và modal cấu hình IP máy in trong [main.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/main.dart). |
+| **Đã xong #6** | **QR Self-Order Tại Bàn Cho Thực Khách** | Backend: `[AllowAnonymous] POST /api/order/qr-self-order` giới hạn tần suất theo IP/bàn (8 req/phút, HTTP 429 khi spam).<br/>Flutter: [qr_table_session.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/services/qr_table_session.dart) đọc `?tableId=X`, hiển thị banner đặt món QR ở [home_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/home_page.dart), chốt đơn tại [order_checkout_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/order/order_checkout_page.dart), và sinh mã QR ngay trên [floor_table_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/table/floor_table_page.dart). |
+
+---
+
+## 2. Lộ Trình Mở Rộng Tương Lai (Phiên Bản Thương Mại v3)
+
+- **Multi-Branch Tenant & Cloud Sync**: Quản lý chuỗi nhiều chi nhánh với phân quyền dữ liệu theo `BranchId` và dashboard hợp nhất toàn chuỗi.
+- **Tích hợp Hóa đơn điện tử (e-Invoice) & Giao hàng đối tác (GrabFood / ShopeeFood Webhook)**: Đồng bộ đơn giao hàng bên ngoài thẳng vào hàng đợi KDS chung một nguồn chân lý.
+- **Smart Kitchen Load Balancing**: Tự động ước lượng thời gian chờ từng món dựa trên số ticket đang nấu (`CookingStatus = 1`) và công suất bếp/bar.

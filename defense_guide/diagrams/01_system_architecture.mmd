@@ -1,37 +1,42 @@
 flowchart TB
     subgraph Client["Multi-Platform Client (Flutter 3 / Dart)"]
         direction LR
-        UI["UI Layer (Role-Based Bottom Nav + Responsive Mobile/Desktop)"]
-        Repo["Repositories (JWT AuthHeaders + UTF-8 + Idempotency UUID)"]
+        UI["UI Layer (Role Nav + AdminInventory + Charts + Split/Merge + QR Guest)"]
+        Repo["Repositories (JWT Auth + Inventory + Analytics + Idempotency UUID)"]
+        ServicesClient["Services (OfflineSync + SignalR WebSocket + ESC/POS 80mm LAN)"]
         LocalDB["Local Persistence (SQLite / sqflite_common_ffi + Web SharedPreferences)"]
-        Sync["OfflineSyncService (Queue + Auto Retry 45s)"]
         UI --> Repo
-        UI --> LocalDB
-        Repo --> Sync
-        Sync --> LocalDB
+        UI --> ServicesClient
+        Repo --> ServicesClient
+        ServicesClient --> LocalDB
     end
 
-    subgraph Backend["ASP.NET Core 10 Web API (Port 5138)"]
+    subgraph Backend["ASP.NET Core 10 Web API + SignalR (Port 5138)"]
         direction LR
-        AuthMW["JWT Bearer Auth + Role Claims"]
-        Ctrl["11 API Controllers (Auth, Account, Category, Product, Table, Order, KDS, Payment, Shift, Discount, Loyalty)"]
-        Services["Services (PBKDF2 PasswordHasher, JwtTokenService, EmailService SMTP, Helper Image IO)"]
-        EF["EF Core 10 + RestaurantPosContext (Transactions & Row Checks)"]
+        AuthMW["JWT Bearer Auth + Role Claims + CORS AllowCredentials"]
+        Ctrl["12 API Controllers (+ InventoryController, Analytics/CSV, QR Self-Order)"]
+        Hub["PosHub (/hubs/pos) + PosRealtimeNotifier"]
+        Services["Services (PBKDF2 PasswordHasher, JwtTokenService, EmailService SMTP, Helper IO)"]
+        EF["EF Core 10 + RestaurantPosContext (18 DbSets, BOM ACID Tx)"]
         AuthMW --> Ctrl
         Ctrl --> Services
+        Ctrl --> Hub
         Ctrl --> EF
     end
 
-    subgraph DataAndExt["Database & External Services"]
+    subgraph DataAndExt["Database & External Hardware / Services"]
         direction LR
-        SQL[("SQL Server Express\n15 Tables (RestaurantPos_Acceptance)")]
+        SQL[("SQL Server Express\n18 Tables (Ingredients, Recipes, StockTx)")]
         StaticImg[("wwwroot/images\n(Categories & Products)")]
+        Printer["ESC/POS Thermal Printer\n(TCP/IP Port 9100 LAN)"]
         SMTP["Gmail SMTP (OTP Verify & Reset)"]
         VietQR["VietQR NAPAS 247 Dynamic QR"]
         VNPay["VNPay Sandbox (HMAC-SHA512)"]
     end
 
     Repo <-->|"HTTP/HTTPS JSON & Multipart"| AuthMW
+    ServicesClient <-->|"SignalR WebSocket /hubs/pos"| Hub
+    ServicesClient -->|"ESC/POS Raw TCP 9100"| Printer
     EF <-->|"T-SQL / ACID Tx"| SQL
     Services --> StaticImg
     Services --> SMTP

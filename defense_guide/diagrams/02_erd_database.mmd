@@ -9,6 +9,10 @@ erDiagram
     DiningTables ||--o{ Reservations : "booked for"
     Categories ||--o{ Products : "groups"
     Products ||--o{ ProductAttributes : "has Size or Topping"
+    Products ||--o{ ProductRecipes : "defined by BOM"
+    Ingredients ||--o{ ProductRecipes : "used in recipe"
+    Ingredients ||--o{ StockTransactions : "logs movement"
+    Accounts ||--o{ StockTransactions : "performs stock tx"
     Products ||--o{ OrderDetails : "ordered as"
     Orders ||--o{ OrderDetails : "contains lines"
     OrderDetails ||--o{ OrderDetailModifiers : "customizes"
@@ -65,4 +69,27 @@ erDiagram
         decimal InitialCash
         decimal ActualCash
         int Status
+    }
+    Ingredients {
+        int IngredientId PK
+        string IngredientName
+        string Unit
+        decimal StockQuantity
+        decimal MinThreshold
+        decimal UnitCost
+        bool IsActive
+    }
+    ProductRecipes {
+        int RecipeId PK
+        int ProductId FK
+        int IngredientId FK
+        decimal QuantityRequired
+    }
+    StockTransactions {
+        int TransactionId PK
+        int IngredientId FK
+        string TransactionType
+        decimal QuantityChange
+        int ReferenceOrderId
+        int PerformedByAccountId FK
     }

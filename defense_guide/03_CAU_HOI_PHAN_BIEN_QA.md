@@ -54,13 +54,13 @@
 **Câu 10: Nếu khách đặt 2 ly Cà phê sữa đá — 1 ly "Ít đường" và 1 ly "Nhiều sữa" — giỏ hàng xử lý thế nào?**
 - Trong [database_helper.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/utils/database_helper.dart), `cart_items` không gộp theo `product_id` đơn thuần mà tạo khóa biến thể `_buildVariantKey` (`product_id | modifiers_json | note`). Khi tăng/giảm/xóa sẽ thao tác theo khóa chính từng dòng (`deleteCartItem(id)`, `updateCartItemQuantityById`), không bao giờ xóa nhầm ly còn lại.
 
-**Câu 11: Nếu Bếp hết nguyên liệu sau khi Phục vụ đã gửi order thì xử lý sao cho đúng kế toán?**
+**Câu 11: Nếu Bếp hết nguyên liệu sau khi Phục vụ đã gửi order thì xử lý sao cho đúng kế toán & kho?**
 - Bếp trưởng dùng 2 cơ chế trên [kitchen_display_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/kitchen/kitchen_display_page.dart):
-  1. **1-Chạm Báo hết món** (`PUT /api/product/{id}/toggle-availability`): tắt mở bán món đó ngay lập tức trên toàn menu để không nhận thêm order mới.
-  2. **Hủy món (`POST /api/kds/{orderDetailId}/void`)**: đánh dấu `CookingStatus = 4` (Đã hủy món) kèm lý do, giữ vết lịch sử kiểm toán và **tự động tính lại `TotalAmount` / `FinalAmount`** của hóa đơn trong Transaction.
+  1. **1-Chạm Báo hết món** (`PUT /api/product/{id}/toggle-availability`): tắt mở bán món đó ngay lập tức trên toàn menu và phát sự kiện SignalR để không nhận thêm order mới.
+  2. **Hủy món (`POST /api/kds/{orderDetailId}/void`)**: đánh dấu `CookingStatus = 4` (Đã hủy món) kèm lý do, giữ vết lịch sử kiểm toán, **tự động hoàn lại tồn kho nguyên liệu (BOM `REFUND` trong `StockTransactions`)** và **tính lại `TotalAmount` / `FinalAmount`** của hóa đơn trong Transaction.
 
 **Câu 12: Quản lý phòng bàn có bị xung đột hoặc mất đơn khi Chuyển bàn / Gộp bàn / Tách bàn không?**
-- Mọi thao tác trong [TableRepository.cs](file:///d:/Download/restaurant_pos_app/backend/Models/TableRepository.cs) (`TransferTable`, `MergeTables`, `SplitTable`) đều bọc trong `BeginTransaction()`. Hệ thống cũng chặn thao tác trả bàn trống (`Status = 0`) nếu bàn đó vẫn còn `Order` chưa thanh toán (`PaymentStatus == 0`).
+- Mọi thao tác trong [TableRepository.cs](file:///d:/Download/restaurant_pos_app/backend/Models/TableRepository.cs) (`TransferTable`, `MergeTables`, `SplitTable`) đều bọc trong `BeginTransaction()` và thu ngân/phục vụ có thể thao tác trực tiếp bằng modal **Gộp bàn / Tách món** trên [cashier_pos_terminal_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/cashier/cashier_pos_terminal_page.dart) và [floor_table_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/table/floor_table_page.dart). Hệ thống cũng chặn thao tác trả bàn trống (`Status = 0`) nếu bàn đó vẫn còn `Order` chưa thanh toán (`PaymentStatus == 0`).
 
 **Câu 13: Khi Bếp xong 1 phần món trên đơn, trạng thái `Order.Status` đồng bộ thế nào?**
 - Khi KDS chuyển từng `OrderDetail.CookingStatus` (`0 -> 1 -> 2 -> 3`), backend kiểm tra tổng thể các món active trong đơn để tự nâng `Order.Status` sang `Đang chế biến` (1) hoặc `Đã phục vụ` (2) đồng bộ.
@@ -87,9 +87,9 @@
 
 **Câu 17: Nhóm/em đã kiểm thử hệ thống bằng những cách nào?**
 - Kết hợp **3 tầng kiểm thử**:
-  1. **Unit & Widget Tests** (`flutter analyze` = 0 lỗi, `flutter test` = **86/86 pass** bao phủ RBAC, giỏ hàng variant, model bàn, offline fallback, mô phỏng hành trình người dùng).
-  2. **API Integration Test trên SQL Server Express thật**: kiểm tra 100% quy trình 6 vai trò (Guest → Member → Waiter → Chef → Cashier Z-Report → Admin), kiểm tra negative RBAC 401/403, IdempotencyKey, VietQR/VNPay và toàn vẹn 63 ảnh catalog.
-  3. **Browser Live QA (Playwright Chromium)** ở 2 kích thước **Mobile (`390×844`)** và **Desktop (`1280×800`)**, đạt **0 `pageerror`, 0 `RenderFlex overflow`, 0 HTTP 500, 0 ảnh vỡ**, kèm build thành công bản **Windows Desktop (`restaurant_pos_app.exe`)**.
+  1. **Unit & Widget Tests** (`flutter analyze --no-fatal-infos` = 0 lỗi, `flutter test -j 1` = **89/89 pass** bao phủ RBAC, giỏ hàng variant, SignalR frame parser, ESC/POS bytes & Vietnamese folding, QR `?tableId=` parser, BOM UI, offline fallback và hành trình người dùng).
+  2. **API + SignalR + BOM Integration Test trên SQL Server Express thật**: kiểm tra 100% quy trình 6 vai trò + Khách QR Self-Order, SignalR WebSocket push `/hubs/pos`, trừ kho BOM khi đặt món & hoàn kho khi void, Export CSV, negative RBAC 401/403, IdempotencyKey, VietQR/VNPay và toàn vẹn ảnh catalog.
+  3. **Browser Live QA (Playwright Chromium)** ở 2 kích thước **Mobile (`390×844`)** và **Desktop (`1280×800`)**, bấm thao tác thật qua ngữ nghĩa Flutter Semantics, đạt **0 `pageerror`, 0 `RenderFlex overflow`, 0 HTTP 500, 0 ảnh vỡ**, kèm build thành công cả **Flutter Web** lẫn **Windows Desktop (`restaurant_pos_app.exe`)**.
 
-**Câu 18: Hạn chế hiện tại và hướng phát triển tiếp theo của hệ thống?**
-- Hiện tại KDS và Sơ đồ bàn dùng cơ chế polling/refresh định kỳ; hướng nâng cấp ưu tiên số 1 là bổ sung **SignalR WebSocket Push** để đơn nhảy tức thì <1s, cùng module **Quản lý kho định lượng nguyên liệu (BOM)** trừ kho tự động theo món bán ra (chi tiết xem [05_DE_XUAT_NANG_CAP.md](file:///d:/Download/restaurant_pos_app/defense_guide/05_DE_XUAT_NANG_CAP.md)).
+**Câu 18: Hệ thống đã xử lý đồng bộ thời gian thực và quản lý định lượng kho thế nào? Hướng mở rộng tiếp?**
+- Cả hai tính năng nâng cao trọng điểm đã được triển khai hoàn chỉnh trong phiên bản hiện tại: **SignalR `/hubs/pos`** đẩy cập nhật `< 0.5s` giữa Phục vụ – Bếp KDS – Thu ngân – Quản lý kho; và module **BOM Inventory** ([InventoryController.cs](file:///d:/Download/restaurant_pos_app/backend/Api/Controllers/InventoryController.cs), [admin_inventory_page.dart](file:///d:/Download/restaurant_pos_app/mobile/lib/views/admin/admin_inventory_page.dart)) tự trừ nguyên liệu theo công thức khi order và hoàn kho khi void, kèm cảnh báo tồn thấp (`InventoryAlert`). Ngoài ra hệ thống còn có **QR Self-Order tại bàn**, **Biểu đồ doanh thu + CSV**, và **In nhiệt ESC/POS LAN TCP 9100**. Hướng mở rộng thương mại v3 xem tại [05_DE_XUAT_NANG_CAP.md](file:///d:/Download/restaurant_pos_app/defense_guide/05_DE_XUAT_NANG_CAP.md).

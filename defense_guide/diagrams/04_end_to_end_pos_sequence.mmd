@@ -1,27 +1,29 @@
 sequenceDiagram
-    actor C as "Khách / Phục vụ"
-    participant App as "Flutter App + Local Queue"
-    participant API as "Order & Payment API"
-    participant DB as "SQL Server (15 Tables)"
+    autonumber
+    actor C as "Khách QR / Phục vụ"
+    participant App as "Flutter App + SignalR + Queue"
+    participant API as "Order, Inventory & Payment API"
+    participant DB as "SQL Server (18 Tables)"
     participant KDS as "Màn hình Bếp (KDS)"
-    participant Pay as "Cash / VietQR / VNPay"
+    participant Pay as "Cash / VietQR / VNPay + LAN 9100"
 
-    C->>App: Chọn món + Size/Topping + Bàn
+    C->>App: Quét QR (?tableId=X) hoặc chọn bàn + Size/Topping
     alt Có mạng
-        App->>API: POST /api/order (IdempotencyKey UUID)
-        API->>DB: BeginTx -> Kiểm tra giá DB -> Tạo Order & Chiếm Bàn
+        App->>API: POST /api/order hoặc /api/order/qr-self-order
+        API->>DB: BeginTx -> Kiểm tra giá -> Trừ Kho BOM (DEDUCT) -> Chiếm Bàn
+        API-->>KDS: SignalR Push (/hubs/pos): OrderEvent & InventoryAlert
         DB-->>API: OrderId + OrderCode
         API-->>App: 200 OK
     else Mất mạng
         App->>App: Lưu offline_orders (SQLite/WebStorage)
-        App->>API: Auto Sync khi online (IdempotencyKey chống trùng)
+        App->>API: Auto Sync khi online (IdempotencyKey UUID chống trùng)
     end
 
-    API->>KDS: GET /api/kds/active-orders (Pending = 0)
-    KDS->>API: PUT /api/kds/order-detail/{id}/status (1=Cooking -> 2=Ready -> 3=Served)
-    API->>DB: Cập nhật CookingStatus + Đồng bộ Order.Status
+    KDS->>API: PUT /api/kds/{id}/status (1=Cooking -> 2=Ready -> 3=Served)
+    API->>DB: Cập nhật CookingStatus (hoặc Void -> Hoàn Kho BOM REFUND)
+    API-->>App: SignalR Push: KdsUpdated & TableUpdated
 
-    C->>Pay: Thanh toán toàn phần hoặc Split (Tiền mặt + VietQR / VNPay)
-    Pay->>API: POST /api/payment/confirm hoặc GET /api/payment/vnpay/callback (HMAC-SHA512)
-    API->>DB: BeginTx -> Ghi Payments (ShiftId) -> Trả Bàn Trống -> Cộng Điểm Loyalty (+1 PTS / 1.000đ)
-    API-->>App: Hóa đơn hoàn tất + Cập nhật Z-Report ca
+    C->>Pay: Thanh toán toàn phần / Split (Tiền mặt + VietQR / VNPay)
+    Pay->>API: POST /api/payment/confirm hoặc VNPay Callback (HMAC-SHA512)
+    API->>DB: BeginTx -> Ghi Payments (ShiftId) -> Trả Bàn Trống -> Cộng Điểm (+1 PTS/1k)
+    API-->>App: SignalR TableUpdated + In Bill PDF / ESC/POS LAN TCP 9100 + Z-Report
