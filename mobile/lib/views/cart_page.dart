@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../config/api_config.dart';
 import '../utils/database_helper.dart';
+import '../utils/snackbar_helper.dart';
 import '../widgets/skeleton_loading.dart';
 import 'home_page.dart';
 import 'order/order_checkout_page.dart';
@@ -87,12 +88,11 @@ class _CartPageState extends State<CartPage> {
       await _dbHelper.clearCart();
       await _loadCart();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Đã dọn sạch giỏ hàng'),
-            duration: Duration(seconds: 2),
-            backgroundColor: Color(0xFF0F172A),
-          ),
+        showAutoDismissSnackBar(
+          context,
+          message: 'Đã dọn sạch giỏ hàng',
+          duration: const Duration(seconds: 2),
+          backgroundColor: const Color(0xFF0F172A),
         );
       }
     }

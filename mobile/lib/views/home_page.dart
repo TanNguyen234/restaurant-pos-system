@@ -8,6 +8,7 @@ import '../repositories/product_repository.dart';
 import '../services/qr_table_session.dart';
 import '../services/session_manager.dart';
 import '../utils/database_helper.dart';
+import '../utils/snackbar_helper.dart';
 import '../widgets/skeleton_loading.dart';
 import 'admin/admin_category_page.dart';
 import 'admin/admin_product_page.dart';
@@ -128,11 +129,11 @@ class _HomePageState extends State<HomePage> {
 
   Future<void> _quickAddToCart(Product product) async {
     if (!product.isAvailable) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Món "${product.productName}" hiện đã tạm hết!'),
-          backgroundColor: const Color(0xFFDC2626),
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: 'Món "${product.productName}" hiện đã tạm hết!',
+        duration: const Duration(seconds: 3),
+        backgroundColor: const Color(0xFFDC2626),
       );
       return;
     }
@@ -149,19 +150,15 @@ class _HomePageState extends State<HomePage> {
     await _dbHelper.insertOrUpdateCart(cartItem);
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Đã thêm 1 x "${product.productName}" vào giỏ'),
-        duration: const Duration(seconds: 2),
-        backgroundColor: const Color(0xFF0F172A),
-        action: SnackBarAction(
-          label: 'GIỎ HÀNG',
-          textColor: const Color(0xFFF59E0B),
-          onPressed: () {
-            Navigator.push(context, MaterialPageRoute(builder: (_) => const CartPage()));
-          },
-        ),
-      ),
+    showAutoDismissSnackBar(
+      context,
+      message: 'Đã thêm 1 x "${product.productName}" vào giỏ',
+      duration: const Duration(milliseconds: 2500),
+      backgroundColor: const Color(0xFF0F172A),
+      actionLabel: 'GIỎ HÀNG',
+      onAction: () {
+        Navigator.push(context, MaterialPageRoute(builder: (_) => const CartPage()));
+      },
     );
   }
 
