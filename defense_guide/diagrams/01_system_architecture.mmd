@@ -1,0 +1,39 @@
+flowchart TB
+    subgraph Client["Multi-Platform Client (Flutter 3 / Dart)"]
+        direction LR
+        UI["UI Layer (Role-Based Bottom Nav + Responsive Mobile/Desktop)"]
+        Repo["Repositories (JWT AuthHeaders + UTF-8 + Idempotency UUID)"]
+        LocalDB["Local Persistence (SQLite / sqflite_common_ffi + Web SharedPreferences)"]
+        Sync["OfflineSyncService (Queue + Auto Retry 45s)"]
+        UI --> Repo
+        UI --> LocalDB
+        Repo --> Sync
+        Sync --> LocalDB
+    end
+
+    subgraph Backend["ASP.NET Core 10 Web API (Port 5138)"]
+        direction LR
+        AuthMW["JWT Bearer Auth + Role Claims"]
+        Ctrl["11 API Controllers (Auth, Account, Category, Product, Table, Order, KDS, Payment, Shift, Discount, Loyalty)"]
+        Services["Services (PBKDF2 PasswordHasher, JwtTokenService, EmailService SMTP, Helper Image IO)"]
+        EF["EF Core 10 + RestaurantPosContext (Transactions & Row Checks)"]
+        AuthMW --> Ctrl
+        Ctrl --> Services
+        Ctrl --> EF
+    end
+
+    subgraph DataAndExt["Database & External Services"]
+        direction LR
+        SQL[("SQL Server Express\n15 Tables (RestaurantPos_Acceptance)")]
+        StaticImg[("wwwroot/images\n(Categories & Products)")]
+        SMTP["Gmail SMTP (OTP Verify & Reset)"]
+        VietQR["VietQR NAPAS 247 Dynamic QR"]
+        VNPay["VNPay Sandbox (HMAC-SHA512)"]
+    end
+
+    Repo <-->|"HTTP/HTTPS JSON & Multipart"| AuthMW
+    EF <-->|"T-SQL / ACID Tx"| SQL
+    Services --> StaticImg
+    Services --> SMTP
+    Ctrl --> VietQR
+    Ctrl --> VNPay

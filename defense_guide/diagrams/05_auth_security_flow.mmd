@@ -1,0 +1,20 @@
+flowchart TD
+    subgraph LoginFlow["1. Đăng nhập & Nâng cấp Hash"]
+        L1["POST /api/auth/login"] --> L2{"Tài khoản Active?"}
+        L2 -- "Không (Locked)" --> L3["401 Từ chối đăng nhập"]
+        L2 -- "Có" --> L4{"Verify Password"}
+        L4 -- "PBKDF2-SHA256 / Legacy SHA256" --> L5["Auto Rehash PBKDF2-100k nếu legacy"]
+        L5 --> L6["Phát hành JWT Token (Claims + Role + KDS/MEMBER Alias)"]
+    end
+
+    subgraph OtpFlow["2. Xác thực Email & Quên Mật Khẩu (SMTP + DB)"]
+        O1["POST /api/auth/request-otp hoặc request-email-verification"] --> O2["Sinh OTP 6 số + Lưu DB (Hết hạn 5 phút)"]
+        O2 --> O3["Gửi Email thật qua Gmail SMTP (Không trả devOtp ra API)"]
+        O3 --> O4["User nhập OTP -> Verify/Reset Password + Vô hiệu OTP"]
+    end
+
+    subgraph OAuthFlow["3. OAuth Social Login (Google / Facebook / Zalo)"]
+        S1["POST /api/auth/oauth-login"] --> S2{"Email đã tồn tại?"}
+        S2 -- "Thuộc ADMIN / STAFF" --> S3["Chặn Hijack (400 Từ chối đăng nhập OAuth)"]
+        S2 -- "MEMBER hoặc Email mới" --> S4["Đăng nhập / Tạo mới MEMBER (EmailVerified=true) + JWT"]
+    end

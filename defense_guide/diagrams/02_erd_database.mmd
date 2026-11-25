@@ -1,0 +1,68 @@
+erDiagram
+    Roles ||--o{ Accounts : "assigns role"
+    Accounts ||--o{ Orders : "places or serves"
+    Accounts ||--o{ Shifts : "operates shift"
+    Accounts ||--o{ Payments : "processes payment"
+    Accounts ||--o{ LoyaltyTransactions : "earns or redeems"
+    Areas ||--o{ DiningTables : "contains"
+    DiningTables ||--o{ Orders : "hosts dine-in"
+    DiningTables ||--o{ Reservations : "booked for"
+    Categories ||--o{ Products : "groups"
+    Products ||--o{ ProductAttributes : "has Size or Topping"
+    Products ||--o{ OrderDetails : "ordered as"
+    Orders ||--o{ OrderDetails : "contains lines"
+    OrderDetails ||--o{ OrderDetailModifiers : "customizes"
+    Orders ||--o{ Payments : "paid via split or full"
+    Shifts ||--o{ Payments : "tracks shift revenue"
+    Discounts ||--o{ Orders : "applied to"
+
+    Accounts {
+        int AccountId PK
+        int RoleId FK
+        string Username
+        string PasswordHash
+        int LoyaltyPoints
+        bool IsEmailVerified
+        string OAuthProvider
+        bool IsActive
+    }
+    Orders {
+        int OrderId PK
+        string OrderCode
+        string IdempotencyKey UK
+        int TableId FK
+        int AccountId FK
+        int OrderType
+        string DiscountCode
+        decimal TotalAmount
+        decimal DiscountAmount
+        decimal FinalAmount
+        decimal PaidAmount
+        int Status
+        int PaymentStatus
+    }
+    OrderDetails {
+        int OrderDetailId PK
+        int OrderId FK
+        int ProductId FK
+        int Quantity
+        decimal UnitPrice
+        decimal SubTotal
+        int CookingStatus
+    }
+    Payments {
+        int PaymentId PK
+        int OrderId FK
+        int ShiftId FK
+        int ProcessedByAccountId FK
+        string PaymentMethod
+        decimal Amount
+        int Status
+    }
+    Shifts {
+        int ShiftId PK
+        int AccountId FK
+        decimal InitialCash
+        decimal ActualCash
+        int Status
+    }

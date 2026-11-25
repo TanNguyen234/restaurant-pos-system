@@ -1,0 +1,27 @@
+sequenceDiagram
+    actor C as "Khách / Phục vụ"
+    participant App as "Flutter App + Local Queue"
+    participant API as "Order & Payment API"
+    participant DB as "SQL Server (15 Tables)"
+    participant KDS as "Màn hình Bếp (KDS)"
+    participant Pay as "Cash / VietQR / VNPay"
+
+    C->>App: Chọn món + Size/Topping + Bàn
+    alt Có mạng
+        App->>API: POST /api/order (IdempotencyKey UUID)
+        API->>DB: BeginTx -> Kiểm tra giá DB -> Tạo Order & Chiếm Bàn
+        DB-->>API: OrderId + OrderCode
+        API-->>App: 200 OK
+    else Mất mạng
+        App->>App: Lưu offline_orders (SQLite/WebStorage)
+        App->>API: Auto Sync khi online (IdempotencyKey chống trùng)
+    end
+
+    API->>KDS: GET /api/kds/active-orders (Pending = 0)
+    KDS->>API: PUT /api/kds/order-detail/{id}/status (1=Cooking -> 2=Ready -> 3=Served)
+    API->>DB: Cập nhật CookingStatus + Đồng bộ Order.Status
+
+    C->>Pay: Thanh toán toàn phần hoặc Split (Tiền mặt + VietQR / VNPay)
+    Pay->>API: POST /api/payment/confirm hoặc GET /api/payment/vnpay/callback (HMAC-SHA512)
+    API->>DB: BeginTx -> Ghi Payments (ShiftId) -> Trả Bàn Trống -> Cộng Điểm Loyalty (+1 PTS / 1.000đ)
+    API-->>App: Hóa đơn hoàn tất + Cập nhật Z-Report ca
