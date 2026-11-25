@@ -4,9 +4,14 @@ public class CategoryRepository : BaseRepository
 {
     public CategoryRepository(RestaurantPosContext context) : base(context) { }
 
-    public IEnumerable<Category> GetCategories()
+    public IEnumerable<Category> GetCategories(bool includeInactive = false)
     {
-        return context.Categories.Where(c => c.IsActive).OrderBy(c => c.SortOrder).ToList();
+        var query = context.Categories.AsQueryable();
+        if (!includeInactive)
+        {
+            query = query.Where(c => c.IsActive);
+        }
+        return query.OrderBy(c => c.SortOrder).ThenBy(c => c.Id).ToList();
     }
 
     public Category? GetById(short id)
@@ -16,12 +21,14 @@ public class CategoryRepository : BaseRepository
 
     public int Add(Category obj)
     {
+        obj.CreatedAt = DateTime.Now;
         context.Categories.Add(obj);
         return context.SaveChanges();
     }
 
     public int Update(Category obj)
     {
+        obj.UpdatedAt = DateTime.Now;
         context.Categories.Update(obj);
         return context.SaveChanges();
     }

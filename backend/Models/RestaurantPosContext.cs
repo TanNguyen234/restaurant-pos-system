@@ -22,6 +22,38 @@ public class RestaurantPosContext : DbContext
     public DbSet<Shift> Shifts { get; set; } = null!;
     public DbSet<Reservation> Reservations { get; set; } = null!;
     public DbSet<Discount> Discounts { get; set; } = null!;
+    public DbSet<LoyaltyTransaction> LoyaltyTransactions { get; set; } = null!;
+
+    protected override void OnModelCreating(ModelBuilder modelBuilder)
+    {
+        base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<Product>().Property(p => p.Price).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<ProductAttribute>().Property(p => p.ExtraPrice).HasColumnType("decimal(18,0)");
+
+        modelBuilder.Entity<Order>().Property(p => p.TotalAmount).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<Order>().Property(p => p.DiscountAmount).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<Order>().Property(p => p.FinalAmount).HasColumnType("decimal(18,0)");
+
+        modelBuilder.Entity<OrderDetail>().Property(p => p.UnitPrice).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<OrderDetail>().Property(p => p.SubTotal).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<OrderDetailModifier>().Property(p => p.ExtraPrice).HasColumnType("decimal(18,0)");
+
+        modelBuilder.Entity<Payment>().Property(p => p.Amount).HasColumnType("decimal(18,0)");
+
+        modelBuilder.Entity<Shift>().Property(p => p.InitialCash).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<Shift>().Property(p => p.TotalCash).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<Shift>().Property(p => p.TotalCard).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<Shift>().Property(p => p.TotalTransfer).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<Shift>().Property(p => p.Discrepancy).HasColumnType("decimal(18,0)");
+
+        modelBuilder.Entity<Reservation>().Property(p => p.DepositAmount).HasColumnType("decimal(18,0)");
+
+        modelBuilder.Entity<Discount>().Property(p => p.DiscountPercent).HasColumnType("decimal(5,2)");
+        modelBuilder.Entity<Discount>().Property(p => p.DiscountAmount).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<Discount>().Property(p => p.MinOrderAmount).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<Discount>().Property(p => p.MaxDiscountAmount).HasColumnType("decimal(18,0)");
+    }
 }
 
 [Table("Roles")]
@@ -54,6 +86,7 @@ public class Account
     public DateTime? ResetPasswordExpiry { get; set; }
     public string? OAuthProvider { get; set; }
     public string? OAuthProviderId { get; set; }
+    public int LoyaltyPoints { get; set; } = 0;
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime? UpdatedAt { get; set; }
 }
@@ -78,7 +111,7 @@ public class DiningTable
     public int AreaId { get; set; }
     public string TableName { get; set; } = null!;
     public int Capacity { get; set; } = 4;
-    public int Status { get; set; } = 0; // 0: Empty, 1: Occupied, 2: Reserved
+    public int Status { get; set; } = 0; // 0: Empty, 1: Occupied, 2: Waiting, 3: Reserved
     public int? CurrentOrderId { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.Now;
 }
@@ -110,7 +143,7 @@ public class Product
     public short CategoryId { get; set; }
     public string ProductName { get; set; } = null!;
     public decimal Price { get; set; }
-    public string Unit { get; set; } = "Phần";
+    public string Unit { get; set; } = "Ly";
     public string? Description { get; set; }
     public string ImageUrl { get; set; } = null!;
     public bool IsAvailable { get; set; } = true;
@@ -125,7 +158,7 @@ public class ProductAttribute
     [Key]
     public int AttributeId { get; set; }
     public int ProductId { get; set; }
-    public string AttributeGroup { get; set; } = null!; // 'Size', 'Đường', 'Đá', 'Topping'
+    public string AttributeGroup { get; set; } = null!;
     public string AttributeName { get; set; } = null!;
     public decimal ExtraPrice { get; set; } = 0;
     public bool IsRequired { get; set; } = false;
@@ -137,12 +170,14 @@ public class Order
     [Key]
     public int OrderId { get; set; }
     public string OrderCode { get; set; } = null!;
+    public string? IdempotencyKey { get; set; }
     public int? TableId { get; set; }
     public int? AccountId { get; set; }
     public string? CustomerName { get; set; }
     public string? PhoneNumber { get; set; }
     public int OrderType { get; set; } = 1; // 1: DineIn, 2: Takeaway, 3: Delivery
     public string? Note { get; set; }
+    public string? DiscountCode { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal FinalAmount { get; set; }
@@ -163,7 +198,7 @@ public class OrderDetail
     public decimal UnitPrice { get; set; }
     public decimal SubTotal { get; set; }
     public string? ItemNote { get; set; }
-    public int CookingStatus { get; set; } = 0; // 0: Pending, 1: Cooking, 2: Ready
+    public int CookingStatus { get; set; } = 0; // 0: Pending, 1: Cooking, 2: Ready, 3: Served, 4: Voided
     public DateTime? StartedCookingAt { get; set; }
     public DateTime? FinishedCookingAt { get; set; }
 }
@@ -174,7 +209,9 @@ public class Payment
     [Key]
     public int PaymentId { get; set; }
     public int OrderId { get; set; }
-    public string PaymentMethod { get; set; } = null!; // 'Cash', 'VietQR', 'VNPay'
+    public int? ShiftId { get; set; }
+    public int? ProcessedByAccountId { get; set; }
+    public string PaymentMethod { get; set; } = null!;
     public decimal Amount { get; set; }
     public string? TransactionRef { get; set; }
     public int Status { get; set; } = 1; // 0: Pending, 1: Success, 2: Failed
@@ -237,7 +274,23 @@ public class Discount
     public decimal DiscountAmount { get; set; } = 0;
     public decimal MinOrderAmount { get; set; } = 0;
     public decimal MaxDiscountAmount { get; set; } = 0;
+    public int PointsCost { get; set; } = 0;
+    public int? MaxUsageCount { get; set; }
+    public int UsedCount { get; set; } = 0;
     public DateTime? ExpiryDate { get; set; }
     public bool IsActive { get; set; } = true;
 }
 
+[Table("LoyaltyTransactions")]
+public class LoyaltyTransaction
+{
+    [Key]
+    public int TransactionId { get; set; }
+    public int AccountId { get; set; }
+    public int? OrderId { get; set; }
+    public int PointsDelta { get; set; }
+    public string Type { get; set; } = "EARN"; // EARN | REDEEM
+    public string? VoucherCode { get; set; }
+    public string Description { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+}

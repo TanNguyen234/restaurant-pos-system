@@ -1,34 +1,22 @@
+using Microsoft.EntityFrameworkCore;
+
 namespace WebApi.Models;
 
 public class TableRepository : BaseRepository
 {
     public TableRepository(RestaurantPosContext context) : base(context) { }
 
-    /// <summary>
-    /// Lấy danh sách các khu vực đang hoạt động, sắp xếp theo SortOrder
-    /// </summary>
     public List<Area> GetAreas()
     {
         return context.Areas
             .Where(a => a.IsActive)
             .OrderBy(a => a.SortOrder)
+            .ThenBy(a => a.AreaId)
             .ToList();
     }
 
-    /// <summary>
-    /// Lấy danh sách bàn theo mã khu vực
-    /// </summary>
-    public List<DiningTable> GetTablesByArea(int areaId)
-    {
-        return context.DiningTables
-            .Where(t => t.AreaId == areaId)
-            .OrderBy(t => t.TableId)
-            .ToList();
-    }
+    public List<TableResponseDto> GetTablesByArea(int areaId) => GetAllEnrichedTables(areaId);
 
-    /// <summary>
-    /// Lấy toàn bộ danh sách bàn ăn trong nhà hàng
-    /// </summary>
     public List<DiningTable> GetAllTables()
     {
         return context.DiningTables
@@ -37,125 +25,110 @@ public class TableRepository : BaseRepository
             .ToList();
     }
 
-    /// <summary>
-    /// Lấy thông tin bàn theo TableId
-    /// </summary>
-    public DiningTable? GetById(int tableId)
-    {
-        return context.DiningTables.Find(tableId);
-    }
+    public DiningTable? GetById(int tableId) => context.DiningTables.Find(tableId);
 
-    /// <summary>
-    /// Cập nhật trạng thái bàn (0: Trống, 1: Có khách, 2: Chờ phục vụ, 3: Đã đặt trước)
-    /// Khi bàn trống (status == 0), tự động reset CurrentOrderId = null
-    /// </summary>
-    public DiningTable? UpdateStatus(int tableId, int status)
+    public TableResponseDto? GetEnrichedById(int tableId) =>
+        GetAllEnrichedTables().FirstOrDefault(t => t.TableId == tableId);
+
+    public (bool Success, string Message, DiningTable? Table) UpdateStatusSafe(int tableId, int status)
     {
-        if (status < 0 || status > 3) return null;
+        if (status < 0 || status > 3)
+            return (false, "Trạng thái bàn không hợp lệ (0..3)", null);
 
         var table = context.DiningTables.Find(tableId);
-        if (table == null) return null;
-
-        table.Status = status;
-        table.UpdatedAt = DateTime.Now;
+        if (table == null) return (false, $"Không tìm thấy bàn có ID = {tableId}", null);
 
         if (status == 0)
         {
+            bool hasUnpaidActiveOrder = context.Orders.Any(o =>
+                o.TableId == tableId && o.Status < 3 && o.PaymentStatus == 0);
+            if (hasUnpaidActiveOrder)
+            {
+                return (false, $"Bàn '{table.TableName}' vẫn còn đơn hàng chưa thanh toán, không thể trả bàn trống trực tiếp!", null);
+            }
             table.CurrentOrderId = null;
         }
 
+        table.Status = status;
+        table.UpdatedAt = DateTime.Now;
         context.SaveChanges();
-        return table;
+        return (true, "Cập nhật trạng thái thành công", table);
     }
 
-    /// <summary>
-    /// Thực hiện chuyển bàn từ bàn nguồn sang bàn đích bằng Transaction an toàn.
-    /// Kiểm tra ràng buộc: bàn nguồn không được trùng bàn đích, bàn nguồn phải tồn tại và không được trống,
-    /// bàn đích phải tồn tại và phải trống (status == 0).
-    /// Chuyển tất cả đơn hàng đang hoạt động sang bàn mới, cập nhật CurrentOrderId và reset bàn nguồn.
-    /// </summary>
+    public DiningTable? UpdateStatus(int tableId, int status)
+    {
+        var res = UpdateStatusSafe(tableId, status);
+        return res.Table;
+    }
+
     public (bool Success, string Message, int? FromTableId, int? ToTableId) TransferTable(int fromTableId, int toTableId)
     {
         if (fromTableId == toTableId)
-        {
             return (false, "Bàn nguồn và bàn đích không được trùng nhau", fromTableId, toTableId);
-        }
-
-        var fromTable = context.DiningTables.Find(fromTableId);
-        if (fromTable == null)
-        {
-            return (false, $"Không tìm thấy bàn nguồn (ID: {fromTableId})", fromTableId, toTableId);
-        }
-
-        var toTable = context.DiningTables.Find(toTableId);
-        if (toTable == null)
-        {
-            return (false, $"Không tìm thấy bàn đích (ID: {toTableId})", fromTableId, toTableId);
-        }
-
-        if (fromTable.Status == 0 && !fromTable.CurrentOrderId.HasValue)
-        {
-            return (false, $"Bàn nguồn '{fromTable.TableName}' hiện đang trống, không thể thực hiện chuyển bàn", fromTableId, toTableId);
-        }
-
-        if (toTable.Status != 0)
-        {
-            return (false, $"Bàn đích '{toTable.TableName}' đang có khách hoặc đã đặt trước, không thể chuyển đến", fromTableId, toTableId);
-        }
 
         using var transaction = context.Database.BeginTransaction();
         try
         {
-            context.Entry(toTable).Reload();
-            if (toTable.Status != 0)
+            var result = TransferTableInternal(fromTableId, toTableId);
+            if (!result.Success)
             {
                 transaction.Rollback();
-                return (false, $"Bàn đích '{toTable.TableName}' đang có khách hoặc đã đặt trước, không thể chuyển đến", fromTableId, toTableId);
+                return result;
             }
-
-            context.Entry(fromTable).Reload();
-            if (fromTable.Status == 0 && !fromTable.CurrentOrderId.HasValue)
-            {
-                transaction.Rollback();
-                return (false, $"Bàn nguồn '{fromTable.TableName}' hiện đang trống, không thể thực hiện chuyển bàn", fromTableId, toTableId);
-            }
-
-            var activeOrders = context.Orders
-                .Where(o => o.TableId == fromTableId && o.Status < 3)
-                .ToList();
-
-            foreach (var order in activeOrders)
-            {
-                order.TableId = toTableId;
-            }
-
-            if (fromTable.CurrentOrderId.HasValue && activeOrders.All(o => o.OrderId != fromTable.CurrentOrderId.Value))
-            {
-                var currentOrder = context.Orders.Find(fromTable.CurrentOrderId.Value);
-                if (currentOrder != null)
-                {
-                    currentOrder.TableId = toTableId;
-                }
-            }
-
-            toTable.CurrentOrderId = activeOrders.OrderByDescending(o => o.OrderId).FirstOrDefault()?.OrderId ?? fromTable.CurrentOrderId;
-            toTable.Status = fromTable.Status != 0 ? fromTable.Status : 1;
-            toTable.UpdatedAt = DateTime.Now;
-
-            fromTable.Status = 0;
-            fromTable.CurrentOrderId = null;
-            fromTable.UpdatedAt = DateTime.Now;
-
-            context.SaveChanges();
             transaction.Commit();
-
-            return (true, $"Chuyển bàn thành công từ '{fromTable.TableName}' sang '{toTable.TableName}'", fromTableId, toTableId);
+            return result;
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             transaction.Rollback();
-            return (false, $"Lỗi trong quá trình chuyển bàn: {ex.Message}", fromTableId, toTableId);
+            return (false, "Lỗi trong quá trình chuyển bàn", fromTableId, toTableId);
         }
+    }
+
+    private (bool Success, string Message, int? FromTableId, int? ToTableId) TransferTableInternal(int fromTableId, int toTableId)
+    {
+        var fromTable = context.DiningTables.Find(fromTableId);
+        if (fromTable == null)
+            return (false, $"Không tìm thấy bàn nguồn (ID: {fromTableId})", fromTableId, toTableId);
+
+        var toTable = context.DiningTables.Find(toTableId);
+        if (toTable == null)
+            return (false, $"Không tìm thấy bàn đích (ID: {toTableId})", fromTableId, toTableId);
+
+        var activeOrders = context.Orders
+            .Where(o => o.TableId == fromTableId && o.Status < 3 && o.PaymentStatus == 0)
+            .ToList();
+
+        if (fromTable.Status == 0 && !fromTable.CurrentOrderId.HasValue && activeOrders.Count == 0)
+            return (false, $"Bàn nguồn '{fromTable.TableName}' hiện đang trống, không thể chuyển bàn", fromTableId, toTableId);
+
+        if (toTable.Status != 0)
+            return (false, $"Bàn đích '{toTable.TableName}' đang có khách hoặc đã đặt trước, không thể chuyển đến", fromTableId, toTableId);
+
+        foreach (var order in activeOrders)
+        {
+            order.TableId = toTableId;
+        }
+
+        if (fromTable.CurrentOrderId.HasValue && activeOrders.All(o => o.OrderId != fromTable.CurrentOrderId.Value))
+        {
+            var currentOrder = context.Orders.Find(fromTable.CurrentOrderId.Value);
+            if (currentOrder != null && currentOrder.Status < 3)
+            {
+                currentOrder.TableId = toTableId;
+            }
+        }
+
+        toTable.CurrentOrderId = activeOrders.OrderByDescending(o => o.OrderId).FirstOrDefault()?.OrderId ?? fromTable.CurrentOrderId;
+        toTable.Status = fromTable.Status != 0 ? fromTable.Status : 1;
+        toTable.UpdatedAt = DateTime.Now;
+
+        fromTable.Status = 0;
+        fromTable.CurrentOrderId = null;
+        fromTable.UpdatedAt = DateTime.Now;
+
+        context.SaveChanges();
+        return (true, $"Chuyển bàn thành công từ '{fromTable.TableName}' sang '{toTable.TableName}'", fromTableId, toTableId);
     }
 
     public int Add(DiningTable table)
@@ -184,52 +157,77 @@ public class TableRepository : BaseRepository
     public (bool Success, string Message, int FromTableId, int ToTableId) MergeTables(int fromTableId, int toTableId)
     {
         if (fromTableId == toTableId)
-        {
             return (false, "Không thể gộp bàn vào chính nó", fromTableId, toTableId);
-        }
-
-        var fromTable = context.DiningTables.Find(fromTableId);
-        var toTable = context.DiningTables.Find(toTableId);
-
-        if (fromTable == null || toTable == null)
-        {
-            return (false, "Bàn nguồn hoặc bàn đích không tồn tại", fromTableId, toTableId);
-        }
-
-        if (fromTable.Status == 0)
-        {
-            return (false, $"Bàn nguồn '{fromTable.TableName}' hiện đang trống, không có hóa đơn để gộp", fromTableId, toTableId);
-        }
 
         using var transaction = context.Database.BeginTransaction();
         try
         {
-            // Find active order of fromTable
-            var fromOrders = context.Orders.Where(o => o.TableId == fromTableId && o.Status < 3).ToList();
-            var toOrder = context.Orders.Where(o => o.TableId == toTableId && o.Status < 3).OrderByDescending(o => o.OrderId).FirstOrDefault();
+            var fromTable = context.DiningTables.Find(fromTableId);
+            var toTable = context.DiningTables.Find(toTableId);
+
+            if (fromTable == null || toTable == null)
+            {
+                transaction.Rollback();
+                return (false, "Bàn nguồn hoặc bàn đích không tồn tại", fromTableId, toTableId);
+            }
+
+            if (fromTable.Status == 0)
+            {
+                transaction.Rollback();
+                return (false, $"Bàn nguồn '{fromTable.TableName}' hiện đang trống, không có hóa đơn để gộp", fromTableId, toTableId);
+            }
+
+            var fromOrders = context.Orders
+                .Where(o => o.TableId == fromTableId && o.Status < 3 && o.PaymentStatus == 0)
+                .ToList();
+
+            if (fromOrders.Count == 0)
+            {
+                transaction.Rollback();
+                return (false, $"Bàn nguồn '{fromTable.TableName}' không có đơn hàng chưa thanh toán để gộp", fromTableId, toTableId);
+            }
+
+            var toOrder = context.Orders
+                .Where(o => o.TableId == toTableId && o.Status < 3 && o.PaymentStatus == 0)
+                .OrderByDescending(o => o.OrderId)
+                .FirstOrDefault();
 
             if (toOrder == null)
             {
-                // toTable has no active order -> simple transfer
-                var transferResult = TransferTable(fromTableId, toTableId);
-                return (transferResult.Success, transferResult.Message, transferResult.FromTableId ?? fromTableId, transferResult.ToTableId ?? toTableId);
+                // Safe internal transfer inside the SAME transaction (no nested BeginTransaction!)
+                var transferResult = TransferTableInternal(fromTableId, toTableId);
+                if (!transferResult.Success)
+                {
+                    transaction.Rollback();
+                    return (false, transferResult.Message, fromTableId, toTableId);
+                }
+                transaction.Commit();
+                return (true, transferResult.Message, transferResult.FromTableId ?? fromTableId, transferResult.ToTableId ?? toTableId);
             }
 
-            // Move details from fromOrders to toOrder
             decimal movedAmount = 0;
             foreach (var fo in fromOrders)
             {
-                var details = context.OrderDetails.Where(d => d.OrderId == fo.OrderId).ToList();
-                foreach (var d in details)
+                var activeDetails = context.OrderDetails
+                    .Where(d => d.OrderId == fo.OrderId && d.CookingStatus != 4)
+                    .ToList();
+
+                foreach (var d in activeDetails)
                 {
                     d.OrderId = toOrder.OrderId;
                     d.ItemNote = string.IsNullOrWhiteSpace(d.ItemNote)
                         ? $"[GỘP TỪ {fromTable.TableName}]"
                         : $"[GỘP TỪ {fromTable.TableName}] {d.ItemNote}";
+                    movedAmount += d.SubTotal;
                 }
-                movedAmount += fo.TotalAmount;
-                fo.Status = 4; // Cancelled/Merged
-                fo.Note = string.IsNullOrWhiteSpace(fo.Note) ? $"Đã gộp vào bàn {toTable.TableName} (Đơn #{toOrder.OrderCode})" : $"{fo.Note} | Đã gộp vào {toTable.TableName}";
+
+                fo.Status = 4; // Merged/Cancelled
+                fo.TotalAmount = 0;
+                fo.DiscountAmount = 0;
+                fo.FinalAmount = 0;
+                fo.Note = string.IsNullOrWhiteSpace(fo.Note)
+                    ? $"Đã gộp vào bàn {toTable.TableName} (Đơn #{toOrder.OrderCode})"
+                    : $"{fo.Note} | Đã gộp vào {toTable.TableName}";
             }
 
             toOrder.TotalAmount += movedAmount;
@@ -240,6 +238,7 @@ public class TableRepository : BaseRepository
             fromTable.UpdatedAt = DateTime.Now;
 
             toTable.Status = 1;
+            toTable.CurrentOrderId = toOrder.OrderId;
             toTable.UpdatedAt = DateTime.Now;
 
             context.SaveChanges();
@@ -247,10 +246,10 @@ public class TableRepository : BaseRepository
 
             return (true, $"Gộp bàn thành công từ '{fromTable.TableName}' vào '{toTable.TableName}' (Hóa đơn #{toOrder.OrderCode})", fromTableId, toTableId);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             transaction.Rollback();
-            return (false, $"Lỗi khi gộp bàn: {ex.Message}", fromTableId, toTableId);
+            return (false, "Lỗi khi thực hiện gộp bàn", fromTableId, toTableId);
         }
     }
 
@@ -259,23 +258,53 @@ public class TableRepository : BaseRepository
         if (fromTableId == toTableId) return (false, "Không thể tách món sang cùng một bàn", null);
         if (orderDetailIds == null || orderDetailIds.Count == 0) return (false, "Vui lòng chọn ít nhất 1 món để tách bàn", null);
 
-        var fromTable = context.DiningTables.Find(fromTableId);
-        var toTable = context.DiningTables.Find(toTableId);
-
-        if (fromTable == null || toTable == null) return (false, "Bàn nguồn hoặc bàn đích không tồn tại", null);
-        if (toTable.Status != 0) return (false, $"Bàn đích '{toTable.TableName}' đang có khách, vui lòng chọn bàn trống để tách sang", null);
-
-        var fromOrder = context.Orders.Where(o => o.TableId == fromTableId && o.Status < 3).OrderByDescending(o => o.OrderId).FirstOrDefault();
-        if (fromOrder == null) return (false, $"Bàn '{fromTable.TableName}' không có hóa đơn đang hoạt động", null);
-
-        var detailsToMove = context.OrderDetails.Where(d => d.OrderId == fromOrder.OrderId && orderDetailIds.Contains(d.OrderDetailId)).ToList();
-        if (detailsToMove.Count == 0) return (false, "Không tìm thấy món ăn cần tách", null);
-
         using var tx = context.Database.BeginTransaction();
         try
         {
+            var fromTable = context.DiningTables.Find(fromTableId);
+            var toTable = context.DiningTables.Find(toTableId);
+
+            if (fromTable == null || toTable == null)
+            {
+                tx.Rollback();
+                return (false, "Bàn nguồn hoặc bàn đích không tồn tại", null);
+            }
+            if (toTable.Status != 0)
+            {
+                tx.Rollback();
+                return (false, $"Bàn đích '{toTable.TableName}' đang có khách hoặc đã đặt trước, vui lòng chọn bàn trống", null);
+            }
+
+            var fromOrder = context.Orders
+                .Where(o => o.TableId == fromTableId && o.Status < 3 && o.PaymentStatus == 0)
+                .OrderByDescending(o => o.OrderId)
+                .FirstOrDefault();
+
+            if (fromOrder == null)
+            {
+                tx.Rollback();
+                return (false, $"Bàn '{fromTable.TableName}' không có hóa đơn chưa thanh toán", null);
+            }
+
+            var allActiveDetails = context.OrderDetails
+                .Where(d => d.OrderId == fromOrder.OrderId && d.CookingStatus != 4)
+                .ToList();
+
+            var detailsToMove = allActiveDetails
+                .Where(d => orderDetailIds.Contains(d.OrderDetailId))
+                .ToList();
+
+            if (detailsToMove.Count == 0)
+            {
+                tx.Rollback();
+                return (false, "Không tìm thấy món hợp lệ cần tách", null);
+            }
+
             decimal splitTotal = detailsToMove.Sum(d => d.SubTotal);
             string newOrderCode = $"ORD-{DateTime.Now:yyyyMMdd}-{Guid.NewGuid().ToString("N")[..6].ToUpper()}";
+
+            int maxCooking = detailsToMove.Max(d => d.CookingStatus);
+            int derivedOrderStatus = maxCooking >= 2 ? 2 : (maxCooking == 1 ? 1 : 0);
 
             var newOrder = new Order
             {
@@ -283,11 +312,12 @@ public class TableRepository : BaseRepository
                 TableId = toTableId,
                 AccountId = fromOrder.AccountId,
                 CustomerName = $"Tách từ {fromTable.TableName}",
+                PhoneNumber = fromOrder.PhoneNumber,
                 OrderType = 1,
                 TotalAmount = splitTotal,
                 DiscountAmount = 0,
                 FinalAmount = splitTotal,
-                Status = 1,
+                Status = derivedOrderStatus,
                 PaymentStatus = 0,
                 CreatedAt = DateTime.Now,
                 Note = $"Tách từ bàn {fromTable.TableName} (Đơn #{fromOrder.OrderCode})"
@@ -300,8 +330,23 @@ public class TableRepository : BaseRepository
                 d.OrderId = newOrder.OrderId;
             }
 
-            fromOrder.TotalAmount = Math.Max(0, fromOrder.TotalAmount - splitTotal);
-            fromOrder.FinalAmount = Math.Max(0, fromOrder.TotalAmount - fromOrder.DiscountAmount);
+            int remainingCount = allActiveDetails.Count - detailsToMove.Count;
+            if (remainingCount == 0)
+            {
+                fromOrder.TotalAmount = 0;
+                fromOrder.DiscountAmount = 0;
+                fromOrder.FinalAmount = 0;
+                fromOrder.Status = 4; // All items moved -> close source order & release source table
+                fromTable.Status = 0;
+                fromTable.CurrentOrderId = null;
+                fromTable.UpdatedAt = DateTime.Now;
+            }
+            else
+            {
+                fromOrder.TotalAmount = Math.Max(0, fromOrder.TotalAmount - splitTotal);
+                fromOrder.DiscountAmount = Math.Min(fromOrder.DiscountAmount, fromOrder.TotalAmount);
+                fromOrder.FinalAmount = Math.Max(0, fromOrder.TotalAmount - fromOrder.DiscountAmount);
+            }
 
             toTable.Status = 1;
             toTable.CurrentOrderId = newOrder.OrderId;
@@ -312,18 +357,23 @@ public class TableRepository : BaseRepository
 
             return (true, $"Tách {detailsToMove.Count} món từ '{fromTable.TableName}' sang '{toTable.TableName}' thành công", newOrder.OrderId);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             tx.Rollback();
-            return (false, $"Lỗi khi tách bàn: {ex.Message}", null);
+            return (false, "Lỗi khi tách bàn", null);
         }
     }
 
-    public (bool Success, string Message, Reservation? Reservation) ReserveTable(int tableId, string customerName, string phoneNumber, int guestCount, DateTime arrivalTime, decimal depositAmount, string? note)
+    public (bool Success, string Message, Reservation? Reservation) ReserveTable(
+        int tableId, string customerName, string phoneNumber, int guestCount, DateTime arrivalTime, decimal depositAmount, string? note)
     {
+        if (guestCount <= 0) return (false, "Số lượng khách phải lớn hơn 0", null);
+        if (depositAmount < 0) return (false, "Tiền đặt cọc không được âm", null);
+
         var table = context.DiningTables.Find(tableId);
         if (table == null) return (false, "Không tìm thấy bàn được chọn", null);
-        if (table.Status == 1) return (false, $"Bàn '{table.TableName}' đang có khách ngồi, không thể đặt trước", null);
+        if (table.Status != 0)
+            return (false, $"Bàn '{table.TableName}' hiện không trống (đang có khách hoặc đã đặt trước)", null);
 
         var reservation = new Reservation
         {
@@ -333,11 +383,11 @@ public class TableRepository : BaseRepository
             GuestCount = guestCount,
             ArrivalTime = arrivalTime,
             DepositAmount = depositAmount,
-            Note = note,
+            Note = note?.Trim(),
             Status = 1 // Confirmed
         };
 
-        table.Status = 2; // Reserved
+        table.Status = 3; // Canonical: 3 = Reserved
         table.UpdatedAt = DateTime.Now;
 
         context.Reservations.Add(reservation);
@@ -349,7 +399,7 @@ public class TableRepository : BaseRepository
 
     public List<Reservation> GetReservations(DateTime? fromDate = null)
     {
-        var query = context.Reservations.AsQueryable();
+        var query = context.Reservations.Where(r => r.Status != 3); // Exclude cancelled by default
         if (fromDate.HasValue)
         {
             query = query.Where(r => r.ArrivalTime >= fromDate.Value);
@@ -361,6 +411,8 @@ public class TableRepository : BaseRepository
     {
         var res = context.Reservations.Find(reservationId);
         if (res == null) return (false, "Không tìm thấy thông tin đặt bàn");
+        if (res.Status == 3) return (false, "Lịch đặt bàn này đã bị hủy trước đó");
+        if (res.Status == 2) return (false, "Khách đã nhận bàn trước đó rồi");
 
         res.Status = 2; // CheckedIn
         var table = context.DiningTables.Find(res.TableId);
@@ -380,10 +432,12 @@ public class TableRepository : BaseRepository
     {
         var res = context.Reservations.Find(reservationId);
         if (res == null) return (false, "Không tìm thấy thông tin đặt bàn");
+        if (res.Status == 2) return (false, "Khách đã check-in vào bàn, không thể hủy lịch đặt");
+        if (res.Status == 3) return (false, "Lịch đặt bàn này đã được hủy trước đó");
 
         res.Status = 3; // Cancelled
         var table = context.DiningTables.Find(res.TableId);
-        if (table != null && table.Status == 2)
+        if (table != null && table.Status == 3 && !table.CurrentOrderId.HasValue)
         {
             table.Status = 0; // Empty
             table.UpdatedAt = DateTime.Now;
@@ -395,40 +449,69 @@ public class TableRepository : BaseRepository
         return (true, $"Đã hủy đặt bàn cho khách '{res.CustomerName}'");
     }
 
-    public List<TableResponseDto> GetAllEnrichedTables()
+    public List<TableResponseDto> GetAllEnrichedTables(int? areaId = null)
     {
-        var tables = context.DiningTables
+        var tablesQuery = context.DiningTables.AsQueryable();
+        if (areaId.HasValue && areaId.Value > 0)
+        {
+            tablesQuery = tablesQuery.Where(t => t.AreaId == areaId.Value);
+        }
+
+        var tables = tablesQuery
             .OrderBy(t => t.AreaId)
             .ThenBy(t => t.TableId)
             .ToList();
 
-        var activeOrderIds = tables
-            .Where(t => t.CurrentOrderId.HasValue)
-            .Select(t => t.CurrentOrderId!.Value)
-            .Distinct()
+        var tableIds = tables.Select(t => t.TableId).ToList();
+
+        // Load ALL active unpaid orders for these tables (resilient even when CurrentOrderId is null!)
+        var activeOrders = context.Orders
+            .Where(o => o.TableId.HasValue && tableIds.Contains(o.TableId.Value) && o.Status < 3 && o.PaymentStatus == 0)
+            .OrderByDescending(o => o.OrderId)
             .ToList();
 
-        var orders = context.Orders
-            .Where(o => activeOrderIds.Contains(o.OrderId))
-            .ToDictionary(o => o.OrderId);
+        var explicitOrderIds = tables
+            .Where(t => t.CurrentOrderId.HasValue)
+            .Select(t => t.CurrentOrderId!.Value)
+            .Except(activeOrders.Select(o => o.OrderId))
+            .ToList();
 
+        if (explicitOrderIds.Count > 0)
+        {
+            var extraOrders = context.Orders
+                .Where(o => explicitOrderIds.Contains(o.OrderId) && o.Status < 3 && o.PaymentStatus == 0)
+                .ToList();
+            activeOrders.AddRange(extraOrders);
+        }
+
+        var orderById = activeOrders.GroupBy(o => o.OrderId).ToDictionary(g => g.Key, g => g.First());
+        var orderByTable = activeOrders
+            .Where(o => o.TableId.HasValue)
+            .GroupBy(o => o.TableId!.Value)
+            .ToDictionary(g => g.Key, g => g.OrderByDescending(o => o.OrderId).First());
+
+        var orderIds = orderById.Keys.ToList();
         var detailsCount = context.OrderDetails
-            .Where(d => activeOrderIds.Contains(d.OrderId) && d.CookingStatus != 3)
+            .Where(d => orderIds.Contains(d.OrderId) && d.CookingStatus != 4)
             .GroupBy(d => d.OrderId)
             .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
 
         return tables.Select(t =>
         {
             Order? ord = null;
-            if (t.CurrentOrderId.HasValue)
+            if (t.CurrentOrderId.HasValue && orderById.TryGetValue(t.CurrentOrderId.Value, out var explicitOrd))
             {
-                orders.TryGetValue(t.CurrentOrderId.Value, out ord);
+                ord = explicitOrd;
+            }
+            else if (orderByTable.TryGetValue(t.TableId, out var fallbackOrd))
+            {
+                ord = fallbackOrd;
             }
 
             int count = 0;
-            if (t.CurrentOrderId.HasValue)
+            if (ord != null)
             {
-                detailsCount.TryGetValue(t.CurrentOrderId.Value, out count);
+                detailsCount.TryGetValue(ord.OrderId, out count);
             }
 
             return new TableResponseDto
@@ -438,7 +521,7 @@ public class TableRepository : BaseRepository
                 TableName = t.TableName,
                 Capacity = t.Capacity,
                 Status = t.Status,
-                CurrentOrderId = t.CurrentOrderId,
+                CurrentOrderId = ord?.OrderId ?? t.CurrentOrderId,
                 UpdatedAt = t.UpdatedAt,
                 OrderCreatedAt = ord?.CreatedAt,
                 RunningTotal = ord?.FinalAmount ?? (ord?.TotalAmount ?? 0),
@@ -480,7 +563,16 @@ public class TableRepository : BaseRepository
 
         if (!string.IsNullOrWhiteSpace(tableName)) table.TableName = tableName.Trim();
         if (capacity.HasValue && capacity.Value > 0) table.Capacity = capacity.Value;
-        if (status.HasValue && status.Value >= 0 && status.Value <= 3) table.Status = status.Value;
+        if (status.HasValue && status.Value >= 0 && status.Value <= 3)
+        {
+            if (status.Value == 0)
+            {
+                bool hasUnpaid = context.Orders.Any(o => o.TableId == tableId && o.Status < 3 && o.PaymentStatus == 0);
+                if (hasUnpaid) return (false, "Bàn còn đơn hàng chưa thanh toán, không thể đặt trống", null);
+                table.CurrentOrderId = null;
+            }
+            table.Status = status.Value;
+        }
 
         table.UpdatedAt = DateTime.Now;
         context.SaveChanges();
@@ -497,10 +589,14 @@ public class TableRepository : BaseRepository
             return (false, $"Bàn '{table.TableName}' hiện đang có khách hoặc đang có đơn phục vụ, không thể xóa!");
         }
 
-        bool hasUnpaidOrders = context.Orders.Any(o => o.TableId == tableId && o.PaymentStatus == 0 && o.Status != 4);
-        if (hasUnpaidOrders)
+        if (context.Orders.Any(o => o.TableId == tableId))
         {
-            return (false, $"Bàn '{table.TableName}' đang có hóa đơn chưa thanh toán trong hệ thống!");
+            return (false, $"Không thể xóa bàn '{table.TableName}' vì đã có dữ liệu đơn hàng lịch sử gắn với bàn này!");
+        }
+
+        if (context.Reservations.Any(r => r.TableId == tableId))
+        {
+            return (false, $"Không thể xóa bàn '{table.TableName}' vì đã có lịch sử đặt bàn!");
         }
 
         context.DiningTables.Remove(table);

@@ -5,6 +5,24 @@ public static class Helper
     public static readonly string[] AllowedImageExtensions = { ".jpg", ".jpeg", ".png", ".webp", ".gif" };
     public const long MaxImageSizeBytes = 5 * 1024 * 1024; // 5 MB
 
+    private static string? _webRootPath;
+
+    public static void ConfigureWebRoot(string webRootPath)
+    {
+        if (!string.IsNullOrWhiteSpace(webRootPath))
+        {
+            _webRootPath = webRootPath;
+        }
+    }
+
+    private static string ResolveWebRoot()
+    {
+        if (!string.IsNullOrWhiteSpace(_webRootPath)) return _webRootPath;
+        var cwdWwwroot = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot");
+        if (Directory.Exists(cwdWwwroot)) return cwdWwwroot;
+        return Path.Combine(AppContext.BaseDirectory, "wwwroot");
+    }
+
     public static bool ValidateImage(IFormFile? file, out string? errorMessage)
     {
         if (file == null || file.Length == 0)
@@ -26,20 +44,33 @@ public static class Helper
             return false;
         }
 
+        // Magic bytes validation
+        try
+        {
+            using var stream = file.OpenReadStream();
+            byte[] header = new byte[12];
+            int read = stream.Read(header, 0, header.Length);
+            bool validMagic =
+                (read >= 3 && header[0] == 0xFF && header[1] == 0xD8 && header[2] == 0xFF) || // JPEG
+                (read >= 4 && header[0] == 0x89 && header[1] == 0x50 && header[2] == 0x4E && header[3] == 0x47) || // PNG
+                (read >= 4 && header[0] == 0x47 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x38) || // GIF
+                (read >= 12 && header[0] == 0x52 && header[1] == 0x49 && header[2] == 0x46 && header[3] == 0x46 &&
+                               header[8] == 0x57 && header[9] == 0x45 && header[10] == 0x42 && header[11] == 0x50); // WEBP
+
+            if (!validMagic)
+            {
+                errorMessage = "Nội dung tệp tin không phải định dạng ảnh hợp lệ (JPEG, PNG, GIF, WEBP)";
+                return false;
+            }
+        }
+        catch
+        {
+            errorMessage = "Không thể đọc tệp tin hình ảnh tải lên";
+            return false;
+        }
+
         errorMessage = null;
         return true;
-    }
-
-    public static string RandomString(int len)
-    {
-        string pattern = "0123456789abcdefghijklmnopqrstuvwxyz";
-        char[] arr = new char[len];
-        Random rand = new Random();
-        for (int i = 0; i < len; i++)
-        {
-            arr[i] = pattern[rand.Next(0, pattern.Length)];
-        }
-        return string.Join(string.Empty, arr);
     }
 
     public static async Task<string> SaveImageAsync(IFormFile file, string folder = "images")
@@ -50,28 +81,35 @@ public static class Helper
         }
 
         string ext = Path.GetExtension(file.FileName).ToLowerInvariant();
-        string fileName = RandomString(16) + ext;
-        string targetDir = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", folder);
+        string fileName = Guid.NewGuid().ToString("N") + ext;
+        string targetDir = Path.Combine(ResolveWebRoot(), folder);
         if (!Directory.Exists(targetDir))
         {
             Directory.CreateDirectory(targetDir);
         }
         string fullPath = Path.Combine(targetDir, fileName);
-        using (var stream = new FileStream(fullPath, FileMode.Create))
+        using (var stream = new FileStream(fullPath, FileMode.CreateNew))
         {
             await file.CopyToAsync(stream);
         }
         return fileName;
     }
 
-    public static void DeleteImage(string fileName, string folder = "images")
+    public static void DeleteImage(string? fileName, string folder = "images")
     {
-        if (string.IsNullOrEmpty(fileName)) return;
-        // Bảo vệ ảnh mặc định hệ thống không bị xóa
-        if (fileName.StartsWith("default_") || fileName.StartsWith("sample_")) return;
+        if (string.IsNullOrWhiteSpace(fileName)) return;
 
-        string cleanFileName = Path.GetFileName(fileName);
-        string fullPath = Path.Combine(Directory.GetCurrentDirectory(), "wwwroot", folder, cleanFileName);
+        string cleanFileName = Path.GetFileName(fileName.Trim());
+        if (string.IsNullOrEmpty(cleanFileName)) return;
+
+        // Bảo vệ ảnh mặc định hệ thống không bị xóa dù có truyền đường dẫn kèm thư mục
+        if (cleanFileName.StartsWith("default_", StringComparison.OrdinalIgnoreCase) ||
+            cleanFileName.StartsWith("sample_", StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        string fullPath = Path.Combine(ResolveWebRoot(), folder, cleanFileName);
         if (File.Exists(fullPath))
         {
             try

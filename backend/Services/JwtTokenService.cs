@@ -15,10 +15,20 @@ public class JwtTokenService
         _config = config;
     }
 
+    public static string ResolveSigningKey(IConfiguration config)
+    {
+        var key = config["Jwt:Key"] ?? config["APP_JWT_SECRET"];
+        if (string.IsNullOrWhiteSpace(key) || Encoding.UTF8.GetByteCount(key) < 32)
+        {
+            throw new InvalidOperationException("Jwt:Key (hoặc APP_JWT_SECRET) phải được cấu hình tối thiểu 32 bytes trong .env hoặc biến môi trường.");
+        }
+        return key;
+    }
+
     public string GenerateToken(Account account, string roleCode, string? roleName = null)
     {
         var jwtSettings = _config.GetSection("Jwt");
-        var secretKey = jwtSettings["Key"] ?? "RestaurantPosSecretKeyForJwtAuthentication2026!@#$%^&*()_+";
+        var secretKey = ResolveSigningKey(_config);
         var issuer = jwtSettings["Issuer"] ?? "RestaurantPosApi";
         var audience = jwtSettings["Audience"] ?? "RestaurantPosClients";
         var expireMinutes = int.TryParse(jwtSettings["ExpireMinutes"], out var m) ? m : 1440;
@@ -48,10 +58,14 @@ public class JwtTokenService
             claims.Add(new Claim("roleName", roleName));
         }
 
-        // Support KITCHEN role alias: HEAD_CHEF, BARISTA_LEAD, and COOK_ASSISTANT also emit KITCHEN claim
+        // Canonical role aliases for RBAC attributes
         if (roleCode is "HEAD_CHEF" or "BARISTA_LEAD" or "COOK_ASSISTANT")
         {
             claims.Add(new Claim(ClaimTypes.Role, "KITCHEN"));
+        }
+        else if (roleCode == "VIP_MEMBER")
+        {
+            claims.Add(new Claim(ClaimTypes.Role, "MEMBER"));
         }
 
         var token = new JwtSecurityToken(

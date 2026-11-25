@@ -1,4 +1,5 @@
-using System.Collections.Concurrent;
+using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
 using WebApi.Services;
@@ -10,17 +11,14 @@ namespace WebApi.Api.Controllers;
 public class AuthController : BaseController
 {
     private readonly JwtTokenService _jwtTokenService;
+    private readonly EmailService _emailService;
 
-    public AuthController(JwtTokenService jwtTokenService)
+    public AuthController(JwtTokenService jwtTokenService, EmailService emailService)
     {
         _jwtTokenService = jwtTokenService;
+        _emailService = emailService;
     }
 
-    /// <summary>
-    /// POST /api/auth/register
-    /// Registers a new user account with SHA-256 + salt password hashing.
-    /// Public registration strictly assigns the MEMBER role.
-    /// </summary>
     [HttpPost("register")]
     public async Task<IActionResult> Register([FromBody] RegisterDto dto)
     {
@@ -36,7 +34,7 @@ public class AuthController : BaseController
         }
 
         var result = await Provider.Account.RegisterAsync(dto);
-        if (!result.Success)
+        if (!result.Success || result.Account == null)
         {
             return BadRequest(new
             {
@@ -47,20 +45,33 @@ public class AuthController : BaseController
             });
         }
 
+        bool emailSent = false;
+        string emailNotice = "";
+        if (!string.IsNullOrWhiteSpace(result.Account.Email) && !string.IsNullOrWhiteSpace(result.EmailOtp))
+        {
+            var sendResult = await _emailService.SendOtpEmailAsync(
+                result.Account.Email,
+                "[Bistro POS] Mã OTP xác thực Email tài khoản",
+                result.Account.FullName,
+                result.EmailOtp,
+                "Xác thực địa chỉ Email");
+            emailSent = sendResult.Sent;
+            emailNotice = sendResult.Message;
+        }
+
         return Ok(new
         {
             statusCode = 200,
             success = true,
             message = result.Message,
-            accountId = result.Account!.AccountId,
-            username = result.Account.Username
+            accountId = result.Account.AccountId,
+            username = result.Account.Username,
+            requiresEmailVerification = !string.IsNullOrWhiteSpace(result.Account.Email),
+            emailSent,
+            emailNotice
         });
     }
 
-    /// <summary>
-    /// POST /api/auth/login
-    /// Authenticates username and password against database. Issues signed JWT Bearer token.
-    /// </summary>
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginDto dto)
     {
@@ -95,24 +106,35 @@ public class AuthController : BaseController
             statusCode = 200,
             success = true,
             message = "Đăng nhập thành công",
-            token = token,
+            token,
             accountId = result.Account.AccountId,
+            roleId = result.Account.RoleId,
             username = result.Account.Username,
             fullName = result.Account.FullName,
             role = roleCode,
-            roleName = roleName,
+            roleName,
             email = result.Account.Email,
             phoneNumber = result.Account.PhoneNumber,
-            avatar = result.Account.Avatar
+            avatar = result.Account.Avatar,
+            isEmailVerified = result.Account.IsEmailVerified,
+            loyaltyPoints = result.Account.LoyaltyPoints
         });
     }
 
-    /// <summary>
-    /// POST /api/auth/change-password
-    /// Verifies existing password and updates to newly salted password.
-    /// Supports AccountId, authenticated JWT identity, or explicit username.
-    /// </summary>
+    [HttpPost("logout")]
+    [Authorize]
+    public IActionResult Logout()
+    {
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = "Đăng xuất phiên làm việc thành công"
+        });
+    }
+
     [HttpPost("change-password")]
+    [Authorize]
     public async Task<IActionResult> ChangePassword([FromBody] ChangePasswordDto dto)
     {
         if (!ModelState.IsValid)
@@ -126,31 +148,13 @@ public class AuthController : BaseController
             });
         }
 
-        (bool Success, string Message) result;
-
-        if (dto.AccountId.HasValue && dto.AccountId.Value > 0)
+        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        if (!int.TryParse(idClaim, out int actorAccountId) || actorAccountId <= 0)
         {
-            result = await Provider.Account.ChangePasswordAsync(dto.AccountId.Value, dto.OldPassword, dto.NewPassword);
-        }
-        else
-        {
-            string? username = User.Identity?.IsAuthenticated == true
-                ? User.Identity.Name
-                : dto.Username;
-
-            if (string.IsNullOrWhiteSpace(username))
-            {
-                return BadRequest(new
-                {
-                    statusCode = 400,
-                    success = false,
-                    message = "Vui lòng cung cấp mã tài khoản hoặc tên đăng nhập để đổi mật khẩu"
-                });
-            }
-
-            result = await Provider.Account.ChangePasswordAsync(username, dto.OldPassword, dto.NewPassword);
+            return Unauthorized(new { statusCode = 401, success = false, message = "Phiên đăng nhập không hợp lệ" });
         }
 
+        var result = await Provider.Account.ChangePasswordAsync(actorAccountId, dto.OldPassword, dto.NewPassword);
         if (!result.Success)
         {
             return BadRequest(new
@@ -170,13 +174,18 @@ public class AuthController : BaseController
         });
     }
 
-    /// <summary>
-    /// GET /api/auth/profile/{id}
-    /// Profile endpoint by ID for backward compatibility
-    /// </summary>
     [HttpGet("profile/{id:int}")]
+    [Authorize]
     public async Task<IActionResult> GetProfile(int id)
     {
+        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        int.TryParse(idClaim, out int actorId);
+        bool isPrivileged = User.IsInRole("ADMIN") || User.IsInRole("MANAGER");
+        if (!isPrivileged && actorId != id)
+        {
+            return Forbid();
+        }
+
         var account = await Provider.Account.GetByIdAsync(id);
         if (account == null)
         {
@@ -197,101 +206,137 @@ public class AuthController : BaseController
             avatar = account.Avatar,
             isActive = account.IsActive,
             isEmailVerified = account.IsEmailVerified,
+            loyaltyPoints = account.LoyaltyPoints,
             createdAt = account.CreatedAt
         });
     }
 
-    /// <summary>
-    /// GET /api/auth/roles
-    /// Returns roles list
-    /// </summary>
     [HttpGet("roles")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> GetRoles()
     {
         var roles = await Provider.Account.GetRolesAsync();
         return Ok(roles);
     }
 
-    private static readonly ConcurrentDictionary<string, (string Otp, DateTime ExpiresAt)> _otpStore = new();
-
     /// <summary>
-    /// POST /api/auth/request-otp
-    /// Gửi mã OTP xác thực email / quên mật khẩu (Barem 1.8 và 1.9)
+    /// POST /api/auth/request-email-verification (Barem 1.8)
     /// </summary>
-    [HttpPost("request-otp")]
-    public async Task<IActionResult> RequestOtp([FromBody] RequestOtpDto dto)
+    [HttpPost("request-email-verification")]
+    public async Task<IActionResult> RequestEmailVerification([FromBody] RequestOtpDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.Email) && string.IsNullOrWhiteSpace(dto.Username))
+        string? identity = !string.IsNullOrWhiteSpace(dto?.Email) ? dto.Email : dto?.Username;
+        if (string.IsNullOrWhiteSpace(identity))
         {
             return BadRequest(new { success = false, message = "Vui lòng cung cấp email hoặc tên đăng nhập" });
         }
 
-        var account = !string.IsNullOrWhiteSpace(dto.Email)
-            ? await Provider.Account.GetByEmailAsync(dto.Email.Trim())
-            : await Provider.Account.GetByUsernameAsync(dto.Username!.Trim());
-
-        if (account == null)
+        var issued = await Provider.Account.IssueEmailVerificationOtpAsync(identity);
+        if (!issued.Success || issued.Account == null || string.IsNullOrWhiteSpace(issued.Otp))
         {
-            return NotFound(new { success = false, message = "Không tìm thấy tài khoản phù hợp với thông tin đã cung cấp" });
+            return BadRequest(new { success = false, message = issued.Message });
         }
 
-        var otp = new Random().Next(100000, 999999).ToString();
-        var key = (account.Email ?? account.Username ?? "").ToLowerInvariant();
-        _otpStore[key] = (otp, DateTime.UtcNow.AddMinutes(5));
+        var sendRes = await _emailService.SendOtpEmailAsync(
+            issued.Account.Email!,
+            "[Bistro POS] Mã OTP xác thực Email",
+            issued.Account.FullName,
+            issued.Otp,
+            "Xác thực địa chỉ Email");
 
         return Ok(new
         {
             success = true,
-            message = $"Mã OTP xác thực 6 chữ số đã được gửi đến {account.Email ?? account.Username} (Hết hạn trong 5 phút).",
-            email = account.Email,
-            devOtp = otp // Expose in response for testing
+            emailSent = sendRes.Sent,
+            message = sendRes.Sent
+                ? sendRes.Message
+                : $"Mã xác thực đã được tạo cho {EmailService.MaskEmail(issued.Account.Email!)}. {sendRes.Message}"
         });
     }
 
     /// <summary>
-    /// POST /api/auth/reset-password-otp
-    /// Xác thực mã OTP và đặt lại mật khẩu mới
+    /// POST /api/auth/verify-email (Barem 1.8)
+    /// </summary>
+    [HttpPost("verify-email")]
+    public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailDto dto)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(new { success = false, message = "Vui lòng nhập đầy đủ tài khoản và mã OTP" });
+        }
+
+        var res = await Provider.Account.VerifyEmailOtpAsync(dto.Identity, dto.Otp);
+        if (!res.Success)
+        {
+            return BadRequest(new { success = false, message = res.Message });
+        }
+
+        return Ok(new { success = true, message = res.Message });
+    }
+
+    /// <summary>
+    /// POST /api/auth/request-otp (Barem 1.9 - Gửi qua SMTP thật & lưu DB, KHÔNG trả OTP ra HTTP)
+    /// </summary>
+    [HttpPost("request-otp")]
+    public async Task<IActionResult> RequestOtp([FromBody] RequestOtpDto dto)
+    {
+        string? identity = !string.IsNullOrWhiteSpace(dto?.Email) ? dto.Email : dto?.Username;
+        if (string.IsNullOrWhiteSpace(identity))
+        {
+            return BadRequest(new { success = false, message = "Vui lòng cung cấp email hoặc tên đăng nhập" });
+        }
+
+        var issued = await Provider.Account.IssuePasswordResetOtpAsync(identity);
+        if (!issued.Success || issued.Account == null || string.IsNullOrWhiteSpace(issued.Otp))
+        {
+            return BadRequest(new { success = false, message = issued.Message });
+        }
+
+        var sendRes = await _emailService.SendOtpEmailAsync(
+            issued.Account.Email!,
+            "[Bistro POS] Mã OTP khôi phục mật khẩu",
+            issued.Account.FullName,
+            issued.Otp,
+            "Khôi phục mật khẩu");
+
+        return Ok(new
+        {
+            success = true,
+            emailSent = sendRes.Sent,
+            maskedEmail = EmailService.MaskEmail(issued.Account.Email!),
+            message = sendRes.Sent
+                ? $"Mã OTP 6 chữ số đã được gửi tới email {EmailService.MaskEmail(issued.Account.Email!)} (hiệu lực 5 phút)."
+                : $"Không gửi được email SMTP ({sendRes.Message}). Vui lòng kiểm tra cấu hình SMTP."
+        });
+    }
+
+    /// <summary>
+    /// POST /api/auth/reset-password-otp (Barem 1.9)
     /// </summary>
     [HttpPost("reset-password-otp")]
     public async Task<IActionResult> ResetPasswordOtp([FromBody] ResetPasswordOtpDto dto)
     {
-        if (string.IsNullOrWhiteSpace(dto.Identity) || string.IsNullOrWhiteSpace(dto.Otp) || string.IsNullOrWhiteSpace(dto.NewPassword))
+        if (!ModelState.IsValid)
         {
-            return BadRequest(new { success = false, message = "Vui lòng nhập đầy đủ thông tin, mã OTP và mật khẩu mới" });
+            return BadRequest(new { success = false, message = "Vui lòng nhập đầy đủ thông tin, mã OTP và mật khẩu mới (tối thiểu 6 ký tự)" });
         }
 
-        var key = dto.Identity.Trim().ToLowerInvariant();
-        if (!_otpStore.TryGetValue(key, out var stored) || stored.ExpiresAt < DateTime.UtcNow || stored.Otp != dto.Otp.Trim())
-        {
-            return BadRequest(new { success = false, message = "Mã OTP không chính xác hoặc đã hết thời gian hiệu lực (5 phút)!" });
-        }
-
-        var account = await Provider.Account.GetByEmailAsync(dto.Identity.Trim()) 
-                      ?? await Provider.Account.GetByUsernameAsync(dto.Identity.Trim());
-
-        if (account == null)
-        {
-            return NotFound(new { success = false, message = "Tài khoản không tồn tại" });
-        }
-
-        var result = await Provider.Account.ResetPasswordAsync(account.AccountId, dto.NewPassword);
+        var result = await Provider.Account.ResetPasswordWithOtpAsync(dto.Identity, dto.Otp, dto.NewPassword);
         if (!result.Success)
         {
             return BadRequest(new { success = false, message = result.Message });
         }
 
-        _otpStore.TryRemove(key, out _);
-        return Ok(new { success = true, message = "Đặt lại mật khẩu mới thành công! Bạn có thể đăng nhập ngay bằng mật khẩu mới." });
+        return Ok(new { success = true, message = result.Message });
     }
 
     /// <summary>
-    /// POST /api/auth/oauth-login
-    /// Đăng nhập bằng tài khoản mạng xã hội Google / Facebook (Barem 1.10)
+    /// POST /api/auth/oauth-login (Google / Facebook / Zalo - Barem 1.10)
     /// </summary>
     [HttpPost("oauth-login")]
     public async Task<IActionResult> OAuthLogin([FromBody] OAuthLoginDto dto)
     {
-        if (dto == null || string.IsNullOrWhiteSpace(dto.Email))
+        if (!ModelState.IsValid)
         {
             return BadRequest(new { success = false, message = "Thông tin đăng nhập mạng xã hội không hợp lệ" });
         }
@@ -312,12 +357,16 @@ public class AuthController : BaseController
             message = result.Message,
             token,
             accountId = result.Account.AccountId,
+            roleId = result.Account.RoleId,
             username = result.Account.Username,
             fullName = result.Account.FullName,
             role = roleCode,
-            roleName = roleName,
+            roleName,
             email = result.Account.Email,
+            phoneNumber = result.Account.PhoneNumber,
             avatar = result.Account.Avatar,
+            isEmailVerified = result.Account.IsEmailVerified,
+            loyaltyPoints = result.Account.LoyaltyPoints,
             oauthProvider = result.Account.OAuthProvider
         });
     }

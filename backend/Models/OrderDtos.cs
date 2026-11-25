@@ -2,6 +2,7 @@ namespace WebApi.Models;
 
 public class OrderItemModifierDto
 {
+    public int? AttributeId { get; set; }
     public string ModifierName { get; set; } = string.Empty;
     public decimal ExtraPrice { get; set; } = 0;
 }
@@ -30,6 +31,13 @@ public class CreateOrderDto
     public DateTime? CreatedAt { get; set; }
 }
 
+public class ApplyDiscountDto
+{
+    public decimal? DiscountPercent { get; set; }
+    public decimal? DiscountAmount { get; set; }
+    public string? Reason { get; set; }
+}
+
 public class OrderDetailDto
 {
     public int OrderDetailId { get; set; }
@@ -41,11 +49,13 @@ public class OrderDetailDto
     public decimal UnitPrice { get; set; }
     public decimal SubTotal { get; set; }
     public string? ItemNote { get; set; }
-    public int CookingStatus { get; set; } // 0: Pending, 1: Cooking, 2: Ready
+    public int CookingStatus { get; set; } // 0: Pending, 1: Cooking, 2: Ready, 3: Served, 4: Voided
     public string CookingStatusText => CookingStatus switch
     {
         1 => "Đang nấu",
         2 => "Đã xong",
+        3 => "Đã giao món",
+        4 => "Đã hủy món",
         _ => "Chờ nấu"
     };
     public DateTime? StartedCookingAt { get; set; }
@@ -71,9 +81,12 @@ public class OrderDto
         _ => "Tại bàn (Dine-in)"
     };
     public string? Note { get; set; }
+    public string? DiscountCode { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal DiscountAmount { get; set; }
     public decimal FinalAmount { get; set; }
+    public decimal PaidAmount { get; set; }
+    public decimal RemainingAmount => Math.Max(0, FinalAmount - PaidAmount);
     public int Status { get; set; } // 0: New, 1: Cooking, 2: Served, 3: Completed, 4: Cancelled
     public string StatusText => Status switch
     {
@@ -97,6 +110,7 @@ public class KdsItemDto
     public string OrderCode { get; set; } = string.Empty;
     public string? TableName { get; set; }
     public int ProductId { get; set; }
+    public short CategoryId { get; set; }
     public string ProductName { get; set; } = string.Empty;
     public int Quantity { get; set; }
     public string? ItemNote { get; set; }
@@ -104,6 +118,16 @@ public class KdsItemDto
     public DateTime OrderCreatedAt { get; set; }
     public DateTime? StartedCookingAt { get; set; }
     public DateTime? FinishedCookingAt { get; set; }
+    public List<OrderItemModifierDto> Modifiers { get; set; } = new();
+}
+
+public class TopSellingProductDto
+{
+    public int ProductId { get; set; }
+    public string ProductName { get; set; } = string.Empty;
+    public string Unit { get; set; } = "Ly";
+    public int TotalQuantity { get; set; }
+    public decimal TotalRevenue { get; set; }
 }
 
 public class VoidItemDto

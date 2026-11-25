@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
@@ -15,20 +16,22 @@ public class PaymentController : BaseController
         _configuration = configuration;
     }
 
-    /// <summary>
-    /// POST /api/payment/cash
-    /// Processes cash payment confirmation at cashier desk. Marks order paid and releases table.
-    /// </summary>
+    private int? GetCallerAccountId()
+    {
+        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        return int.TryParse(claim, out int id) && id > 0 ? id : null;
+    }
+
     [HttpPost("cash")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
     public async Task<IActionResult> ProcessCashPayment([FromBody] CashPaymentRequestDto dto)
     {
         if (dto == null || dto.OrderId <= 0)
         {
-            return BadRequest(new { statusCode = 400, message = "Mã đơn hàng không hợp lệ" });
+            return BadRequest(new { statusCode = 400, success = false, message = "Mã đơn hàng không hợp lệ" });
         }
 
-        var result = await Provider.Payment.ProcessCashPaymentAsync(dto.OrderId, dto.Note);
+        var result = await Provider.Payment.ProcessCashPaymentAsync(dto.OrderId, dto.Note, GetCallerAccountId());
         if (!result.Success)
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
@@ -44,12 +47,8 @@ public class PaymentController : BaseController
         });
     }
 
-    /// <summary>
-    /// POST /api/payment/confirm
-    /// Confirms payment across all methods (Cash, VietQR, VNPay) for Flutter mobile client.
-    /// </summary>
     [HttpPost("confirm")]
-    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
     public async Task<IActionResult> ConfirmPayment([FromBody] ConfirmPaymentRequestDto dto)
     {
         if (dto == null || dto.OrderId <= 0)
@@ -57,7 +56,14 @@ public class PaymentController : BaseController
             return BadRequest(new { statusCode = 400, success = false, message = "Thông tin đơn hàng thanh toán không hợp lệ" });
         }
 
-        var result = await Provider.Payment.ProcessPaymentAsync(dto.OrderId, dto.PaymentMethod, dto.Amount, dto.TransactionRef, dto.Note);
+        var result = await Provider.Payment.ProcessPaymentAsync(
+            dto.OrderId,
+            dto.PaymentMethod,
+            dto.Amount,
+            dto.TransactionRef,
+            dto.Note,
+            GetCallerAccountId());
+
         if (!result.Success)
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
@@ -73,15 +79,23 @@ public class PaymentController : BaseController
         });
     }
 
-    /// <summary>
-    /// GET /api/payment/vietqr/{orderId}
-    /// Generates dynamic VietQR image link and payment transfer details for customer scanning.
-    /// </summary>
     [HttpGet("vietqr/{orderId:int}")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
-    public async Task<IActionResult> GenerateVietQr(int orderId)
+    public async Task<IActionResult> GenerateVietQr(int orderId, [FromQuery] decimal? amount = null)
     {
-        var result = await Provider.Payment.GenerateVietQrAsync(orderId);
+        var order = await Provider.Order.GetOrderByIdAsync(orderId);
+        if (order == null)
+        {
+            return NotFound(new { statusCode = 404, success = false, message = "Không tìm thấy đơn hàng" });
+        }
+
+        bool isStaff = User.IsInRole("ADMIN") || User.IsInRole("MANAGER") || User.IsInRole("CASHIER") || User.IsInRole("WAITER");
+        if (!isStaff && order.AccountId.HasValue && GetCallerAccountId() != order.AccountId.Value)
+        {
+            return Forbid();
+        }
+
+        var result = await Provider.Payment.GenerateVietQrAsync(orderId, _configuration, amount);
         if (!result.Success)
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
@@ -96,21 +110,39 @@ public class PaymentController : BaseController
         });
     }
 
-    /// <summary>
-    /// POST /api/payment/vnpay/create-url
-    /// Creates signed VNPay Sandbox payment redirect URL with HMAC-SHA512 checksum.
-    /// </summary>
     [HttpPost("vnpay/create-url")]
+    [HttpPost("create-vnpay-url")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
     public async Task<IActionResult> CreateVnPayUrl([FromBody] VnPayUrlRequestDto dto)
     {
-        string tmnCode = _configuration["VNPay:TmnCode"] ?? _configuration["VNP_TMN_CODE"] ?? "L5GXH1AU";
-        string hashSecret = _configuration["VNPay:HashSecret"] ?? _configuration["VNP_HASH_SECRET"] ?? "EVCHM01XP0U7PT31IRMOJKC2IXRV2DW7";
+        if (dto == null || dto.OrderId <= 0)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = "Mã đơn hàng không hợp lệ" });
+        }
+
+        var order = await Provider.Order.GetOrderByIdAsync(dto.OrderId);
+        if (order == null)
+        {
+            return NotFound(new { statusCode = 404, success = false, message = "Không tìm thấy đơn hàng" });
+        }
+
+        bool isStaff = User.IsInRole("ADMIN") || User.IsInRole("MANAGER") || User.IsInRole("CASHIER") || User.IsInRole("WAITER");
+        if (!isStaff && order.AccountId.HasValue && GetCallerAccountId() != order.AccountId.Value)
+        {
+            return Forbid();
+        }
+
+        string? tmnCode = _configuration["VNPay:TmnCode"] ?? _configuration["VNP_TMN_CODE"];
+        string? hashSecret = _configuration["VNPay:HashSecret"] ?? _configuration["VNP_HASH_SECRET"];
         string vnpUrl = _configuration["VNPay:Url"] ?? _configuration["VNP_URL"] ?? "https://sandbox.vnpayment.vn/paymentv2/vpcpay.html";
         string returnUrl = _configuration["VNPay:ReturnUrl"] ?? _configuration["VNP_RETURN_URL"] ?? dto.ReturnUrl ?? "http://localhost:5138/api/payment/vnpay/callback";
 
-        string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
+        if (string.IsNullOrWhiteSpace(tmnCode) || string.IsNullOrWhiteSpace(hashSecret))
+        {
+            return StatusCode(500, new { statusCode = 500, success = false, message = "Chưa cấu hình VNPay TmnCode/HashSecret trong .env" });
+        }
 
+        string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
         var result = await Provider.Payment.GenerateVnPayUrlAsync(dto.OrderId, tmnCode, hashSecret, vnpUrl, returnUrl, clientIp, dto.OrderInfo);
         if (!result.Success)
         {
@@ -127,27 +159,20 @@ public class PaymentController : BaseController
         });
     }
 
-    /// <summary>
-    /// POST /api/payment/create-vnpay-url
-    /// Alternative endpoint matching mobile client.
-    /// </summary>
-    [HttpPost("create-vnpay-url")]
-    public async Task<IActionResult> CreateVnPayUrlAlt([FromBody] VnPayUrlRequestDto dto)
-    {
-        return await CreateVnPayUrl(dto);
-    }
-
-    /// <summary>
-    /// GET /api/payment/vnpay/callback
-    /// Handles VNPay callback and verifies HMAC-SHA512 signature before recording settlement.
-    /// </summary>
     [HttpGet("vnpay/callback")]
+    [HttpGet("vnpay-return")]
+    [AllowAnonymous]
     public async Task<IActionResult> VnPayCallback()
     {
-        string hashSecret = _configuration["VNPay:HashSecret"] ?? _configuration["VNP_HASH_SECRET"] ?? "EVCHM01XP0U7PT31IRMOJKC2IXRV2DW7";
-        var queryParams = Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
+        string? hashSecret = _configuration["VNPay:HashSecret"] ?? _configuration["VNP_HASH_SECRET"];
+        string? tmnCode = _configuration["VNPay:TmnCode"] ?? _configuration["VNP_TMN_CODE"];
+        if (string.IsNullOrWhiteSpace(hashSecret))
+        {
+            return StatusCode(500, new { statusCode = 500, success = false, message = "Chưa cấu hình VNPay HashSecret" });
+        }
 
-        var result = await Provider.Payment.ProcessVnPayCallbackAsync(queryParams, hashSecret);
+        var queryParams = Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
+        var result = await Provider.Payment.ProcessVnPayCallbackAsync(queryParams, hashSecret, tmnCode);
         if (!result.Success)
         {
             return BadRequest(new
@@ -166,16 +191,6 @@ public class PaymentController : BaseController
             orderId = result.OrderId,
             status = "SANDBOX VERIFIED"
         });
-    }
-
-    /// <summary>
-    /// GET /api/payment/vnpay-return
-    /// Alternative callback route for VNPay.
-    /// </summary>
-    [HttpGet("vnpay-return")]
-    public async Task<IActionResult> VnPayReturn()
-    {
-        return await VnPayCallback();
     }
 }
 

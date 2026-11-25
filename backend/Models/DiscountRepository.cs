@@ -20,14 +20,26 @@ public class DiscountRepository : BaseRepository
     public async Task<List<Discount>> GetActiveDiscountsAsync()
     {
         return await context.Discounts
-            .Where(d => d.IsActive && (d.ExpiryDate == null || d.ExpiryDate >= DateTime.Now))
-            .OrderByDescending(d => d.DiscountPercent)
-            .ThenByDescending(d => d.DiscountAmount)
+            .Where(d => d.IsActive &&
+                        (d.ExpiryDate == null || d.ExpiryDate >= DateTime.Now) &&
+                        (d.MaxUsageCount == null || d.UsedCount < d.MaxUsageCount))
+            .OrderBy(d => d.PointsCost)
+            .ThenByDescending(d => d.DiscountPercent)
             .ToListAsync();
     }
 
     public async Task<DiscountValidationResultDto> ValidateDiscountAsync(string code, decimal orderAmount)
     {
+        if (orderAmount < 0)
+        {
+            return new DiscountValidationResultDto
+            {
+                IsValid = false,
+                Message = "Giá trị đơn hàng không hợp lệ",
+                FinalAmount = 0
+            };
+        }
+
         if (string.IsNullOrWhiteSpace(code))
         {
             return new DiscountValidationResultDto
@@ -72,6 +84,16 @@ public class DiscountRepository : BaseRepository
             };
         }
 
+        if (discount.MaxUsageCount.HasValue && discount.UsedCount >= discount.MaxUsageCount.Value)
+        {
+            return new DiscountValidationResultDto
+            {
+                IsValid = false,
+                Message = $"Mã giảm giá '{code}' đã đạt giới hạn lượt sử dụng",
+                FinalAmount = orderAmount
+            };
+        }
+
         if (orderAmount < discount.MinOrderAmount)
         {
             return new DiscountValidationResultDto
@@ -89,7 +111,7 @@ public class DiscountRepository : BaseRepository
         }
         else if (discount.DiscountPercent > 0)
         {
-            discountAmount = orderAmount * (discount.DiscountPercent / 100m);
+            discountAmount = Math.Round(orderAmount * (discount.DiscountPercent / 100m), 0);
             if (discount.MaxDiscountAmount > 0 && discountAmount > discount.MaxDiscountAmount)
             {
                 discountAmount = discount.MaxDiscountAmount;

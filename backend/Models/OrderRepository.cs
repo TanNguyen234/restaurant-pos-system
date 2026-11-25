@@ -6,95 +6,117 @@ public class OrderRepository : BaseRepository
 {
     public OrderRepository(RestaurantPosContext context) : base(context) { }
 
-    private static readonly object _orderCodeLock = new object();
+    private static readonly object _orderCodeLock = new();
 
-    private string GenerateOrderCode(int? offlineOrderId, int? tableId)
+    private static string GenerateOrderCode(int? offlineOrderId)
     {
         if (offlineOrderId.HasValue && offlineOrderId.Value > 0)
         {
-            return $"ORD-OFF-{offlineOrderId.Value:D6}";
+            return $"ORD-OFF-{offlineOrderId.Value:D6}-{Guid.NewGuid().ToString("N")[..4].ToUpper()}";
         }
 
         lock (_orderCodeLock)
         {
             string datePart = DateTime.Now.ToString("yyyyMMdd");
-            string randomPart = Guid.NewGuid().ToString("N").Substring(0, 6).ToUpper();
+            string randomPart = Guid.NewGuid().ToString("N")[..6].ToUpper();
             return $"ORD-{datePart}-{randomPart}";
         }
     }
 
-    public async Task<(bool Success, string Message, OrderDto? Order)> CreateOrderAsync(CreateOrderDto dto)
+    private async Task<(bool Success, string Message, List<(OrderDetail Detail, List<OrderItemModifierDto> VerifiedModifiers)> Items, decimal Total)>
+        ValidateAndBuildOrderItemsAsync(List<CreateOrderItemDto> rawItems, string? notePrefix = null)
     {
-        if (dto.Items == null || dto.Items.Count == 0)
-        {
-            return (false, "Đơn hàng phải có ít nhất một món ăn hoặc thức uống", null);
-        }
+        var result = new List<(OrderDetail, List<OrderItemModifierDto>)>();
+        decimal total = 0;
 
-        // Idempotency check for offline sync or retry
-        if (dto.OfflineOrderId.HasValue && dto.OfflineOrderId.Value > 0)
-        {
-            string expectedOfflineCode = $"ORD-OFF-{dto.OfflineOrderId.Value:D6}";
-            var existingOrder = await context.Orders
-                .FirstOrDefaultAsync(o => o.OrderCode == expectedOfflineCode);
-            if (existingOrder != null)
-            {
-                var existingDto = await GetOrderByIdAsync(existingOrder.OrderId);
-                return (true, "Đơn hàng đã được đồng bộ trước đó (Idempotent)", existingDto);
-            }
-        }
-
-        // Validate table if specified
-        DiningTable? table = null;
-        if (dto.TableId.HasValue && dto.TableId.Value > 0)
-        {
-            table = await context.DiningTables.FindAsync(dto.TableId.Value);
-            if (table == null)
-            {
-                return (false, "Bàn ăn được chọn không tồn tại trong hệ thống", null);
-            }
-            if (table.Status == 1 && table.CurrentOrderId.HasValue)
-            {
-                // Table is already occupied
-                var currentActive = await context.Orders.FindAsync(table.CurrentOrderId.Value);
-                if (currentActive != null && currentActive.Status != 3 && currentActive.Status != 4)
-                {
-                    return (false, $"Bàn '{table.TableName}' hiện đang có khách (Đơn #{currentActive.OrderCode})", null);
-                }
-            }
-        }
-
-        // Calculate server-side total from official Product prices
-        var productIds = dto.Items.Select(i => i.ProductId).Distinct().ToList();
+        var productIds = rawItems.Select(i => i.ProductId).Distinct().ToList();
         var products = await context.Products
             .Where(p => productIds.Contains(p.ProductId))
             .ToDictionaryAsync(p => p.ProductId);
 
-        decimal serverTotal = 0;
-        var orderDetailsToCreate = new List<(OrderDetail Detail, List<OrderItemModifierDto>? Modifiers)>();
+        var dbAttributes = await context.ProductAttributes
+            .Where(a => productIds.Contains(a.ProductId))
+            .ToListAsync();
 
-        foreach (var item in dto.Items)
+        foreach (var item in rawItems)
         {
             if (item.Quantity <= 0)
-            {
-                return (false, "Số lượng món ăn phải lớn hơn 0", null);
-            }
+                return (false, "Số lượng món ăn phải lớn hơn 0", result, 0);
 
             if (!products.TryGetValue(item.ProductId, out var product))
-            {
-                return (false, $"Món ăn với ID {item.ProductId} không tồn tại trong thực đơn", null);
-            }
+                return (false, $"Món ăn với ID {item.ProductId} không tồn tại trong thực đơn", result, 0);
 
             if (!product.IsAvailable)
+                return (false, $"Món '{product.ProductName}' hiện đang tạm hết, không thể đặt", result, 0);
+
+            var productAttrs = dbAttributes.Where(a => a.ProductId == item.ProductId).ToList();
+            var verifiedMods = new List<OrderItemModifierDto>();
+            decimal modifierExtra = 0;
+
+            if (item.Modifiers != null && item.Modifiers.Count > 0)
             {
-                return (false, $"Món '{product.ProductName}' hiện đang tạm hết, không thể đặt", null);
+                foreach (var mod in item.Modifiers)
+                {
+                    if (mod.ExtraPrice < 0)
+                    {
+                        return (false, $"Phụ thu tùy chọn '{mod.ModifierName}' không hợp lệ (không được âm)", result, 0);
+                    }
+
+                    ProductAttribute? matched = null;
+                    if (mod.AttributeId.HasValue && mod.AttributeId.Value > 0)
+                    {
+                        matched = productAttrs.FirstOrDefault(a => a.AttributeId == mod.AttributeId.Value);
+                        if (matched == null)
+                        {
+                            return (false, $"Thuộc tính #{mod.AttributeId} không thuộc về món '{product.ProductName}'", result, 0);
+                        }
+                    }
+                    else if (!string.IsNullOrWhiteSpace(mod.ModifierName))
+                    {
+                        var modNameTrim = mod.ModifierName.Trim();
+                        matched = productAttrs.FirstOrDefault(a =>
+                            modNameTrim.Equals(a.AttributeName, StringComparison.OrdinalIgnoreCase) ||
+                            modNameTrim.Equals($"{a.AttributeGroup}: {a.AttributeName}", StringComparison.OrdinalIgnoreCase));
+                    }
+
+                    if (matched != null)
+                    {
+                        modifierExtra += matched.ExtraPrice;
+                        verifiedMods.Add(new OrderItemModifierDto
+                        {
+                            AttributeId = matched.AttributeId,
+                            ModifierName = string.IsNullOrWhiteSpace(mod.ModifierName) ? matched.AttributeName : mod.ModifierName.Trim(),
+                            ExtraPrice = matched.ExtraPrice
+                        });
+                    }
+                    else
+                    {
+                        // Non-DB informational modifiers (e.g. "Đường: 50%", "Đá: Ít đá") cannot invent client prices
+                        if (mod.ExtraPrice > 0)
+                        {
+                            return (false, $"Tùy chọn '{mod.ModifierName}' không có phụ thu hợp lệ trên hệ thống", result, 0);
+                        }
+                        if (!string.IsNullOrWhiteSpace(mod.ModifierName))
+                        {
+                            verifiedMods.Add(new OrderItemModifierDto
+                            {
+                                ModifierName = mod.ModifierName.Trim(),
+                                ExtraPrice = 0
+                            });
+                        }
+                    }
+                }
             }
 
-            decimal modifierExtra = item.Modifiers != null && item.Modifiers.Count > 0
-                ? item.Modifiers.Sum(m => m.ExtraPrice)
-                : 0;
             decimal unitPrice = product.Price + modifierExtra;
             decimal subTotal = unitPrice * item.Quantity;
-            serverTotal += subTotal;
+            total += subTotal;
+
+            string? finalNote = item.ItemNote?.Trim();
+            if (!string.IsNullOrEmpty(notePrefix))
+            {
+                finalNote = string.IsNullOrWhiteSpace(finalNote) ? notePrefix : $"{notePrefix} {finalNote}";
+            }
 
             var detail = new OrderDetail
             {
@@ -102,68 +124,164 @@ public class OrderRepository : BaseRepository
                 Quantity = item.Quantity,
                 UnitPrice = unitPrice,
                 SubTotal = subTotal,
-                ItemNote = item.ItemNote,
-                CookingStatus = 0 // Pending
+                ItemNote = finalNote,
+                CookingStatus = 0
             };
-            orderDetailsToCreate.Add((detail, item.Modifiers));
+
+            result.Add((detail, verifiedMods));
         }
 
-        string orderCode = GenerateOrderCode(dto.OfflineOrderId, dto.TableId);
+        return (true, "OK", result, total);
+    }
+
+    public async Task<(bool Success, string Message, OrderDto? Order)> CreateOrderAsync(CreateOrderDto dto, int? authenticatedAccountId = null)
+    {
+        if (dto.Items == null || dto.Items.Count == 0)
+            return (false, "Đơn hàng phải có ít nhất một món ăn hoặc thức uống", null);
+
+        string? idempotencyKey = string.IsNullOrWhiteSpace(dto.IdempotencyKey) ? null : dto.IdempotencyKey.Trim();
+
+        // Check IdempotencyKey first (cross-device safe)
+        if (idempotencyKey != null)
+        {
+            var existingByKey = await context.Orders.FirstOrDefaultAsync(o => o.IdempotencyKey == idempotencyKey);
+            if (existingByKey != null)
+            {
+                var existingDto = await GetOrderByIdAsync(existingByKey.OrderId);
+                return (true, "Đơn hàng đã được đồng bộ trước đó (Idempotent)", existingDto);
+            }
+        }
+        else if (dto.OfflineOrderId.HasValue && dto.OfflineOrderId.Value > 0)
+        {
+            string legacyPrefix = $"ORD-OFF-{dto.OfflineOrderId.Value:D6}";
+            var existingByOffline = await context.Orders.FirstOrDefaultAsync(o => o.OrderCode == legacyPrefix);
+            if (existingByOffline != null)
+            {
+                var existingDto = await GetOrderByIdAsync(existingByOffline.OrderId);
+                return (true, "Đơn hàng đã được đồng bộ trước đó (Idempotent)", existingDto);
+            }
+        }
+
+        var validatedItems = await ValidateAndBuildOrderItemsAsync(dto.Items);
+        if (!validatedItems.Success)
+            return (false, validatedItems.Message, null);
+
+        decimal serverTotal = validatedItems.Total;
+        string orderCode = idempotencyKey != null
+            ? GenerateOrderCode(null)
+            : (dto.OfflineOrderId.HasValue && dto.OfflineOrderId.Value > 0 ? $"ORD-OFF-{dto.OfflineOrderId.Value:D6}" : GenerateOrderCode(null));
 
         using var transaction = await context.Database.BeginTransactionAsync();
         try
         {
-            decimal discountAmount = 0;
-            if (!string.IsNullOrWhiteSpace(dto.DiscountCode))
+            // Re-check idempotency inside transaction
+            if (idempotencyKey != null)
             {
-                var disc = await context.Discounts
-                    .FirstOrDefaultAsync(d => d.Code.ToUpper() == dto.DiscountCode.Trim().ToUpper() && d.IsActive && (d.ExpiryDate == null || d.ExpiryDate >= DateTime.Now));
-                if (disc != null && serverTotal >= disc.MinOrderAmount)
+                var dup = await context.Orders.FirstOrDefaultAsync(o => o.IdempotencyKey == idempotencyKey);
+                if (dup != null)
                 {
-                    if (disc.DiscountAmount > 0)
-                    {
-                        discountAmount = disc.DiscountAmount;
-                    }
-                    else if (disc.DiscountPercent > 0)
-                    {
-                        discountAmount = serverTotal * (disc.DiscountPercent / 100m);
-                        if (disc.MaxDiscountAmount > 0 && discountAmount > disc.MaxDiscountAmount)
-                        {
-                            discountAmount = disc.MaxDiscountAmount;
-                        }
-                    }
-                    discountAmount = Math.Min(discountAmount, serverTotal);
+                    await transaction.RollbackAsync();
+                    return (true, "Đơn hàng đã được đồng bộ trước đó (Idempotent)", await GetOrderByIdAsync(dup.OrderId));
                 }
             }
+
+            DiningTable? table = null;
+            if (dto.TableId.HasValue && dto.TableId.Value > 0)
+            {
+                table = await context.DiningTables.FindAsync(dto.TableId.Value);
+                if (table == null)
+                {
+                    await transaction.RollbackAsync();
+                    return (false, "Bàn ăn được chọn không tồn tại trong hệ thống", null);
+                }
+
+                var activeTableOrder = await context.Orders
+                    .FirstOrDefaultAsync(o => o.TableId == table.TableId && o.Status < 3 && o.PaymentStatus == 0);
+                if (activeTableOrder != null)
+                {
+                    await transaction.RollbackAsync();
+                    return (false, $"Bàn '{table.TableName}' hiện đang có khách (Đơn #{activeTableOrder.OrderCode})", null);
+                }
+                if (table.Status == 3)
+                {
+                    await transaction.RollbackAsync();
+                    return (false, $"Bàn '{table.TableName}' đang được đặt trước, vui lòng check-in trước khi gọi món", null);
+                }
+            }
+
+            decimal discountAmount = 0;
+            string? appliedCode = null;
+            if (!string.IsNullOrWhiteSpace(dto.DiscountCode))
+            {
+                string normCode = dto.DiscountCode.Trim().ToUpper();
+                var disc = await context.Discounts.FirstOrDefaultAsync(d => d.Code.ToUpper() == normCode);
+                if (disc == null || !disc.IsActive)
+                {
+                    await transaction.RollbackAsync();
+                    return (false, $"Mã giảm giá '{dto.DiscountCode}' không tồn tại hoặc đã ngừng áp dụng", null);
+                }
+                if (disc.ExpiryDate.HasValue && disc.ExpiryDate.Value < DateTime.Now)
+                {
+                    await transaction.RollbackAsync();
+                    return (false, $"Mã giảm giá '{dto.DiscountCode}' đã hết hạn sử dụng", null);
+                }
+                if (disc.MaxUsageCount.HasValue && disc.UsedCount >= disc.MaxUsageCount.Value)
+                {
+                    await transaction.RollbackAsync();
+                    return (false, $"Mã giảm giá '{dto.DiscountCode}' đã hết lượt sử dụng", null);
+                }
+                if (serverTotal < disc.MinOrderAmount)
+                {
+                    await transaction.RollbackAsync();
+                    return (false, $"Mã '{disc.Code}' yêu cầu đơn hàng tối thiểu {disc.MinOrderAmount:N0}đ", null);
+                }
+
+                if (disc.DiscountAmount > 0) discountAmount = disc.DiscountAmount;
+                else if (disc.DiscountPercent > 0)
+                {
+                    discountAmount = Math.Round(serverTotal * (disc.DiscountPercent / 100m), 0);
+                    if (disc.MaxDiscountAmount > 0 && discountAmount > disc.MaxDiscountAmount)
+                        discountAmount = disc.MaxDiscountAmount;
+                }
+                discountAmount = Math.Min(discountAmount, serverTotal);
+                appliedCode = disc.Code;
+                disc.UsedCount += 1;
+            }
+
             decimal finalAmount = Math.Max(0, serverTotal - discountAmount);
 
             var order = new Order
             {
                 OrderCode = orderCode,
+                IdempotencyKey = idempotencyKey,
                 TableId = dto.TableId,
-                AccountId = dto.AccountId,
+                AccountId = authenticatedAccountId ?? dto.AccountId,
                 CustomerName = string.IsNullOrWhiteSpace(dto.CustomerName) ? "Khách vãng lai" : dto.CustomerName.Trim(),
-                PhoneNumber = dto.PhoneNumber,
-                OrderType = dto.OrderType,
-                Note = dto.Note,
+                PhoneNumber = string.IsNullOrWhiteSpace(dto.PhoneNumber) ? null : dto.PhoneNumber.Trim(),
+                OrderType = dto.OrderType is >= 1 and <= 3 ? dto.OrderType : 1,
+                Note = dto.Note?.Trim(),
+                DiscountCode = appliedCode,
                 TotalAmount = serverTotal,
                 DiscountAmount = discountAmount,
                 FinalAmount = finalAmount,
-                Status = 0, // New
-                PaymentStatus = 0, // Unpaid
-                CreatedAt = dto.CreatedAt ?? DateTime.Now
+                Status = 0,
+                PaymentStatus = 0,
+                CreatedAt = DateTime.Now // Server authoritative timestamp
             };
 
             context.Orders.Add(order);
             await context.SaveChangesAsync();
 
-            foreach (var (detail, modifiers) in orderDetailsToCreate)
+            foreach (var (detail, modifiers) in validatedItems.Items)
             {
                 detail.OrderId = order.OrderId;
                 context.OrderDetails.Add(detail);
-                await context.SaveChangesAsync();
+            }
+            await context.SaveChangesAsync();
 
-                if (modifiers != null && modifiers.Count > 0)
+            foreach (var (detail, modifiers) in validatedItems.Items)
+            {
+                if (modifiers.Count > 0)
                 {
                     foreach (var mod in modifiers)
                     {
@@ -174,11 +292,10 @@ public class OrderRepository : BaseRepository
                             ExtraPrice = mod.ExtraPrice
                         });
                     }
-                    await context.SaveChangesAsync();
                 }
             }
+            await context.SaveChangesAsync();
 
-            // Update table status to Occupied (1) if applicable
             if (table != null)
             {
                 table.Status = 1; // Occupied
@@ -193,10 +310,10 @@ public class OrderRepository : BaseRepository
             var createdDto = await GetOrderByIdAsync(order.OrderId);
             return (true, "Tạo đơn hàng thành công", createdDto);
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             await transaction.RollbackAsync();
-            return (false, $"Lỗi lưu đơn hàng vào hệ thống: {ex.Message}", null);
+            return (false, "Lỗi lưu đơn hàng vào hệ thống", null);
         }
     }
 
@@ -204,7 +321,8 @@ public class OrderRepository : BaseRepository
         int? status = null,
         DateTime? fromDate = null,
         DateTime? toDate = null,
-        string? search = null)
+        string? search = null,
+        int? onlyAccountId = null)
     {
         var query = from o in context.Orders
                     join t in context.DiningTables on o.TableId equals t.TableId into tGroup
@@ -218,6 +336,11 @@ public class OrderRepository : BaseRepository
                         WaiterName = a != null ? a.FullName : null
                     };
 
+        if (onlyAccountId.HasValue)
+        {
+            query = query.Where(x => x.Order.AccountId == onlyAccountId.Value);
+        }
+
         if (status.HasValue)
         {
             query = query.Where(x => x.Order.Status == status.Value);
@@ -225,27 +348,39 @@ public class OrderRepository : BaseRepository
 
         if (fromDate.HasValue)
         {
-            query = query.Where(x => x.Order.CreatedAt >= fromDate.Value);
+            var start = fromDate.Value.Date;
+            query = query.Where(x => x.Order.CreatedAt >= start);
         }
 
         if (toDate.HasValue)
         {
-            query = query.Where(x => x.Order.CreatedAt <= toDate.Value);
+            var endExclusive = toDate.Value.Date.AddDays(1);
+            query = query.Where(x => x.Order.CreatedAt < endExclusive);
         }
 
         if (!string.IsNullOrWhiteSpace(search))
         {
             string kw = search.Trim().ToLower();
-            query = query.Where(x => x.Order.OrderCode.ToLower().Contains(kw) ||
-                                     (x.Order.CustomerName != null && x.Order.CustomerName.ToLower().Contains(kw)));
+            query = query.Where(x =>
+                x.Order.OrderCode.ToLower().Contains(kw) ||
+                (x.Order.CustomerName != null && x.Order.CustomerName.ToLower().Contains(kw)) ||
+                (x.Order.PhoneNumber != null && x.Order.PhoneNumber.ToLower().Contains(kw)) ||
+                (x.TableName != null && x.TableName.ToLower().Contains(kw)));
         }
 
         var rawList = await query.OrderByDescending(x => x.Order.CreatedAt).ToListAsync();
+        var orderIds = rawList.Select(x => x.Order.OrderId).ToList();
+
+        var paidByOrder = await context.Payments
+            .Where(p => orderIds.Contains(p.OrderId) && p.Status == 1)
+            .GroupBy(p => p.OrderId)
+            .ToDictionaryAsync(g => g.Key, g => g.Sum(p => p.Amount));
 
         var result = new List<OrderDto>();
         foreach (var item in rawList)
         {
             var ord = item.Order;
+            paidByOrder.TryGetValue(ord.OrderId, out decimal paid);
             result.Add(new OrderDto
             {
                 OrderId = ord.OrderId,
@@ -258,9 +393,11 @@ public class OrderRepository : BaseRepository
                 PhoneNumber = ord.PhoneNumber,
                 OrderType = ord.OrderType,
                 Note = ord.Note,
+                DiscountCode = ord.DiscountCode,
                 TotalAmount = ord.TotalAmount,
                 DiscountAmount = ord.DiscountAmount,
                 FinalAmount = ord.FinalAmount,
+                PaidAmount = paid,
                 Status = ord.Status,
                 PaymentStatus = ord.PaymentStatus,
                 CreatedAt = ord.CreatedAt,
@@ -269,6 +406,123 @@ public class OrderRepository : BaseRepository
         }
 
         return result;
+    }
+
+    public async Task<List<TopSellingProductDto>> GetTopSellingProductsAsync(DateTime? fromDate = null, DateTime? toDate = null, int limit = 5)
+    {
+        var query = from d in context.OrderDetails
+                    join o in context.Orders on d.OrderId equals o.OrderId
+                    join p in context.Products on d.ProductId equals p.ProductId
+                    where o.Status != 4 && d.CookingStatus != 4
+                    select new { o.CreatedAt, d.ProductId, p.ProductName, p.Unit, d.Quantity, d.SubTotal };
+
+        if (fromDate.HasValue)
+        {
+            var start = fromDate.Value.Date;
+            query = query.Where(x => x.CreatedAt >= start);
+        }
+        if (toDate.HasValue)
+        {
+            var endExclusive = toDate.Value.Date.AddDays(1);
+            query = query.Where(x => x.CreatedAt < endExclusive);
+        }
+
+        return await query
+            .GroupBy(x => new { x.ProductId, x.ProductName, x.Unit })
+            .Select(g => new TopSellingProductDto
+            {
+                ProductId = g.Key.ProductId,
+                ProductName = g.Key.ProductName,
+                Unit = g.Key.Unit,
+                TotalQuantity = g.Sum(x => x.Quantity),
+                TotalRevenue = g.Sum(x => x.SubTotal)
+            })
+            .OrderByDescending(x => x.TotalQuantity)
+            .ThenByDescending(x => x.TotalRevenue)
+            .Take(limit)
+            .ToListAsync();
+    }
+
+    public async Task<List<OrderDto>> LookupOrdersAsync(string? queryText, int? callerAccountId, bool isStaff)
+    {
+        string kw = queryText?.Trim().ToLower() ?? string.Empty;
+        var baseQuery = from o in context.Orders
+                        join t in context.DiningTables on o.TableId equals t.TableId into tGroup
+                        from t in tGroup.DefaultIfEmpty()
+                        join a in context.Accounts on o.AccountId equals a.AccountId into aGroup
+                        from a in aGroup.DefaultIfEmpty()
+                        select new
+                        {
+                            Order = o,
+                            TableName = t != null ? t.TableName : null,
+                            WaiterName = a != null ? a.FullName : null
+                        };
+
+        if (!string.IsNullOrEmpty(kw))
+        {
+            baseQuery = baseQuery.Where(x =>
+                x.Order.OrderCode.ToLower().Contains(kw) ||
+                (x.Order.PhoneNumber != null && x.Order.PhoneNumber.ToLower().Contains(kw)));
+        }
+        else if (callerAccountId.HasValue)
+        {
+            baseQuery = baseQuery.Where(x => x.Order.AccountId == callerAccountId.Value);
+        }
+
+        if (!isStaff && string.IsNullOrEmpty(kw) && callerAccountId.HasValue)
+        {
+            baseQuery = baseQuery.Where(x => x.Order.AccountId == callerAccountId.Value);
+        }
+
+        var rawList = await baseQuery
+            .OrderByDescending(x => x.Order.CreatedAt)
+            .Take(20)
+            .ToListAsync();
+
+        var ids = rawList.Select(x => x.Order.OrderId).ToList();
+        var detailsByOrder = await (from d in context.OrderDetails
+                                    join p in context.Products on d.ProductId equals p.ProductId
+                                    where ids.Contains(d.OrderId) && d.CookingStatus != 4
+                                    select new OrderDetailDto
+                                    {
+                                        OrderDetailId = d.OrderDetailId,
+                                        OrderId = d.OrderId,
+                                        ProductId = d.ProductId,
+                                        ProductName = p.ProductName,
+                                        ImageUrl = p.ImageUrl,
+                                        Quantity = d.Quantity,
+                                        UnitPrice = d.UnitPrice,
+                                        SubTotal = d.SubTotal,
+                                        ItemNote = d.ItemNote,
+                                        CookingStatus = d.CookingStatus
+                                    }).ToListAsync();
+
+        return rawList.Select(item =>
+        {
+            var ord = item.Order;
+            return new OrderDto
+            {
+                OrderId = ord.OrderId,
+                OrderCode = ord.OrderCode,
+                TableId = ord.TableId,
+                TableName = item.TableName,
+                AccountId = ord.AccountId,
+                WaiterName = item.WaiterName,
+                CustomerName = ord.CustomerName,
+                PhoneNumber = ord.PhoneNumber,
+                OrderType = ord.OrderType,
+                Note = ord.Note,
+                DiscountCode = ord.DiscountCode,
+                TotalAmount = ord.TotalAmount,
+                DiscountAmount = ord.DiscountAmount,
+                FinalAmount = ord.FinalAmount,
+                Status = ord.Status,
+                PaymentStatus = ord.PaymentStatus,
+                CreatedAt = ord.CreatedAt,
+                CompletedAt = ord.CompletedAt,
+                Details = detailsByOrder.Where(d => d.OrderId == ord.OrderId).ToList()
+            };
+        }).ToList();
     }
 
     public async Task<OrderDto?> GetOrderByIdAsync(int orderId)
@@ -325,6 +579,10 @@ public class OrderRepository : BaseRepository
                 .ToList();
         }
 
+        decimal paidAmount = await context.Payments
+            .Where(p => p.OrderId == orderId && p.Status == 1)
+            .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
         return new OrderDto
         {
             OrderId = ord.OrderId,
@@ -337,9 +595,11 @@ public class OrderRepository : BaseRepository
             PhoneNumber = ord.PhoneNumber,
             OrderType = ord.OrderType,
             Note = ord.Note,
+            DiscountCode = ord.DiscountCode,
             TotalAmount = ord.TotalAmount,
             DiscountAmount = ord.DiscountAmount,
             FinalAmount = ord.FinalAmount,
+            PaidAmount = paidAmount,
             Status = ord.Status,
             PaymentStatus = ord.PaymentStatus,
             CreatedAt = ord.CreatedAt,
@@ -348,23 +608,45 @@ public class OrderRepository : BaseRepository
         };
     }
 
-    public async Task<(bool Success, string Message)> UpdateOrderStatusAsync(int orderId, int newStatus)
+    public async Task<OrderDto?> GetActiveOrderByTableIdAsync(int tableId)
     {
-        var order = await context.Orders.FindAsync(orderId);
-        if (order == null)
+        var table = await context.DiningTables.FindAsync(tableId);
+        if (table == null) return null;
+
+        Order? active = null;
+        if (table.CurrentOrderId.HasValue)
         {
-            return (false, "Không tìm thấy đơn hàng");
+            active = await context.Orders.FirstOrDefaultAsync(o =>
+                o.OrderId == table.CurrentOrderId.Value && o.Status < 3 && o.PaymentStatus == 0);
         }
 
-        // Validate illegal transitions
+        active ??= await context.Orders
+            .Where(o => o.TableId == tableId && o.Status < 3 && o.PaymentStatus == 0)
+            .OrderByDescending(o => o.OrderId)
+            .FirstOrDefaultAsync();
+
+        return active == null ? null : await GetOrderByIdAsync(active.OrderId);
+    }
+
+    public async Task<(bool Success, string Message)> UpdateOrderStatusAsync(int orderId, int newStatus, bool canCompleteOrCancel)
+    {
+        if (newStatus < 0 || newStatus > 4)
+            return (false, "Trạng thái đơn hàng không hợp lệ (0..4)");
+
+        var order = await context.Orders.FindAsync(orderId);
+        if (order == null) return (false, "Không tìm thấy đơn hàng");
+
+        if ((newStatus == 3 || newStatus == 4) && !canCompleteOrCancel)
+            return (false, "Chỉ Thu ngân, Quản lý hoặc Quản trị viên mới có quyền hoàn tất/hủy đơn hàng");
+
         if (order.Status == 4 && newStatus != 4)
-        {
             return (false, "Đơn hàng đã bị hủy, không thể kích hoạt lại");
-        }
+
         if (order.Status == 3 && newStatus < 3)
-        {
             return (false, "Đơn hàng đã hoàn thành, không thể chuyển về trạng thái trước");
-        }
+
+        if (newStatus == 3 && order.PaymentStatus == 0)
+            return (false, "Đơn hàng chưa thanh toán, vui lòng thu tiền trước khi hoàn tất đơn");
 
         order.Status = newStatus;
         if (newStatus == 3)
@@ -372,13 +654,12 @@ public class OrderRepository : BaseRepository
             order.CompletedAt = DateTime.Now;
         }
 
-        // If order is completed or cancelled, and table was assigned, release table
         if ((newStatus == 3 || newStatus == 4) && order.TableId.HasValue)
         {
             var table = await context.DiningTables.FindAsync(order.TableId.Value);
-            if (table != null && table.CurrentOrderId == order.OrderId)
+            if (table != null && (table.CurrentOrderId == order.OrderId || !context.Orders.Any(o => o.TableId == table.TableId && o.OrderId != order.OrderId && o.Status < 3 && o.PaymentStatus == 0)))
             {
-                table.Status = 0; // Empty
+                table.Status = 0;
                 table.CurrentOrderId = null;
                 table.UpdatedAt = DateTime.Now;
                 context.DiningTables.Update(table);
@@ -391,215 +672,256 @@ public class OrderRepository : BaseRepository
 
     public async Task<List<KdsItemDto>> GetKdsItemsAsync()
     {
-        var query = from d in context.OrderDetails
-                    join o in context.Orders on d.OrderId equals o.OrderId
-                    join p in context.Products on d.ProductId equals p.ProductId
-                    join t in context.DiningTables on o.TableId equals t.TableId into tGroup
-                    from t in tGroup.DefaultIfEmpty()
-                    where o.Status != 3 && o.Status != 4 && d.CookingStatus < 2 // 0: Pending, 1: Cooking
-                    orderby d.CookingStatus descending, o.CreatedAt ascending
-                    select new KdsItemDto
-                    {
-                        OrderDetailId = d.OrderDetailId,
-                        OrderId = d.OrderId,
-                        OrderCode = o.OrderCode,
-                        TableName = t != null ? t.TableName : "Mang về",
-                        ProductId = d.ProductId,
-                        ProductName = p.ProductName,
-                        Quantity = d.Quantity,
-                        ItemNote = d.ItemNote,
-                        CookingStatus = d.CookingStatus,
-                        OrderCreatedAt = o.CreatedAt,
-                        StartedCookingAt = d.StartedCookingAt,
-                        FinishedCookingAt = d.FinishedCookingAt
-                    };
+        var items = await (from d in context.OrderDetails
+                           join o in context.Orders on d.OrderId equals o.OrderId
+                           join p in context.Products on d.ProductId equals p.ProductId
+                           join t in context.DiningTables on o.TableId equals t.TableId into tGroup
+                           from t in tGroup.DefaultIfEmpty()
+                           where o.Status != 3 && o.Status != 4 && d.CookingStatus >= 0 && d.CookingStatus <= 2
+                           orderby d.CookingStatus ascending, o.CreatedAt ascending
+                           select new KdsItemDto
+                           {
+                               OrderDetailId = d.OrderDetailId,
+                               OrderId = d.OrderId,
+                               OrderCode = o.OrderCode,
+                               TableName = t != null ? t.TableName : (o.OrderType == 3 ? "Giao hàng" : "Mang về"),
+                               ProductId = d.ProductId,
+                               CategoryId = p.CategoryId,
+                               ProductName = p.ProductName,
+                               Quantity = d.Quantity,
+                               ItemNote = d.ItemNote,
+                               CookingStatus = d.CookingStatus,
+                               OrderCreatedAt = o.CreatedAt,
+                               StartedCookingAt = d.StartedCookingAt,
+                               FinishedCookingAt = d.FinishedCookingAt
+                           }).ToListAsync();
 
-        return await query.ToListAsync();
+        var detailIds = items.Select(i => i.OrderDetailId).ToList();
+        if (detailIds.Count > 0)
+        {
+            var mods = await context.OrderDetailModifiers
+                .Where(m => detailIds.Contains(m.OrderDetailId))
+                .ToListAsync();
+
+            foreach (var item in items)
+            {
+                item.Modifiers = mods
+                    .Where(m => m.OrderDetailId == item.OrderDetailId)
+                    .Select(m => new OrderItemModifierDto
+                    {
+                        ModifierName = m.ModifierName,
+                        ExtraPrice = m.ExtraPrice
+                    })
+                    .ToList();
+            }
+        }
+
+        return items;
     }
 
     public async Task<(bool Success, string Message)> UpdateCookingStatusAsync(int orderDetailId, int newStatus)
     {
-        var detail = await context.OrderDetails.FindAsync(orderDetailId);
-        if (detail == null)
-        {
-            return (false, "Không tìm thấy món ăn trong đơn hàng");
-        }
+        if (newStatus < 0 || newStatus > 3)
+            return (false, "Trạng thái chế biến không hợp lệ (0: Chờ nấu, 1: Đang nấu, 2: Đã xong, 3: Đã giao)");
 
-        detail.CookingStatus = newStatus;
-        if (newStatus == 1) // In Progress
+        using var tx = await context.Database.BeginTransactionAsync();
+        try
         {
-            detail.StartedCookingAt = DateTime.Now;
-        }
-        else if (newStatus == 2) // Ready
-        {
-            detail.FinishedCookingAt = DateTime.Now;
-        }
+            var detail = await context.OrderDetails.FindAsync(orderDetailId);
+            if (detail == null) return (false, "Không tìm thấy món ăn trong đơn hàng");
+            if (detail.CookingStatus == 4) return (false, "Món ăn này đã bị hủy (Void), không thể cập nhật tiến độ nấu");
 
-        context.OrderDetails.Update(detail);
-        await context.SaveChangesAsync();
+            var order = await context.Orders.FindAsync(detail.OrderId);
+            if (order == null || order.Status == 3 || order.Status == 4)
+                return (false, "Đơn hàng đã hoàn tất hoặc đã hủy, không thể thay đổi trạng thái bếp");
 
-        // Check if all details in this order are completed
-        var allDetails = await context.OrderDetails
-            .Where(d => d.OrderId == detail.OrderId)
-            .ToListAsync();
+            detail.CookingStatus = newStatus;
+            if (newStatus == 1) detail.StartedCookingAt = DateTime.Now;
+            else if (newStatus == 2) detail.FinishedCookingAt ??= DateTime.Now;
 
-        var order = await context.Orders.FindAsync(detail.OrderId);
-        if (order != null)
-        {
-            if (allDetails.All(d => d.CookingStatus == 2))
-            {
-                // All items ready -> order served
-                order.Status = 2; // Served
-            }
-            else if (allDetails.Any(d => d.CookingStatus >= 1) && order.Status == 0)
-            {
-                // Cooking started
-                order.Status = 1; // Cooking
-            }
-            context.Orders.Update(order);
+            context.OrderDetails.Update(detail);
             await context.SaveChangesAsync();
-        }
 
-        return (true, "Cập nhật trạng thái chế biến món ăn thành công");
+            var activeDetails = await context.OrderDetails
+                .Where(d => d.OrderId == detail.OrderId && d.CookingStatus != 4)
+                .ToListAsync();
+
+            if (activeDetails.Count > 0)
+            {
+                if (activeDetails.All(d => d.CookingStatus >= 2))
+                {
+                    order.Status = 2; // Served/Ready
+                }
+                else if (activeDetails.Any(d => d.CookingStatus >= 1) && order.Status == 0)
+                {
+                    order.Status = 1; // Cooking
+                }
+                context.Orders.Update(order);
+                await context.SaveChangesAsync();
+            }
+
+            await tx.CommitAsync();
+            return (true, "Cập nhật trạng thái chế biến món ăn thành công");
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            return (false, "Lỗi cập nhật trạng thái chế biến");
+        }
     }
 
     public async Task<(bool Success, string Message, OrderDto? Order)> AddItemsToOrderAsync(int orderId, List<CreateOrderItemDto> newItems)
     {
         if (newItems == null || newItems.Count == 0)
-        {
             return (false, "Vui lòng chọn ít nhất một món để thêm vào đơn hàng", null);
-        }
 
         var order = await context.Orders.FindAsync(orderId);
-        if (order == null || order.Status == 3 || order.Status == 4)
-        {
-            return (false, "Không tìm thấy đơn hàng hoặc đơn hàng đã hoàn tất/đã hủy", null);
-        }
+        if (order == null || order.Status == 3 || order.Status == 4 || order.PaymentStatus == 1)
+            return (false, "Không tìm thấy đơn hàng hoặc đơn hàng đã thanh toán/đã hủy", null);
 
-        var productIds = newItems.Select(i => i.ProductId).Distinct().ToList();
-        var products = await context.Products
-            .Where(p => productIds.Contains(p.ProductId))
-            .ToDictionaryAsync(p => p.ProductId);
-
-        decimal addedTotal = 0;
-        var detailsToAdd = new List<(OrderDetail Detail, List<OrderItemModifierDto>? Modifiers)>();
-
-        foreach (var item in newItems)
-        {
-            if (item.Quantity <= 0) continue;
-            if (!products.TryGetValue(item.ProductId, out var product))
-            {
-                return (false, $"Món ăn #{item.ProductId} không tồn tại trong thực đơn", null);
-            }
-            if (!product.IsAvailable)
-            {
-                return (false, $"Món '{product.ProductName}' hiện đang tạm hết", null);
-            }
-
-            decimal modExtra = item.Modifiers != null && item.Modifiers.Count > 0 ? item.Modifiers.Sum(m => m.ExtraPrice) : 0;
-            decimal unitPrice = product.Price + modExtra;
-            decimal subTotal = unitPrice * item.Quantity;
-            addedTotal += subTotal;
-
-            var detail = new OrderDetail
-            {
-                OrderId = order.OrderId,
-                ProductId = item.ProductId,
-                Quantity = item.Quantity,
-                UnitPrice = unitPrice,
-                SubTotal = subTotal,
-                ItemNote = string.IsNullOrWhiteSpace(item.ItemNote) ? "[GỌI THÊM]" : $"[GỌI THÊM] {item.ItemNote}",
-                CookingStatus = 0
-            };
-            detailsToAdd.Add((detail, item.Modifiers));
-        }
+        var validated = await ValidateAndBuildOrderItemsAsync(newItems, "[GỌI THÊM]");
+        if (!validated.Success) return (false, validated.Message, null);
 
         using var tx = await context.Database.BeginTransactionAsync();
         try
         {
-            foreach (var (detail, modifiers) in detailsToAdd)
+            foreach (var (detail, _) in validated.Items)
             {
+                detail.OrderId = order.OrderId;
                 context.OrderDetails.Add(detail);
-                await context.SaveChangesAsync();
+            }
+            await context.SaveChangesAsync();
 
-                if (modifiers != null && modifiers.Count > 0)
+            foreach (var (detail, modifiers) in validated.Items)
+            {
+                foreach (var mod in modifiers)
                 {
-                    foreach (var mod in modifiers)
+                    context.OrderDetailModifiers.Add(new OrderDetailModifier
                     {
-                        context.OrderDetailModifiers.Add(new OrderDetailModifier
-                        {
-                            OrderDetailId = detail.OrderDetailId,
-                            ModifierName = mod.ModifierName,
-                            ExtraPrice = mod.ExtraPrice
-                        });
-                    }
-                    await context.SaveChangesAsync();
+                        OrderDetailId = detail.OrderDetailId,
+                        ModifierName = mod.ModifierName,
+                        ExtraPrice = mod.ExtraPrice
+                    });
                 }
             }
+            await context.SaveChangesAsync();
 
-            order.TotalAmount += addedTotal;
+            order.TotalAmount += validated.Total;
+            order.DiscountAmount = Math.Min(order.DiscountAmount, order.TotalAmount);
             order.FinalAmount = Math.Max(0, order.TotalAmount - order.DiscountAmount);
-            if (order.Status == 2) order.Status = 1; // Back to cooking because of new items
+            if (order.Status == 2) order.Status = 1;
 
             context.Orders.Update(order);
             await context.SaveChangesAsync();
             await tx.CommitAsync();
 
-            var updatedDto = await GetOrderByIdAsync(orderId);
-            return (true, $"Đã thêm thành công {detailsToAdd.Count} món vào đơn #{order.OrderCode}", updatedDto);
+            return (true, $"Đã thêm thành công {validated.Items.Count} món vào đơn #{order.OrderCode}", await GetOrderByIdAsync(orderId));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             await tx.RollbackAsync();
-            return (false, $"Lỗi khi thêm món vào đơn hàng: {ex.Message}", null);
+            return (false, "Lỗi khi thêm món vào đơn hàng", null);
         }
+    }
+
+    public async Task<(bool Success, string Message, OrderDto? Order)> ApplyManualDiscountAsync(int orderId, ApplyDiscountDto dto)
+    {
+        var order = await context.Orders.FindAsync(orderId);
+        if (order == null) return (false, "Không tìm thấy đơn hàng", null);
+        if (order.PaymentStatus == 1 || order.Status == 3 || order.Status == 4)
+            return (false, "Không thể áp dụng chiết khấu cho đơn hàng đã thanh toán hoặc đã hủy", null);
+
+        decimal discountAmt = 0;
+        if (dto.DiscountPercent.HasValue && dto.DiscountPercent.Value > 0)
+        {
+            if (dto.DiscountPercent.Value > 100) return (false, "Phần trăm giảm giá không được vượt quá 100%", null);
+            discountAmt = Math.Round(order.TotalAmount * (dto.DiscountPercent.Value / 100m), 0);
+        }
+        else if (dto.DiscountAmount.HasValue && dto.DiscountAmount.Value >= 0)
+        {
+            discountAmt = dto.DiscountAmount.Value;
+        }
+        else
+        {
+            return (false, "Giá trị giảm giá không hợp lệ", null);
+        }
+
+        discountAmt = Math.Clamp(discountAmt, 0, order.TotalAmount);
+        order.DiscountAmount = discountAmt;
+        order.FinalAmount = Math.Max(0, order.TotalAmount - discountAmt);
+        if (!string.IsNullOrWhiteSpace(dto.Reason))
+        {
+            order.Note = string.IsNullOrWhiteSpace(order.Note)
+                ? $"[Chiết khấu: {dto.Reason.Trim()}]"
+                : $"{order.Note} | [CK: {dto.Reason.Trim()}]";
+        }
+
+        await context.SaveChangesAsync();
+        return (true, $"Đã áp dụng chiết khấu {discountAmt:N0}đ thành công", await GetOrderByIdAsync(orderId));
     }
 
     public async Task<(bool Success, string Message, OrderDto? Order)> VoidOrderItemAsync(int orderId, int orderDetailId, string reason, int voidQuantity)
     {
-        var order = await context.Orders.FindAsync(orderId);
-        if (order == null) return (false, "Không tìm thấy đơn hàng", null);
-
-        if (order.Status == 3 || order.PaymentStatus == 1)
+        using var tx = await context.Database.BeginTransactionAsync();
+        try
         {
-            return (false, "Không thể hủy món trong đơn hàng đã hoàn tất hoặc đã thanh toán!", null);
+            var order = await context.Orders.FindAsync(orderId);
+            if (order == null) return (false, "Không tìm thấy đơn hàng", null);
+
+            if (order.Status == 3 || order.Status == 4 || order.PaymentStatus == 1)
+                return (false, "Không thể hủy món trong đơn hàng đã hoàn tất, đã hủy hoặc đã thanh toán!", null);
+
+            var detail = await context.OrderDetails.FirstOrDefaultAsync(d => d.OrderDetailId == orderDetailId && d.OrderId == orderId);
+            if (detail == null) return (false, "Không tìm thấy món ăn trong đơn hàng này", null);
+
+            if (detail.CookingStatus == 4)
+                return (false, "Món ăn này đã được hủy trước đó rồi!", null);
+
+            if (voidQuantity <= 0 || voidQuantity >= detail.Quantity)
+            {
+                detail.CookingStatus = 4; // Canonical 4: Voided
+                detail.SubTotal = 0;      // Zero subtotal explicitly
+                detail.ItemNote = string.IsNullOrEmpty(detail.ItemNote)
+                    ? $"[ĐÃ HỦY: {reason}]"
+                    : $"{detail.ItemNote} [ĐÃ HỦY: {reason}]";
+            }
+            else
+            {
+                decimal unitPrice = detail.Quantity > 0 ? (detail.SubTotal / detail.Quantity) : detail.UnitPrice;
+                detail.Quantity -= voidQuantity;
+                detail.SubTotal = Math.Max(0, detail.Quantity * unitPrice);
+                detail.ItemNote = string.IsNullOrEmpty(detail.ItemNote)
+                    ? $"[HỦY {voidQuantity}x: {reason}]"
+                    : $"{detail.ItemNote} [HỦY {voidQuantity}x: {reason}]";
+            }
+
+            // CRITICAL FIX: Save detail mutation FIRST before querying SQL SUM
+            await context.SaveChangesAsync();
+
+            decimal activeTotal = await context.OrderDetails
+                .Where(d => d.OrderId == orderId && d.CookingStatus != 4)
+                .SumAsync(d => (decimal?)d.SubTotal) ?? 0;
+
+            order.TotalAmount = activeTotal;
+            order.DiscountAmount = Math.Min(order.DiscountAmount, activeTotal);
+            order.FinalAmount = Math.Max(0, activeTotal - order.DiscountAmount);
+
+            await context.SaveChangesAsync();
+            await tx.CommitAsync();
+
+            return (true, "Đã hủy món thành công", await GetOrderByIdAsync(orderId));
         }
-
-        var detail = await context.OrderDetails.FirstOrDefaultAsync(d => d.OrderDetailId == orderDetailId && d.OrderId == orderId);
-        if (detail == null) return (false, "Không tìm thấy món ăn trong đơn hàng này", null);
-
-        if (detail.CookingStatus == 3)
+        catch (Exception)
         {
-            return (false, "Món ăn này đã được hủy trước đó rồi!", null);
+            await tx.RollbackAsync();
+            return (false, "Lỗi khi hủy món", null);
         }
+    }
 
-        if (voidQuantity <= 0 || voidQuantity >= detail.Quantity)
-        {
-            detail.CookingStatus = 3; // 3: Voided / Cancelled
-            detail.ItemNote = string.IsNullOrEmpty(detail.ItemNote)
-                ? $"[ĐÃ HỦY: {reason}]"
-                : $"{detail.ItemNote} [ĐÃ HỦY: {reason}]";
-        }
-        else
-        {
-            decimal unitPrice = detail.Quantity > 0 ? (detail.SubTotal / detail.Quantity) : detail.UnitPrice;
-            detail.Quantity -= voidQuantity;
-            detail.SubTotal = Math.Max(0, detail.Quantity * unitPrice);
-            detail.ItemNote = string.IsNullOrEmpty(detail.ItemNote)
-                ? $"[HỦY {voidQuantity}x: {reason}]"
-                : $"{detail.ItemNote} [HỦY {voidQuantity}x: {reason}]";
-        }
-
-        decimal activeTotal = await context.OrderDetails
-            .Where(d => d.OrderId == orderId && d.CookingStatus != 3)
-            .SumAsync(d => d.SubTotal);
-
-        order.TotalAmount = activeTotal;
-        order.FinalAmount = Math.Max(0, order.TotalAmount - order.DiscountAmount);
-
-        await context.SaveChangesAsync();
-
-        var updatedOrder = await GetOrderByIdAsync(orderId);
-        return (true, "Đã hủy món thành công", updatedOrder);
+    public async Task<(bool Success, string Message, OrderDto? Order)> VoidDetailByIdAsync(int orderDetailId, string reason, int voidQuantity)
+    {
+        var detail = await context.OrderDetails.FindAsync(orderDetailId);
+        if (detail == null) return (false, "Không tìm thấy món ăn", null);
+        return await VoidOrderItemAsync(detail.OrderId, orderDetailId, reason, voidQuantity);
     }
 }

@@ -8,47 +8,35 @@ namespace WebApi.Api.Controllers;
 [Route("api/[controller]")]
 public class TableController : BaseController
 {
-    /// <summary>
-    /// GET /api/table/areas
-    /// Lấy danh sách toàn bộ các khu vực đang hoạt động trong nhà hàng
-    /// </summary>
     [HttpGet("areas")]
+    [AllowAnonymous]
     public IActionResult GetAreas()
     {
         var areas = Provider.Table.GetAreas();
         return Ok(areas);
     }
 
-    /// <summary>
-    /// GET /api/table/by-area/{areaId}
-    /// Lấy danh sách bàn theo khu vực
-    /// </summary>
     [HttpGet("by-area/{areaId:int}")]
+    [AllowAnonymous]
     public IActionResult GetTablesByArea(int areaId)
     {
         var tables = Provider.Table.GetTablesByArea(areaId);
         return Ok(tables);
     }
 
-    /// <summary>
-    /// GET /api/table
-    /// Lấy toàn bộ danh sách bàn và trạng thái hiện tại
-    /// </summary>
     [HttpGet]
+    [AllowAnonymous]
     public IActionResult GetAllTables()
     {
         var tables = Provider.Table.GetAllEnrichedTables();
         return Ok(tables);
     }
 
-    /// <summary>
-    /// GET /api/table/{id}
-    /// Lấy thông tin chi tiết của 1 bàn theo ID
-    /// </summary>
     [HttpGet("{id:int}")]
+    [AllowAnonymous]
     public IActionResult GetById(int id)
     {
-        var table = Provider.Table.GetById(id);
+        var table = Provider.Table.GetEnrichedById(id);
         if (table == null)
         {
             return NotFound(new { success = false, message = $"Không tìm thấy bàn có ID = {id}" });
@@ -56,64 +44,51 @@ public class TableController : BaseController
         return Ok(table);
     }
 
-    /// <summary>
-    /// PUT /api/table/{id}/status
-    /// Cập nhật trạng thái bàn ăn (0: Bàn trống, 1: Có khách, 2: Chờ phục vụ, 3: Đã đặt trước)
-    /// Hỗ trợ cả Request Body JSON { "status": 1 } và Query Param ?status=1
-    /// </summary>
     [HttpPut("{id:int}/status")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public IActionResult UpdateStatus(int id, [FromBody] UpdateTableStatusRequest? body = null, [FromQuery] int? status = null)
     {
         int? resolvedStatus = body?.Status ?? status;
-
         if (!resolvedStatus.HasValue)
         {
-            return BadRequest(new { success = false, message = "Vui lòng cung cấp trạng thái bàn mới (status: 0: Trống, 1: Có khách, 2: Chờ phục vụ, 3: Đã đặt trước)" });
+            return BadRequest(new { success = false, message = "Vui lòng cung cấp trạng thái bàn mới (status: 0: Trống, 1: Có khách, 2: Chờ phục vụ, 3: Đặt trước)" });
         }
 
         if (resolvedStatus.Value < 0 || resolvedStatus.Value > 3)
         {
-            return BadRequest(new { success = false, message = "Trạng thái bàn không hợp lệ. Giá trị hợp lệ: 0 (Trống), 1 (Có khách), 2 (Chờ phục vụ), 3 (Đã đặt trước)" });
+            return BadRequest(new { success = false, message = "Trạng thái bàn không hợp lệ. Giá trị hợp lệ: 0..3" });
         }
 
-        var updatedTable = Provider.Table.UpdateStatus(id, resolvedStatus.Value);
-        if (updatedTable == null)
+        var result = Provider.Table.UpdateStatusSafe(id, resolvedStatus.Value);
+        if (!result.Success || result.Table == null)
         {
-            return NotFound(new { success = false, message = $"Không tìm thấy bàn có ID = {id}" });
+            if (result.Message.Contains("Không tìm thấy"))
+                return NotFound(new { success = false, message = result.Message });
+            return BadRequest(new { success = false, message = result.Message });
         }
 
         return Ok(new
         {
             success = true,
-            message = "Cập nhật trạng thái thành công",
-            tableId = updatedTable.TableId,
-            status = updatedTable.Status,
-            table = updatedTable
+            message = result.Message,
+            tableId = result.Table.TableId,
+            status = result.Table.Status,
+            table = result.Table
         });
     }
 
-    /// <summary>
-    /// POST /api/table/transfer
-    /// Chuyển bàn từ bàn nguồn sang bàn đích bằng transaction
-    /// Body hỗ trợ: { "fromTableId": 1, "toTableId": 2 } hoặc { "sourceTableId": 1, "targetTableId": 2 }
-    /// </summary>
     [HttpPost("transfer")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public IActionResult Transfer([FromBody] TransferTableRequest request)
     {
         if (request == null)
-        {
             return BadRequest(new { success = false, message = "Dữ liệu yêu cầu chuyển bàn không hợp lệ" });
-        }
 
         int fromId = request.FromTableId ?? request.SourceTableId ?? 0;
         int toId = request.ToTableId ?? request.TargetTableId ?? 0;
 
         if (fromId <= 0 || toId <= 0)
-        {
-            return BadRequest(new { success = false, message = "Vui lòng cung cấp đầy đủ ID bàn nguồn (fromTableId) và bàn đích (toTableId)" });
-        }
+            return BadRequest(new { success = false, message = "Vui lòng cung cấp đầy đủ ID bàn nguồn và bàn đích" });
 
         var result = Provider.Table.TransferTable(fromId, toId);
         if (!result.Success)
@@ -136,10 +111,6 @@ public class TableController : BaseController
         });
     }
 
-    /// <summary>
-    /// POST /api/table/merge
-    /// Gộp hóa đơn từ bàn nguồn vào bàn đích
-    /// </summary>
     [HttpPost("merge")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public IActionResult Merge([FromBody] TransferTableRequest request)
@@ -156,10 +127,6 @@ public class TableController : BaseController
         return Ok(new { success = true, message = result.Message, fromTableId = result.FromTableId, toTableId = result.ToTableId });
     }
 
-    /// <summary>
-    /// POST /api/table/split
-    /// Tách một số món sang bàn trống mới
-    /// </summary>
     [HttpPost("split")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public IActionResult Split([FromBody] SplitTableRequest request)
@@ -174,10 +141,6 @@ public class TableController : BaseController
         return Ok(new { success = true, message = result.Message, newOrderId = result.NewOrderId });
     }
 
-    /// <summary>
-    /// POST /api/table/reserve
-    /// Đặt bàn trước cho khách hàng
-    /// </summary>
     [HttpPost("reserve")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
     public IActionResult Reserve([FromBody] ReserveTableRequest request)
@@ -193,10 +156,6 @@ public class TableController : BaseController
         return Ok(new { success = true, message = result.Message, data = result.Reservation });
     }
 
-    /// <summary>
-    /// GET /api/table/reservations
-    /// Lấy danh sách đặt bàn
-    /// </summary>
     [HttpGet("reservations")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public IActionResult GetReservations([FromQuery] DateTime? fromDate)
@@ -205,10 +164,6 @@ public class TableController : BaseController
         return Ok(new { success = true, total = list.Count, data = list });
     }
 
-    /// <summary>
-    /// PUT /api/table/reservation/{id}/check-in
-    /// Khách đến nhận bàn đã đặt
-    /// </summary>
     [HttpPut("reservation/{id:int}/check-in")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public IActionResult CheckInReservation(int id)
@@ -218,10 +173,6 @@ public class TableController : BaseController
         return Ok(new { success = true, message = result.Message });
     }
 
-    /// <summary>
-    /// DELETE /api/table/reservation/{id}
-    /// Hủy yêu cầu đặt bàn
-    /// </summary>
     [HttpDelete("reservation/{id:int}")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public IActionResult CancelReservation(int id)
@@ -231,27 +182,18 @@ public class TableController : BaseController
         return Ok(new { success = true, message = result.Message });
     }
 
-    /// <summary>
-    /// POST /api/table
-    /// Tạo bàn mới
-    /// </summary>
     [HttpPost]
     [Authorize(Roles = "ADMIN,MANAGER")]
     public IActionResult CreateTable([FromBody] CreateTableRequest request)
     {
         if (request == null || string.IsNullOrWhiteSpace(request.TableName))
-        {
             return BadRequest(new { success = false, message = "Tên bàn không được để trống" });
-        }
+
         var result = Provider.Table.CreateTable(request.AreaId, request.TableName, request.Capacity);
         if (!result.Success) return BadRequest(new { success = false, message = result.Message });
         return Ok(new { success = true, message = result.Message, data = result.Table });
     }
 
-    /// <summary>
-    /// PUT /api/table/{id}
-    /// Cập nhật bàn
-    /// </summary>
     [HttpPut("{id:int}")]
     [Authorize(Roles = "ADMIN,MANAGER")]
     public IActionResult UpdateTable(int id, [FromBody] UpdateTableRequest request)
@@ -262,10 +204,6 @@ public class TableController : BaseController
         return Ok(new { success = true, message = result.Message, data = result.Table });
     }
 
-    /// <summary>
-    /// DELETE /api/table/{id}
-    /// Xóa bàn
-    /// </summary>
     [HttpDelete("{id:int}")]
     [Authorize(Roles = "ADMIN,MANAGER")]
     public IActionResult DeleteTable(int id)
@@ -275,44 +213,30 @@ public class TableController : BaseController
         return Ok(new { success = true, message = result.Message });
     }
 
-    /// <summary>
-    /// POST /api/table/area
-    /// Tạo khu vực mới
-    /// </summary>
     [HttpPost("area")]
     [Authorize(Roles = "ADMIN,MANAGER")]
     public IActionResult CreateArea([FromBody] CreateAreaRequest request)
     {
         if (request == null || string.IsNullOrWhiteSpace(request.AreaName))
-        {
             return BadRequest(new { success = false, message = "Tên khu vực không được để trống" });
-        }
+
         var result = Provider.Table.CreateArea(request.AreaName, request.Description, request.SortOrder);
         if (!result.Success) return BadRequest(new { success = false, message = result.Message });
         return Ok(new { success = true, message = result.Message, data = result.Area });
     }
 
-    /// <summary>
-    /// PUT /api/table/area/{id}
-    /// Cập nhật khu vực
-    /// </summary>
     [HttpPut("area/{id:int}")]
     [Authorize(Roles = "ADMIN,MANAGER")]
     public IActionResult UpdateArea(int id, [FromBody] UpdateAreaRequest request)
     {
         if (request == null || string.IsNullOrWhiteSpace(request.AreaName))
-        {
             return BadRequest(new { success = false, message = "Tên khu vực không được để trống" });
-        }
+
         var result = Provider.Table.UpdateArea(id, request.AreaName, request.Description, request.SortOrder, request.IsActive);
         if (!result.Success) return BadRequest(new { success = false, message = result.Message });
         return Ok(new { success = true, message = result.Message, data = result.Area });
     }
 
-    /// <summary>
-    /// DELETE /api/table/area/{id}
-    /// Xóa khu vực
-    /// </summary>
     [HttpDelete("area/{id:int}")]
     [Authorize(Roles = "ADMIN,MANAGER")]
     public IActionResult DeleteArea(int id)
@@ -340,7 +264,6 @@ public class ReserveTableRequest
     public decimal DepositAmount { get; set; } = 0;
     public string? Note { get; set; }
 }
-
 
 public class UpdateTableStatusRequest
 {

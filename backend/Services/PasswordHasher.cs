@@ -5,47 +5,92 @@ namespace WebApi.Services;
 
 public static class PasswordHasher
 {
+    private const int Pbkdf2Iterations = 100_000;
+    private const int SaltSize = 16;
+    private const int HashSize = 32;
+
     /// <summary>
-    /// Hashes a password using a 16-byte cryptographically secure random salt and SHA-256.
-    /// Returns format: "{salt}:{hash}" (97 characters), safely fitting in VARCHAR(256).
+    /// Hashes a password using PBKDF2-HMAC-SHA256 (100,000 iterations, 16-byte random salt).
+    /// Format: "pbkdf2${saltHex}${hashHex}"
     /// </summary>
     public static string HashPassword(string password)
     {
-        byte[] saltBytes = RandomNumberGenerator.GetBytes(16);
-        string salt = Convert.ToHexString(saltBytes).ToLowerInvariant();
-        string hash = ComputeSha256(salt + password);
-        return $"{salt}:{hash}";
+        byte[] saltBytes = RandomNumberGenerator.GetBytes(SaltSize);
+        byte[] hashBytes = Rfc2898DeriveBytes.Pbkdf2(
+            Encoding.UTF8.GetBytes(password),
+            saltBytes,
+            Pbkdf2Iterations,
+            HashAlgorithmName.SHA256,
+            HashSize);
+        return $"pbkdf2${Convert.ToHexString(saltBytes).ToLowerInvariant()}${Convert.ToHexString(hashBytes).ToLowerInvariant()}";
+    }
+
+    public static bool NeedsRehash(string storedHash)
+    {
+        return string.IsNullOrWhiteSpace(storedHash) || !storedHash.StartsWith("pbkdf2$", StringComparison.Ordinal);
     }
 
     /// <summary>
-    /// Verifies password against stored hash.
-    /// Supports both salted format ("{salt}:{hash}") and legacy/seeded format (plain SHA-256).
+    /// Verifies password against PBKDF2, legacy "{salt}:{sha256}", or legacy plain SHA-256 hashes using constant-time comparison.
     /// </summary>
     public static bool VerifyPassword(string password, string storedHash)
     {
         if (string.IsNullOrWhiteSpace(storedHash) || string.IsNullOrEmpty(password))
             return false;
 
+        if (storedHash.StartsWith("pbkdf2$", StringComparison.Ordinal))
+        {
+            var parts = storedHash.Split('$');
+            if (parts.Length != 3) return false;
+            try
+            {
+                byte[] saltBytes = Convert.FromHexString(parts[1]);
+                byte[] expectedBytes = Convert.FromHexString(parts[2]);
+                byte[] actualBytes = Rfc2898DeriveBytes.Pbkdf2(
+                    Encoding.UTF8.GetBytes(password),
+                    saltBytes,
+                    Pbkdf2Iterations,
+                    HashAlgorithmName.SHA256,
+                    expectedBytes.Length);
+                return CryptographicOperations.FixedTimeEquals(actualBytes, expectedBytes);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         if (storedHash.Contains(':'))
         {
             var parts = storedHash.Split(':');
             if (parts.Length != 2) return false;
-            string salt = parts[0];
-            string hash = parts[1];
-            string computed = ComputeSha256(salt + password);
-            return string.Equals(computed, hash, StringComparison.OrdinalIgnoreCase);
+            byte[] computed = SHA256.HashData(Encoding.UTF8.GetBytes(parts[0] + password));
+            try
+            {
+                byte[] expected = Convert.FromHexString(parts[1]);
+                return expected.Length == computed.Length && CryptographicOperations.FixedTimeEquals(computed, expected);
+            }
+            catch
+            {
+                return false;
+            }
         }
-        else
+
+        // Legacy seeded plain SHA-256
         {
-            // Plain SHA-256 (matches database seeds)
-            string computed = ComputeSha256(password);
-            return string.Equals(computed, storedHash, StringComparison.OrdinalIgnoreCase);
+            byte[] computed = SHA256.HashData(Encoding.UTF8.GetBytes(password));
+            try
+            {
+                byte[] expected = Convert.FromHexString(storedHash);
+                return expected.Length == computed.Length && CryptographicOperations.FixedTimeEquals(computed, expected);
+            }
+            catch
+            {
+                return false;
+            }
         }
     }
 
-    /// <summary>
-    /// Computes lowercase hex SHA-256 hash of input string.
-    /// </summary>
     public static string ComputeSha256(string input)
     {
         byte[] bytes = SHA256.HashData(Encoding.UTF8.GetBytes(input));

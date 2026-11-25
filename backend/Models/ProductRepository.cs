@@ -9,7 +9,7 @@ public class ProductDto
     public string CategoryName { get; set; } = string.Empty;
     public string ProductName { get; set; } = string.Empty;
     public decimal Price { get; set; }
-    public string Unit { get; set; } = "Phần";
+    public string Unit { get; set; } = "Ly";
     public string? Description { get; set; }
     public string ImageUrl { get; set; } = string.Empty;
     public List<string> Images { get; set; } = new();
@@ -133,6 +133,7 @@ public class ProductRepository : BaseRepository
     public async Task<List<ProductDto>> GetFeaturedProductsAsync(int limit = 10)
     {
         if (limit < 1) limit = 10;
+        if (limit > 100) limit = 100;
         var items = await BaseQuery()
             .Where(p => p.IsFeatured && p.IsAvailable)
             .OrderByDescending(p => p.ProductId)
@@ -146,6 +147,7 @@ public class ProductRepository : BaseRepository
     {
         if (page < 1) page = 1;
         if (pageSize < 1) pageSize = 10;
+        if (pageSize > 100) pageSize = 100;
 
         var query = BaseQuery().OrderByDescending(p => p.CreatedAt).ThenByDescending(p => p.ProductId);
         int totalItems = await query.CountAsync();
@@ -166,7 +168,7 @@ public class ProductRepository : BaseRepository
         return await GetPagedProductsAsync(page, pageSize, categoryId, null);
     }
 
-    public async Task<PagedResult<ProductDto>> SearchProductsAsync(string keyword, int page = 1, int pageSize = 10)
+    public async Task<PagedResult<ProductDto>> SearchProductsAsync(string? keyword, int page = 1, int pageSize = 10)
     {
         return await GetPagedProductsAsync(page, pageSize, null, keyword);
     }
@@ -175,6 +177,7 @@ public class ProductRepository : BaseRepository
     {
         if (page < 1) page = 1;
         if (pageSize < 1) pageSize = 10;
+        if (pageSize > 100) pageSize = 100;
 
         var current = await context.Products.FindAsync(productId);
         if (current == null)

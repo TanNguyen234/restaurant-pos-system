@@ -8,10 +8,6 @@ namespace WebApi.Api.Controllers;
 [Route("api/[controller]")]
 public class DiscountController : BaseController
 {
-    /// <summary>
-    /// GET /api/discount/active
-    /// Retrieves list of currently active discount programs and vouchers.
-    /// </summary>
     [HttpGet("active")]
     [AllowAnonymous]
     public async Task<IActionResult> GetActiveDiscounts()
@@ -26,10 +22,6 @@ public class DiscountController : BaseController
         });
     }
 
-    /// <summary>
-    /// POST /api/discount/validate
-    /// Validates voucher code and calculates discount amount for an order.
-    /// </summary>
     [HttpPost("validate")]
     [AllowAnonymous]
     public async Task<IActionResult> ValidateDiscount([FromBody] ValidateDiscountRequest request)

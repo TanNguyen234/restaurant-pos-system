@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
@@ -8,11 +9,6 @@ namespace WebApi.Api.Controllers;
 [Route("api/[controller]")]
 public class AccountController : BaseController
 {
-    /// <summary>
-    /// GET /api/account/members
-    /// Returns member and staff list. Restricted to ADMIN and MANAGER roles.
-    /// Returns 401 Unauthorized if unauthenticated, 403 Forbidden if unauthorized role.
-    /// </summary>
     [HttpGet("members")]
     [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> GetMembers([FromQuery] int? roleId = null)
@@ -21,10 +17,6 @@ public class AccountController : BaseController
         return Ok(members);
     }
 
-    /// <summary>
-    /// PUT /api/account/{id}/role
-    /// Updates member/staff role. Restricted to ADMIN and MANAGER roles.
-    /// </summary>
     [HttpPut("{id:int}/role")]
     [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> UpdateRole(int id, [FromBody] UpdateRoleRequest request)
@@ -34,47 +26,62 @@ public class AccountController : BaseController
             return BadRequest(new { success = false, message = "Vui lòng chọn vai trò hợp lệ" });
         }
 
-        var result = await Provider.Account.UpdateRoleAsync(id, request.RoleId);
+        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        int.TryParse(idClaim, out int actorAccountId);
+        string actorRoleCode = User.FindFirstValue("role") ?? User.FindFirstValue(ClaimTypes.Role) ?? "";
+
+        var result = await Provider.Account.UpdateRoleAsync(id, request.RoleId, actorAccountId, actorRoleCode);
         if (!result.Success)
         {
+            if (result.Message.Contains("ADMIN", StringComparison.OrdinalIgnoreCase) ||
+                result.Message.Contains("quyền", StringComparison.OrdinalIgnoreCase))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { success = false, message = result.Message });
+            }
             return BadRequest(new { success = false, message = result.Message });
         }
 
         return Ok(new { success = true, message = result.Message });
     }
 
-    /// <summary>
-    /// GET /api/account/profile
-    /// Returns profile of the currently authenticated account.
-    /// </summary>
+    [HttpPut("{id:int}/status")]
+    [Authorize(Roles = "ADMIN")]
+    public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdateAccountStatusRequest request)
+    {
+        if (request == null)
+        {
+            return BadRequest(new { success = false, message = "Dữ liệu trạng thái tài khoản không hợp lệ" });
+        }
+
+        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        int.TryParse(idClaim, out int actorAccountId);
+
+        var result = await Provider.Account.UpdateStatusAsync(id, request.IsActive, actorAccountId);
+        if (!result.Success)
+        {
+            return BadRequest(new { success = false, message = result.Message });
+        }
+
+        return Ok(new { success = true, message = result.Message, isActive = request.IsActive });
+    }
+
     [HttpGet("profile")]
     [Authorize]
     public async Task<IActionResult> GetProfile()
     {
-        var username = User.Identity?.Name;
-        if (string.IsNullOrEmpty(username))
-        {
-            return Unauthorized(new
-            {
-                statusCode = 401,
-                success = false,
-                message = "Không xác định được danh tính người dùng"
-            });
-        }
+        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        Account? account = int.TryParse(idClaim, out int accountId) && accountId > 0
+            ? await Provider.Account.GetByIdAsync(accountId)
+            : (!string.IsNullOrEmpty(User.Identity?.Name)
+                ? await Provider.Account.GetByUsernameAsync(User.Identity.Name)
+                : null);
 
-        var account = await Provider.Account.GetByUsernameAsync(username);
         if (account == null)
         {
-            return NotFound(new
-            {
-                statusCode = 404,
-                success = false,
-                message = "Không tìm thấy thông tin tài khoản"
-            });
+            return NotFound(new { statusCode = 404, success = false, message = "Không tìm thấy thông tin tài khoản" });
         }
 
         var role = await Provider.Account.GetRoleByIdAsync(account.RoleId);
-
         return Ok(new AccountDto
         {
             AccountId = account.AccountId,
@@ -89,15 +96,36 @@ public class AccountController : BaseController
             IsActive = account.IsActive,
             IsEmailVerified = account.IsEmailVerified,
             OAuthProvider = account.OAuthProvider,
+            LoyaltyPoints = account.LoyaltyPoints,
             CreatedAt = account.CreatedAt,
             UpdatedAt = account.UpdatedAt
         });
     }
 
-    /// <summary>
-    /// GET /api/account/roles
-    /// Returns list of all system roles. Restricted to ADMIN and MANAGER.
-    /// </summary>
+    [HttpPut("profile")]
+    [Authorize]
+    public async Task<IActionResult> UpdateProfile([FromBody] UpdateProfileDto dto)
+    {
+        if (!ModelState.IsValid)
+        {
+            return BadRequest(new { success = false, message = "Thông tin hồ sơ không hợp lệ", errors = ModelState });
+        }
+
+        var idClaim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        if (!int.TryParse(idClaim, out int accountId) || accountId <= 0)
+        {
+            return Unauthorized(new { success = false, message = "Không xác định được danh tính người dùng" });
+        }
+
+        var res = await Provider.Account.UpdateProfileAsync(accountId, dto);
+        if (!res.Success)
+        {
+            return BadRequest(new { success = false, message = res.Message });
+        }
+
+        return Ok(new { success = true, message = res.Message });
+    }
+
     [HttpGet("roles")]
     [Authorize(Roles = "ADMIN,MANAGER")]
     public async Task<IActionResult> GetRoles()

@@ -6,13 +6,9 @@ namespace WebApi.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "ADMIN,MANAGER,KITCHEN,CHEF,BARISTA")]
+[Authorize(Roles = "ADMIN,MANAGER,KITCHEN,HEAD_CHEF,BARISTA_LEAD,COOK_ASSISTANT")]
 public class KdsController : BaseController
 {
-    /// <summary>
-    /// GET /api/kds
-    /// Retrieves active dishes for the Kitchen Display System (sorted by status and creation time).
-    /// </summary>
     [HttpGet]
     public async Task<IActionResult> GetKdsItems()
     {
@@ -26,10 +22,6 @@ public class KdsController : BaseController
         });
     }
 
-    /// <summary>
-    /// GET /api/kds/active-orders
-    /// Direct array response for Flutter Mobile KitchenDisplayPage.
-    /// </summary>
     [HttpGet("active-orders")]
     public async Task<IActionResult> GetActiveOrders()
     {
@@ -39,14 +31,15 @@ public class KdsController : BaseController
 
     /// <summary>
     /// PUT /api/kds/{orderDetailId}/status
-    /// Updates cooking status of an item: 0 = Pending, 1 = Cooking (In Progress), 2 = Ready.
+    /// Updates cooking status: 0 = Pending, 1 = Cooking, 2 = Ready, 3 = Served
     /// </summary>
     [HttpPut("{orderDetailId:int}/status")]
+    [HttpPut("order-detail/{orderDetailId:int}/status")]
     public async Task<IActionResult> UpdateCookingStatus(int orderDetailId, [FromBody] UpdateCookingStatusDto dto)
     {
-        if (dto == null || dto.CookingStatus < 0 || dto.CookingStatus > 2)
+        if (dto == null || dto.CookingStatus < 0 || dto.CookingStatus > 3)
         {
-            return BadRequest(new { statusCode = 400, message = "Trạng thái chế biến không hợp lệ (0: Chờ nấu, 1: Đang nấu, 2: Đã xong)" });
+            return BadRequest(new { statusCode = 400, success = false, message = "Trạng thái chế biến không hợp lệ (0: Chờ nấu, 1: Đang nấu, 2: Đã xong, 3: Đã giao)" });
         }
 
         var result = await Provider.Order.UpdateCookingStatusAsync(orderDetailId, dto.CookingStatus);
@@ -60,23 +53,44 @@ public class KdsController : BaseController
             statusCode = 200,
             success = true,
             message = result.Message,
-            orderDetailId = orderDetailId,
+            orderDetailId,
             cookingStatus = dto.CookingStatus
         });
     }
 
     /// <summary>
-    /// PUT /api/kds/order-detail/{orderDetailId}/status
-    /// Alternative route for Flutter mobile client compatibility.
+    /// POST /api/kds/{orderDetailId}/void
+    /// Báo hủy món từ màn hình Bếp kèm lý do và tự động tính lại tổng tiền đơn hàng
     /// </summary>
-    [HttpPut("order-detail/{orderDetailId:int}/status")]
-    public async Task<IActionResult> UpdateCookingStatusAlt(int orderDetailId, [FromBody] UpdateCookingStatusDto dto)
+    [HttpPost("{orderDetailId:int}/void")]
+    public async Task<IActionResult> VoidFromKitchen(int orderDetailId, [FromBody] KitchenVoidDto? dto = null)
     {
-        return await UpdateCookingStatus(orderDetailId, dto);
+        string reason = string.IsNullOrWhiteSpace(dto?.Reason) ? "Bếp báo hết nguyên liệu" : dto.Reason.Trim();
+        int voidQty = dto?.VoidQuantity ?? 0;
+
+        var result = await Provider.Order.VoidDetailByIdAsync(orderDetailId, reason, voidQty);
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = result.Message,
+            data = result.Order
+        });
     }
 }
 
 public class UpdateCookingStatusDto
 {
     public int CookingStatus { get; set; }
+}
+
+public class KitchenVoidDto
+{
+    public string? Reason { get; set; }
+    public int VoidQuantity { get; set; } = 0;
 }

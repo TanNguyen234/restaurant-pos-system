@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
@@ -8,20 +9,25 @@ namespace WebApi.Api.Controllers;
 [Route("api/[controller]")]
 public class OrderController : BaseController
 {
-    /// <summary>
-    /// POST /api/order
-    /// Creates a new order or processes an offline order sync with server-calculated totals.
-    /// </summary>
+    private int? GetCallerAccountId()
+    {
+        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        return int.TryParse(claim, out int id) && id > 0 ? id : null;
+    }
+
+    private bool IsStaffUser() =>
+        User.IsInRole("ADMIN") || User.IsInRole("MANAGER") || User.IsInRole("CASHIER") || User.IsInRole("WAITER") || User.IsInRole("KITCHEN");
+
     [HttpPost]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
     public async Task<IActionResult> CreateOrder([FromBody] CreateOrderDto dto)
     {
         if (dto == null)
         {
-            return BadRequest(new { statusCode = 400, message = "Dữ liệu đơn hàng không hợp lệ" });
+            return BadRequest(new { statusCode = 400, success = false, message = "Dữ liệu đơn hàng không hợp lệ" });
         }
 
-        var result = await Provider.Order.CreateOrderAsync(dto);
+        var result = await Provider.Order.CreateOrderAsync(dto, GetCallerAccountId());
         if (!result.Success)
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message, error = result.Message });
@@ -42,10 +48,6 @@ public class OrderController : BaseController
         });
     }
 
-    /// <summary>
-    /// GET /api/order/admin
-    /// Retrieves order management list for Admin & Cashier with date, status, and search filters.
-    /// </summary>
     [HttpGet("admin")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
     public async Task<IActionResult> GetAdminOrders(
@@ -55,20 +57,20 @@ public class OrderController : BaseController
         [FromQuery] string? search)
     {
         var orders = await Provider.Order.GetOrdersAsync(status, fromDate, toDate, search);
-        decimal totalRevenue = orders.Where(o => o.PaymentStatus == 1).Sum(o => o.FinalAmount);
+        var topProducts = await Provider.Order.GetTopSellingProductsAsync(fromDate, toDate, 5);
+        decimal totalRevenue = orders
+            .Where(o => o.PaymentStatus == 1 && o.Status != 4)
+            .Sum(o => o.FinalAmount);
 
         return Ok(new
         {
             totalOrders = orders.Count,
-            totalRevenue = totalRevenue,
-            orders = orders
+            totalRevenue,
+            orders,
+            topProducts
         });
     }
 
-    /// <summary>
-    /// GET /api/order
-    /// Retrieves list of orders with optional status, date-range, and keyword filters.
-    /// </summary>
     [HttpGet]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public async Task<IActionResult> GetOrders(
@@ -81,10 +83,21 @@ public class OrderController : BaseController
         return Ok(result);
     }
 
-    /// <summary>
-    /// GET /api/order/{id}
-    /// Retrieves single order details including table name and itemized list.
-    /// </summary>
+    [HttpGet("lookup")]
+    [Authorize]
+    public async Task<IActionResult> LookupOrders([FromQuery] string? query = null)
+    {
+        var result = await Provider.Order.LookupOrdersAsync(query, GetCallerAccountId(), IsStaffUser());
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            total = result.Count,
+            items = result,
+            data = result
+        });
+    }
+
     [HttpGet("{id:int}")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
     public async Task<IActionResult> GetOrderById(int id)
@@ -94,18 +107,25 @@ public class OrderController : BaseController
         {
             return NotFound(new { statusCode = 404, success = false, message = $"Không tìm thấy đơn hàng #{id}" });
         }
+
+        if (!IsStaffUser())
+        {
+            int? callerId = GetCallerAccountId();
+            if (order.AccountId.HasValue && callerId.HasValue && order.AccountId.Value != callerId.Value)
+            {
+                return Forbid();
+            }
+        }
+
         return Ok(order);
     }
 
-    /// <summary>
-    /// PUT /api/order/{id}/status
-    /// Updates order status (0: New, 1: Cooking, 2: Served, 3: Completed, 4: Cancelled).
-    /// </summary>
     [HttpPut("{id:int}/status")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdateStatusDto dto)
     {
-        var result = await Provider.Order.UpdateOrderStatusAsync(id, dto.Status);
+        bool canCompleteOrCancel = User.IsInRole("ADMIN") || User.IsInRole("MANAGER") || User.IsInRole("CASHIER");
+        var result = await Provider.Order.UpdateOrderStatusAsync(id, dto.Status, canCompleteOrCancel);
         if (!result.Success)
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
@@ -113,32 +133,43 @@ public class OrderController : BaseController
         return Ok(new { statusCode = 200, success = true, message = result.Message, status = dto.Status });
     }
 
-    /// <summary>
-    /// GET /api/order/by-table/{tableId}
-    /// Retrieves current active order for the specified table.
-    /// </summary>
+    [HttpPut("{id:int}/discount")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
+    public async Task<IActionResult> ApplyDiscount(int id, [FromBody] ApplyDiscountDto dto)
+    {
+        if (dto == null)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = "Thông tin chiết khấu không hợp lệ" });
+        }
+
+        var result = await Provider.Order.ApplyManualDiscountAsync(id, dto);
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        return Ok(new { statusCode = 200, success = true, message = result.Message, data = result.Order });
+    }
+
     [HttpGet("by-table/{tableId:int}")]
+    [Authorize]
     public async Task<IActionResult> GetByTable(int tableId)
     {
         var table = Provider.Table.GetById(tableId);
         if (table == null)
         {
-            return NotFound(new { statusCode = 404, message = "Không tìm thấy bàn ăn" });
+            return NotFound(new { statusCode = 404, success = false, message = "Không tìm thấy bàn ăn" });
         }
 
-        if (!table.CurrentOrderId.HasValue)
+        var order = await Provider.Order.GetActiveOrderByTableIdAsync(tableId);
+        if (order == null)
         {
             return Ok(new { statusCode = 200, hasActiveOrder = false, message = "Bàn hiện đang trống, chưa có đơn" });
         }
 
-        var order = await Provider.Order.GetOrderByIdAsync(table.CurrentOrderId.Value);
         return Ok(new { statusCode = 200, hasActiveOrder = true, data = order });
     }
 
-    /// <summary>
-    /// POST /api/order/{id}/add-items
-    /// Thêm món ăn vào đơn hàng đang phục vụ
-    /// </summary>
     [HttpPost("{id:int}/add-items")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public async Task<IActionResult> AddItems(int id, [FromBody] List<CreateOrderItemDto> items)
@@ -163,10 +194,6 @@ public class OrderController : BaseController
         });
     }
 
-    /// <summary>
-    /// POST /api/order/{id}/void-item
-    /// Hủy món / trả món có lý do xác thực
-    /// </summary>
     [HttpPost("{id:int}/void-item")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
     public async Task<IActionResult> VoidItem(int id, [FromBody] VoidItemDto dto)

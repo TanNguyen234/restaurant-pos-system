@@ -27,4 +27,7 @@ public class SiteProvider : BaseProvider
 
     DiscountRepository? discount;
     public DiscountRepository Discount => discount ??= new DiscountRepository(Context);
+
+    LoyaltyRepository? loyalty;
+    public LoyaltyRepository Loyalty => loyalty ??= new LoyaltyRepository(Context);
 }
