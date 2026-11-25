@@ -23,6 +23,9 @@ public class RestaurantPosContext : DbContext
     public DbSet<Reservation> Reservations { get; set; } = null!;
     public DbSet<Discount> Discounts { get; set; } = null!;
     public DbSet<LoyaltyTransaction> LoyaltyTransactions { get; set; } = null!;
+    public DbSet<Ingredient> Ingredients { get; set; } = null!;
+    public DbSet<ProductRecipe> ProductRecipes { get; set; } = null!;
+    public DbSet<StockTransaction> StockTransactions { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -53,6 +56,12 @@ public class RestaurantPosContext : DbContext
         modelBuilder.Entity<Discount>().Property(p => p.DiscountAmount).HasColumnType("decimal(18,0)");
         modelBuilder.Entity<Discount>().Property(p => p.MinOrderAmount).HasColumnType("decimal(18,0)");
         modelBuilder.Entity<Discount>().Property(p => p.MaxDiscountAmount).HasColumnType("decimal(18,0)");
+
+        modelBuilder.Entity<Ingredient>().Property(p => p.CurrentStock).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<Ingredient>().Property(p => p.MinThreshold).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<Ingredient>().Property(p => p.CostPerUnit).HasColumnType("decimal(18,0)");
+        modelBuilder.Entity<ProductRecipe>().Property(p => p.QuantityRequired).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<StockTransaction>().Property(p => p.ChangeAmount).HasColumnType("decimal(18,2)");
     }
 }
 
@@ -292,5 +301,43 @@ public class LoyaltyTransaction
     public string Type { get; set; } = "EARN"; // EARN | REDEEM
     public string? VoucherCode { get; set; }
     public string Description { get; set; } = string.Empty;
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+}
+
+[Table("Ingredients")]
+public class Ingredient
+{
+    [Key]
+    public int IngredientId { get; set; }
+    public string IngredientName { get; set; } = null!;
+    public string Unit { get; set; } = "gram";
+    public decimal CurrentStock { get; set; } = 0;
+    public decimal MinThreshold { get; set; } = 10;
+    public decimal CostPerUnit { get; set; } = 0;
+    public bool IsActive { get; set; } = true;
+    public DateTime UpdatedAt { get; set; } = DateTime.Now;
+}
+
+[Table("ProductRecipes")]
+public class ProductRecipe
+{
+    [Key]
+    public int RecipeId { get; set; }
+    public int ProductId { get; set; }
+    public int IngredientId { get; set; }
+    public decimal QuantityRequired { get; set; }
+}
+
+[Table("StockTransactions")]
+public class StockTransaction
+{
+    [Key]
+    public int StockTxId { get; set; }
+    public int IngredientId { get; set; }
+    public int? OrderId { get; set; }
+    public int? AccountId { get; set; }
+    public decimal ChangeAmount { get; set; }
+    public string Type { get; set; } = "IMPORT"; // IMPORT | ADJUST | DEDUCT | REFUND
+    public string? Note { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 }

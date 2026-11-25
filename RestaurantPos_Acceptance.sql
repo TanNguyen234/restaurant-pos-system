@@ -17,6 +17,9 @@ USE RestaurantPos_Acceptance;
 GO
 
 -- XÓA BẢNG CŨ THEO THỨ TỰ PHỤ THUỘC KHÓA NGOẠI (ĐẢM BẢO CHẠY LẠI AN TOÀN 100%)
+IF OBJECT_ID('StockTransactions', 'U') IS NOT NULL DROP TABLE StockTransactions;
+IF OBJECT_ID('ProductRecipes', 'U') IS NOT NULL DROP TABLE ProductRecipes;
+IF OBJECT_ID('Ingredients', 'U') IS NOT NULL DROP TABLE Ingredients;
 IF OBJECT_ID('LoyaltyTransactions', 'U') IS NOT NULL DROP TABLE LoyaltyTransactions;
 IF OBJECT_ID('Payments', 'U') IS NOT NULL DROP TABLE Payments;
 IF OBJECT_ID('Shifts', 'U') IS NOT NULL DROP TABLE Shifts;
@@ -258,6 +261,42 @@ CREATE TABLE LoyaltyTransactions (
 );
 GO
 
+-- 16. NGUYÊN LIỆU KHO (INGREDIENTS)
+CREATE TABLE Ingredients (
+    IngredientId INT IDENTITY(1,1) PRIMARY KEY,
+    IngredientName NVARCHAR(120) NOT NULL,
+    Unit NVARCHAR(30) NOT NULL DEFAULT N'gram',
+    CurrentStock DECIMAL(18,2) NOT NULL DEFAULT 0,
+    MinThreshold DECIMAL(18,2) NOT NULL DEFAULT 10,
+    CostPerUnit DECIMAL(18,0) NOT NULL DEFAULT 0,
+    IsActive BIT NOT NULL DEFAULT 1,
+    UpdatedAt DATETIME NOT NULL DEFAULT GETDATE()
+);
+GO
+
+-- 17. ĐỊNH LƯỢNG CÔNG THỨC MÓN (PRODUCT_RECIPES / BOM)
+CREATE TABLE ProductRecipes (
+    RecipeId INT IDENTITY(1,1) PRIMARY KEY,
+    ProductId INT NOT NULL CONSTRAINT FK_ProductRecipes_Products REFERENCES Products(ProductId) ON DELETE CASCADE,
+    IngredientId INT NOT NULL CONSTRAINT FK_ProductRecipes_Ingredients REFERENCES Ingredients(IngredientId),
+    QuantityRequired DECIMAL(18,2) NOT NULL,
+    CONSTRAINT UQ_ProductRecipes_Product_Ingredient UNIQUE (ProductId, IngredientId)
+);
+GO
+
+-- 18. LỊCH SỬ XUẤT NHẬP KHO (STOCK_TRANSACTIONS)
+CREATE TABLE StockTransactions (
+    StockTxId INT IDENTITY(1,1) PRIMARY KEY,
+    IngredientId INT NOT NULL CONSTRAINT FK_StockTransactions_Ingredients REFERENCES Ingredients(IngredientId),
+    OrderId INT NULL CONSTRAINT FK_StockTransactions_Orders REFERENCES Orders(OrderId),
+    AccountId INT NULL CONSTRAINT FK_StockTransactions_Accounts REFERENCES Accounts(AccountId),
+    ChangeAmount DECIMAL(18,2) NOT NULL,
+    Type NVARCHAR(30) NOT NULL, -- 'IMPORT' | 'ADJUST' | 'DEDUCT' | 'REFUND' | 'WASTE'
+    Note NVARCHAR(255) NULL,
+    CreatedAt DATETIME NOT NULL DEFAULT GETDATE()
+);
+GO
+
 -- INDEXES HIỆU NĂNG
 CREATE NONCLUSTERED INDEX IX_Products_CategoryId ON Products(CategoryId);
 CREATE NONCLUSTERED INDEX IX_Products_ProductName ON Products(ProductName);
@@ -274,6 +313,8 @@ CREATE NONCLUSTERED INDEX IX_Reservations_TableId ON Reservations(TableId);
 CREATE NONCLUSTERED INDEX IX_Reservations_ArrivalTime ON Reservations(ArrivalTime);
 CREATE NONCLUSTERED INDEX IX_Discounts_Code ON Discounts(Code);
 CREATE NONCLUSTERED INDEX IX_LoyaltyTransactions_AccountId ON LoyaltyTransactions(AccountId);
+CREATE NONCLUSTERED INDEX IX_ProductRecipes_ProductId ON ProductRecipes(ProductId);
+CREATE NONCLUSTERED INDEX IX_StockTransactions_IngredientId_CreatedAt ON StockTransactions(IngredientId, CreatedAt DESC);
 GO
 
 -- ======================================================================================
@@ -488,6 +529,48 @@ INSERT INTO LoyaltyTransactions (TransactionId, AccountId, OrderId, PointsDelta,
 SET IDENTITY_INSERT LoyaltyTransactions OFF;
 GO
 
-PRINT N'KHỞI TẠO CSDL RestaurantPos_Acceptance (15 BẢNG) THÀNH CÔNG!'
+-- 14. NGUYÊN LIỆU KHO & ĐỊNH LƯỢNG BOM MẪU (12 NGUYÊN LIỆU + CÔNG THỨC)
+SET IDENTITY_INSERT Ingredients ON;
+INSERT INTO Ingredients (IngredientId, IngredientName, Unit, CurrentStock, MinThreshold, CostPerUnit, IsActive) VALUES
+(1, N'Cà phê hạt Robusta Đắk Lắk', N'gram', 5000, 1000, 320, 1),
+(2, N'Cà phê hạt Arabica Cầu Đất', N'gram', 3500, 800, 480, 1),
+(3, N'Sữa đặc có đường', N'ml', 4500, 1000, 45, 1),
+(4, N'Sữa tươi thanh trùng không đường', N'ml', 6000, 1500, 38, 1),
+(5, N'Trà Ô Long nguyên lá', N'gram', 1800, 500, 350, 1),
+(6, N'Siro Đào & Sả tươi', N'ml', 2200, 600, 85, 1),
+(7, N'Trân châu đường đen', N'gram', 1500, 400, 95, 1),
+(8, N'Soda & Syrup Blue Ocean', N'ml', 3200, 700, 90, 1),
+(9, N'Chanh tươi & Lá bạc hà', N'gram', 450, 500, 120, 1),
+(10, N'Cam sành tươi Tiền Giang', N'gram', 4200, 1000, 42, 1),
+(11, N'Thịt bò Wagyu thái lát', N'gram', 2500, 600, 850, 1),
+(12, N'Kem phô mai Tiramisu', N'gram', 320, 400, 290, 1);
+SET IDENTITY_INSERT Ingredients OFF;
+GO
+
+INSERT INTO ProductRecipes (ProductId, IngredientId, QuantityRequired) VALUES
+(1, 1, 25),
+(2, 1, 25), (2, 3, 35),
+(3, 1, 15), (3, 3, 30), (3, 4, 80),
+(6, 1, 25), (6, 4, 40),
+(8, 2, 18), (8, 4, 180),
+(9, 2, 18), (9, 4, 150),
+(11, 5, 12), (11, 6, 45),
+(14, 5, 15), (14, 4, 120), (14, 7, 50),
+(20, 12, 65),
+(24, 11, 140),
+(30, 10, 250),
+(33, 8, 60), (33, 9, 25),
+(34, 8, 150), (34, 9, 15);
+GO
+
+SET IDENTITY_INSERT StockTransactions ON;
+INSERT INTO StockTransactions (StockTxId, IngredientId, OrderId, AccountId, ChangeAmount, Type, Note) VALUES
+(1, 1, NULL, 1, 5000, 'IMPORT', N'Nhập kho đầu kỳ Cà phê Robusta'),
+(2, 8, NULL, 1, 3200, 'IMPORT', N'Nhập kho Syrup Blue Ocean'),
+(3, 9, NULL, 2, 450, 'IMPORT', N'Nhập lá bạc hà (cần nhập thêm)');
+SET IDENTITY_INSERT StockTransactions OFF;
+GO
+
+PRINT N'KHỞI TẠO CSDL RestaurantPos_Acceptance (18 BẢNG) THÀNH CÔNG!'
 GO
 

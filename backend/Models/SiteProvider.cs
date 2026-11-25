@@ -30,4 +30,7 @@ public class SiteProvider : BaseProvider
 
     LoyaltyRepository? loyalty;
     public LoyaltyRepository Loyalty => loyalty ??= new LoyaltyRepository(Context);
+
+    InventoryRepository? inventory;
+    public InventoryRepository Inventory => inventory ??= new InventoryRepository(Context);
 }
