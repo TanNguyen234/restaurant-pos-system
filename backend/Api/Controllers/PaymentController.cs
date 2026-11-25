@@ -182,27 +182,110 @@ public class PaymentController : BaseController
 
         var queryParams = Request.Query.ToDictionary(q => q.Key, q => q.Value.ToString());
         var result = await Provider.Payment.ProcessVnPayCallbackAsync(queryParams, hashSecret, tmnCode);
-        if (!result.Success)
+
+        if (result.Success)
         {
-            return BadRequest(new
+            await _realtime.NotifyOrderChangedAsync("OrderPaid", new { orderId = result.OrderId, method = "VNPay" });
+            await _realtime.NotifyTableChangedAsync(new { orderId = result.OrderId });
+        }
+
+        bool wantsHtml = Request.Headers.Accept.ToString()
+            .Contains("text/html", StringComparison.OrdinalIgnoreCase);
+
+        if (!wantsHtml)
+        {
+            if (!result.Success)
             {
-                statusCode = 400,
-                success = false,
-                message = result.Message
+                return BadRequest(new
+                {
+                    statusCode = 400,
+                    success = false,
+                    message = result.Message,
+                    orderId = result.OrderId
+                });
+            }
+
+            return Ok(new
+            {
+                statusCode = 200,
+                success = true,
+                message = result.Message,
+                orderId = result.OrderId,
+                status = "SANDBOX VERIFIED"
             });
         }
 
-        await _realtime.NotifyOrderChangedAsync("OrderPaid", new { orderId = result.OrderId, method = "VNPay" });
-        await _realtime.NotifyTableChangedAsync(new { orderId = result.OrderId });
-
-        return Ok(new
+        string? configFrontend = _configuration["Frontend:BaseUrl"];
+        string? envAllowed = Environment.GetEnvironmentVariable("ALLOWED_ORIGINS") ?? _configuration["ALLOWED_ORIGINS"];
+        string frontendBase = "http://localhost:8088";
+        if (!string.IsNullOrWhiteSpace(configFrontend))
         {
-            statusCode = 200,
-            success = true,
-            message = result.Message,
-            orderId = result.OrderId,
-            status = "SANDBOX VERIFIED"
-        });
+            frontendBase = configFrontend.Trim().TrimEnd('/');
+        }
+        else if (!string.IsNullOrWhiteSpace(envAllowed))
+        {
+            var candidate = envAllowed
+                .Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                .FirstOrDefault(u => u.StartsWith("http://localhost:", StringComparison.OrdinalIgnoreCase) && !u.Contains(":5138"))
+                ?? envAllowed.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).FirstOrDefault();
+            if (!string.IsNullOrWhiteSpace(candidate))
+            {
+                frontendBase = candidate.TrimEnd('/');
+            }
+        }
+
+        string responseCode = queryParams.TryGetValue("vnp_ResponseCode", out var rc) ? rc : "";
+        string statusKey = result.Success ? "success" : (responseCode == "24" ? "cancelled" : "failed");
+        int oid = result.OrderId ?? 0;
+
+        string safeMsg = System.Net.WebUtility.HtmlEncode(result.Message);
+        string safeCode = System.Net.WebUtility.HtmlEncode(responseCode);
+        string backOrderUrl = oid > 0
+            ? $"{frontendBase}/?vnpayStatus={statusKey}&orderId={oid}&code={Uri.EscapeDataString(responseCode)}"
+            : $"{frontendBase}/";
+        string restoreCartUrl = oid > 0
+            ? $"{frontendBase}/?vnpayStatus=restore&orderId={oid}&code={Uri.EscapeDataString(responseCode)}"
+            : $"{frontendBase}/";
+
+        string badgeColor = result.Success ? "#059669" : (statusKey == "cancelled" ? "#D97706" : "#DC2626");
+        string titleText = result.Success
+            ? "Thanh toán VNPay thành công!"
+            : (statusKey == "cancelled" ? "Bạn đã hủy thanh toán VNPay" : "Thanh toán VNPay chưa hoàn tất");
+
+        string restoreBtn = !result.Success && oid > 0
+            ? $"<a class=\"btn btn-outline\" href=\"{System.Net.WebUtility.HtmlEncode(restoreCartUrl)}\">Hủy đơn &amp; Khôi phục về giỏ hàng</a>"
+            : "";
+
+        string html = $@"<!DOCTYPE html>
+<html lang=""vi"">
+<head>
+  <meta charset=""utf-8"" />
+  <meta name=""viewport"" content=""width=device-width, initial-scale=1"" />
+  <title>{System.Net.WebUtility.HtmlEncode(titleText)}</title>
+  <style>
+    body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background:#F8FAFC; color:#0F172A; margin:0; padding:24px; display:flex; align-items:center; justify-content:center; min-height:100vh; }}
+    .card {{ background:#fff; border:1px solid #E2E8F0; border-radius:18px; max-width:460px; width:100%; padding:28px 24px; box-shadow:0 10px 30px rgba(15,23,42,.08); text-align:center; }}
+    .badge {{ display:inline-block; padding:6px 14px; border-radius:999px; font-weight:700; font-size:13px; color:#fff; background:{badgeColor}; margin-bottom:14px; }}
+    h1 {{ font-size:20px; margin:0 0 10px; }}
+    p {{ font-size:14px; color:#475569; line-height:1.5; margin:0 0 22px; }}
+    .btn {{ display:block; width:100%; box-sizing:border-box; padding:13px 16px; border-radius:12px; font-weight:700; font-size:14px; text-decoration:none; margin-bottom:10px; }}
+    .btn-primary {{ background:#0F172A; color:#fff; }}
+    .btn-outline {{ background:#FEF2F2; color:#DC2626; border:1px solid #FECACA; }}
+  </style>
+</head>
+<body>
+  <div class=""card"">
+    <span class=""badge"">{(string.IsNullOrEmpty(safeCode) ? statusKey.ToUpperInvariant() : $"VNPay Mã {safeCode}")}</span>
+    <h1>{System.Net.WebUtility.HtmlEncode(titleText)}</h1>
+    <p>{safeMsg}</p>
+    <a class=""btn btn-primary"" href=""{System.Net.WebUtility.HtmlEncode(backOrderUrl)}"">{(result.Success ? "Xem hóa đơn vừa thanh toán" : "Quay lại đơn hàng / Đổi phương thức thanh toán")}</a>
+    {restoreBtn}
+  </div>
+</body>
+</html>";
+
+        Response.StatusCode = result.Success ? 200 : 400;
+        return Content(html, "text/html; charset=utf-8");
     }
 }
 

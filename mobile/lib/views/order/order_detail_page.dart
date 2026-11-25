@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -7,16 +8,25 @@ import '../../models/payment.dart';
 import '../../repositories/order_repository.dart';
 import '../../services/receipt_printer_service.dart';
 import '../../services/session_manager.dart';
+import '../../utils/database_helper.dart';
+import '../../utils/snackbar_helper.dart';
 import '../../widgets/skeleton_loading.dart';
+import '../cart_page.dart';
 
 class OrderDetailPage extends StatefulWidget {
   final int orderId;
   final String? initialPaymentMethod;
+  final String? vnpayStatus;
+  final String? vnpayCode;
+  final bool autoRestoreToCart;
 
   const OrderDetailPage({
     super.key,
     required this.orderId,
     this.initialPaymentMethod,
+    this.vnpayStatus,
+    this.vnpayCode,
+    this.autoRestoreToCart = false,
   });
 
   @override
@@ -31,6 +41,8 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   VietQrModel? _vietQr;
   bool _isLoading = true;
   bool _isProcessingPayment = false;
+  bool _isRestoringToCart = false;
+  bool _didAutoRestore = false;
   String? _errorMessage;
   String _paymentMethod = 'VietQR';
 
@@ -67,6 +79,18 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         _vietQr = qr;
         _isLoading = false;
       });
+
+      if (widget.autoRestoreToCart &&
+          !_didAutoRestore &&
+          order != null &&
+          !order.isPaid &&
+          order.status != 3 &&
+          order.status != 4) {
+        _didAutoRestore = true;
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _cancelAndRestoreToCart(skipConfirm: true);
+        });
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
@@ -74,6 +98,84 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
         _errorMessage = 'Không thể tải thông tin đơn hàng: $e';
       });
     }
+  }
+
+  Future<void> _cancelAndRestoreToCart({bool skipConfirm = false}) async {
+    final order = _order;
+    if (order == null || _isRestoringToCart) return;
+
+    final activeItems = order.items.where((i) => !i.isVoided && i.quantity > 0).toList();
+    if (activeItems.isEmpty) {
+      showAutoDismissSnackBar(
+        context,
+        message: 'Đơn hàng không còn món hợp lệ để khôi phục về giỏ hàng.',
+        backgroundColor: const Color(0xFFDC2626),
+      );
+      return;
+    }
+
+    if (!skipConfirm) {
+      final confirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Hủy đơn & Khôi phục giỏ hàng?', style: TextStyle(fontWeight: FontWeight.bold)),
+          content: Text(
+            'Đơn #${order.orderCode} chưa thanh toán sẽ được hủy và ${activeItems.length} món sẽ được đưa trở lại giỏ hàng để bạn chỉnh sửa hoặc chọn lại phương thức thanh toán.',
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Giữ lại đơn')),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Khôi phục về giỏ'),
+            ),
+          ],
+        ),
+      );
+      if (confirm != true || !mounted) return;
+    }
+
+    setState(() => _isRestoringToCart = true);
+    final cancelRes = await _orderRepo.cancelUnpaidOrder(order.orderId);
+    if (!mounted) return;
+
+    if (cancelRes['success'] != true) {
+      setState(() => _isRestoringToCart = false);
+      showAutoDismissSnackBar(
+        context,
+        message: cancelRes['message']?.toString() ?? 'Không thể hủy đơn để hoàn về giỏ hàng.',
+        duration: const Duration(seconds: 4),
+        backgroundColor: const Color(0xFFDC2626),
+      );
+      return;
+    }
+
+    final db = DatabaseHelper();
+    for (final item in activeItems) {
+      await db.insertOrUpdateCart({
+        'product_id': item.productId,
+        'product_name': item.productName,
+        'price': item.unitPrice,
+        'quantity': item.quantity,
+        'image_url': item.productImage,
+        'note': item.itemNote,
+        'modifiers_json': item.modifiers.isNotEmpty ? jsonEncode(item.modifiers) : null,
+      });
+    }
+
+    if (!mounted) return;
+    setState(() => _isRestoringToCart = false);
+    showAutoDismissSnackBar(
+      context,
+      message: 'Đã khôi phục ${activeItems.length} món về giỏ hàng!',
+      duration: const Duration(seconds: 3),
+      backgroundColor: const Color(0xFF059669),
+    );
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => const CartPage()),
+    );
   }
 
   Future<void> _showVoidItemDialog(OrderItemModel item) async {
@@ -197,12 +299,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       );
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(res['message'] ?? (res['success'] == true ? 'Đã hủy món thành công' : 'Không thể hủy món')),
-          backgroundColor: res['success'] == true ? const Color(0xFF10B981) : const Color(0xFFEF4444),
-          behavior: SnackBarBehavior.floating,
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: res['message']?.toString() ?? (res['success'] == true ? 'Đã hủy món thành công' : 'Không thể hủy món'),
+        backgroundColor: res['success'] == true ? const Color(0xFF10B981) : const Color(0xFFEF4444),
       );
       if (res['success'] == true) _loadOrderDetails();
     }
@@ -223,12 +323,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     if (!mounted) return;
     setState(() => _isProcessingPayment = false);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(result['message'] ?? (result['success'] == true ? 'Thanh toán thành công!' : 'Không thể xác nhận thanh toán')),
-        backgroundColor: result['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
-        behavior: SnackBarBehavior.floating,
-      ),
+    showAutoDismissSnackBar(
+      context,
+      message: result['message']?.toString() ?? (result['success'] == true ? 'Thanh toán thành công!' : 'Không thể xác nhận thanh toán'),
+      backgroundColor: result['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
     );
     if (result['success'] == true) _loadOrderDetails();
   }
@@ -247,8 +345,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       setState(() => _isProcessingPayment = false);
 
       if (url == null || url.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Không tạo được liên kết thanh toán VNPay'), backgroundColor: Color(0xFFDC2626)),
+        showAutoDismissSnackBar(
+          context,
+          message: 'Không tạo được liên kết thanh toán VNPay',
+          backgroundColor: const Color(0xFFDC2626),
         );
         return;
       }
@@ -256,12 +356,11 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       final launched = await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
       if (!mounted) return;
       if (launched) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Đã mở cổng VNPay Sandbox. Sau khi hoàn tất, bấm Làm mới để cập nhật trạng thái đơn!'),
-            backgroundColor: Color(0xFF0284C7),
-            duration: Duration(seconds: 5),
-          ),
+        showAutoDismissSnackBar(
+          context,
+          message: 'Đã mở cổng VNPay Sandbox. Sau khi hoàn tất, bấm Làm mới để cập nhật trạng thái đơn!',
+          backgroundColor: const Color(0xFF0284C7),
+          duration: const Duration(seconds: 5),
         );
       } else {
         await showDialog(
@@ -285,8 +384,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     } catch (e) {
       if (!mounted) return;
       setState(() => _isProcessingPayment = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('$e'), backgroundColor: const Color(0xFFDC2626)),
+      showAutoDismissSnackBar(
+        context,
+        message: '$e',
+        backgroundColor: const Color(0xFFDC2626),
       );
     }
   }
@@ -296,12 +397,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     final success = await _orderRepo.updateOrderStatus(_order!.orderId, newStatus);
     if (!mounted) return;
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(success ? 'Đã cập nhật trạng thái đơn hàng' : 'Không đủ quyền hoặc trạng thái không hợp lệ'),
-        backgroundColor: success ? const Color(0xFF059669) : const Color(0xFFDC2626),
-        behavior: SnackBarBehavior.floating,
-      ),
+    showAutoDismissSnackBar(
+      context,
+      message: success ? 'Đã cập nhật trạng thái đơn hàng' : 'Không đủ quyền hoặc trạng thái không hợp lệ',
+      backgroundColor: success ? const Color(0xFF059669) : const Color(0xFFDC2626),
     );
     if (success) _loadOrderDetails();
   }
@@ -526,7 +625,60 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                           ],
                         ),
                         if (!isPaid && order.status != 4) ...[
-                          if (_vietQr != null) ...[
+                          if (widget.vnpayStatus == 'cancelled' || widget.vnpayStatus == 'failed') ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFFEF2F2),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFFCA5A5)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    widget.vnpayStatus == 'cancelled'
+                                        ? 'Bạn đã hủy giao dịch VNPay${widget.vnpayCode != null ? " (Mã ${widget.vnpayCode})" : ""}.'
+                                        : 'Thanh toán VNPay chưa thành công${widget.vnpayCode != null ? " (Mã ${widget.vnpayCode})" : ""}.',
+                                    style: const TextStyle(color: Color(0xFF991B1B), fontWeight: FontWeight.bold, fontSize: 13),
+                                  ),
+                                  const SizedBox(height: 4),
+                                  const Text(
+                                    'Đơn hàng vẫn được giữ nguyên! Bạn có thể chọn phương thức thanh toán khác bên dưới hoặc hủy đơn để hoàn món về giỏ hàng.',
+                                    style: TextStyle(color: Color(0xFF7F1D1D), fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 12),
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                ChoiceChip(
+                                  label: const Text('VietQR'),
+                                  selected: _paymentMethod == 'VietQR',
+                                  onSelected: (_) => setState(() => _paymentMethod = 'VietQR'),
+                                ),
+                                ChoiceChip(
+                                  label: const Text('VNPay Sandbox'),
+                                  selected: _paymentMethod == 'VNPay',
+                                  onSelected: (_) => setState(() => _paymentMethod = 'VNPay'),
+                                ),
+                                ChoiceChip(
+                                  label: const Text('Tiền mặt tại quầy'),
+                                  selected: _paymentMethod == 'Cash',
+                                  onSelected: (_) => setState(() => _paymentMethod = 'Cash'),
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (_paymentMethod == 'VietQR' && _vietQr != null) ...[
                             const Divider(height: 24),
                             Container(
                               padding: const EdgeInsets.all(12),
@@ -574,8 +726,10 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                                                 InkWell(
                                                   onTap: () {
                                                     Clipboard.setData(ClipboardData(text: _vietQr!.accountNo));
-                                                    ScaffoldMessenger.of(context).showSnackBar(
-                                                      const SnackBar(content: Text('Đã sao chép số tài khoản!')),
+                                                    showAutoDismissSnackBar(
+                                                      context,
+                                                      message: 'Đã sao chép số tài khoản!',
+                                                      duration: const Duration(seconds: 2),
                                                     );
                                                   },
                                                   child: const Icon(Icons.copy, size: 15),
@@ -595,18 +749,40 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                               ),
                             ),
                           ],
-                          const SizedBox(height: 14),
-                          OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFFEA580C),
-                              side: const BorderSide(color: Color(0xFFEA580C)),
-                              minimumSize: const Size(double.infinity, 46),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          if (_paymentMethod == 'Cash') ...[
+                            const SizedBox(height: 12),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFECFDF5),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFA7F3D0)),
+                              ),
+                              child: Text(
+                                'Bạn đã chọn thanh toán tiền mặt cho đơn #${order.orderCode}. Vui lòng thanh toán trực tiếp với nhân viên hoặc tại quầy thu ngân.',
+                                style: const TextStyle(fontSize: 13, color: Color(0xFF065F46)),
+                              ),
                             ),
-                            onPressed: _isProcessingPayment ? null : _launchVnpaySandbox,
-                            icon: const Icon(Icons.credit_card_rounded),
-                            label: const Text('Mở cổng thanh toán VNPay Sandbox', style: TextStyle(fontWeight: FontWeight.bold)),
-                          ),
+                          ],
+                          const SizedBox(height: 14),
+                          if (_paymentMethod == 'VNPay' || widget.vnpayStatus == null)
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFEA580C),
+                                side: const BorderSide(color: Color(0xFFEA580C)),
+                                minimumSize: const Size(double.infinity, 46),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              onPressed: _isProcessingPayment ? null : _launchVnpaySandbox,
+                              icon: const Icon(Icons.credit_card_rounded),
+                              label: Text(
+                                _paymentMethod == 'VNPay'
+                                    ? 'Thanh toán qua VNPay Sandbox'
+                                    : 'Hoặc thanh toán qua VNPay Sandbox',
+                                style: const TextStyle(fontWeight: FontWeight.bold),
+                              ),
+                            ),
                           if (canCollectMoney) ...[
                             const SizedBox(height: 10),
                             ElevatedButton.icon(
@@ -622,6 +798,22 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                                   ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                   : const Icon(Icons.check_circle_outline_rounded),
                               label: const Text('Xác Nhận Đã Thu Tiền & Hoàn Tất Đơn', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                            ),
+                          ],
+                          if (order.status != 3) ...[
+                            const SizedBox(height: 10),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: const Color(0xFFDC2626),
+                                side: const BorderSide(color: Color(0xFFFCA5A5)),
+                                minimumSize: const Size(double.infinity, 44),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                              ),
+                              onPressed: _isRestoringToCart ? null : () => _cancelAndRestoreToCart(),
+                              icon: _isRestoringToCart
+                                  ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFDC2626)))
+                                  : const Icon(Icons.restore_outlined),
+                              label: const Text('Hủy thanh toán & Khôi phục về giỏ hàng', style: TextStyle(fontWeight: FontWeight.bold)),
                             ),
                           ],
                         ],

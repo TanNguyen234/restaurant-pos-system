@@ -8,6 +8,7 @@ import '../../repositories/table_repository.dart';
 import '../../services/qr_table_session.dart';
 import '../../services/session_manager.dart';
 import '../../utils/database_helper.dart';
+import '../../utils/snackbar_helper.dart';
 import '../../widgets/skeleton_loading.dart';
 import 'order_detail_page.dart';
 
@@ -51,10 +52,21 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
   String? _appliedDiscountCode;
   double _discountAmount = 0.0;
   bool _isValidatingVoucher = false;
+  List<Map<String, dynamic>> _availableDiscounts = [];
+  bool _isLoadingDiscounts = false;
 
   @override
   void initState() {
     super.initState();
+    final user = SessionManager.instance.currentUser;
+    if (user != null) {
+      if (user.fullName.trim().isNotEmpty) {
+        _customerNameController.text = user.fullName.trim();
+      }
+      if (user.phoneNumber != null && user.phoneNumber!.trim().isNotEmpty) {
+        _phoneController.text = user.phoneNumber!.trim();
+      }
+    }
     _selectedTableId = widget.preSelectedTableId ?? QrTableSession.instance.activeTableId;
     if (widget.initialDiscountCode != null && widget.initialDiscountCode!.isNotEmpty) {
       _voucherController.text = widget.initialDiscountCode!;
@@ -76,6 +88,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
     setState(() {
       _isLoading = true;
       _loadError = null;
+      _isLoadingDiscounts = true;
     });
     try {
       List<DiningTable> tables = [];
@@ -84,21 +97,48 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
       } catch (_) {}
 
       final cart = await _dbHelper.getCartItems();
+      List<Map<String, dynamic>> discounts = [];
+      try {
+        final res = await ApiConfig.get(Uri.parse('${ApiConfig.baseUrl}/api/discount/active'))
+            .timeout(const Duration(seconds: 5));
+        if (res.statusCode == 200) {
+          final decoded = jsonDecode(utf8.decode(res.bodyBytes));
+          final rawList = decoded is List
+              ? decoded
+              : (decoded is Map ? (decoded['data'] ?? decoded['items'] ?? []) : []);
+          if (rawList is List) {
+            discounts = rawList
+                .whereType<Map>()
+                .map((e) => Map<String, dynamic>.from(e))
+                .toList();
+          }
+        }
+      } catch (_) {}
+
       if (!mounted) return;
 
       final emptyTable = tables.where((t) => t.status == 0).toList();
       setState(() {
         _tables = tables;
         _cartItems = List<Map<String, dynamic>>.from(cart);
+        _availableDiscounts = discounts;
+        _isLoadingDiscounts = false;
         if (_selectedTableId == null && tables.isNotEmpty) {
           _selectedTableId = (emptyTable.isNotEmpty ? emptyTable.first : tables.first).id;
         }
         _isLoading = false;
       });
+
+      if (widget.initialDiscountCode != null &&
+          widget.initialDiscountCode!.trim().isNotEmpty &&
+          _cartItems.isNotEmpty) {
+        await _applyVoucher(codeOverride: widget.initialDiscountCode);
+      }
     } catch (e) {
       if (!mounted) return;
       setState(() {
         _isLoading = false;
+        _isLoadingDiscounts = false;
         _loadError = 'Không thể khởi tạo dữ liệu đặt món: $e';
       });
     }
@@ -112,9 +152,34 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
   double get _discount => _discountAmount;
   double get _finalAmount => (_subtotal - _discount) < 0 ? 0.0 : (_subtotal - _discount);
 
-  Future<void> _applyVoucher() async {
-    final code = _voucherController.text.trim().toUpperCase();
+  ({bool eligible, double missingAmount, double estimatedSavings}) _computeVoucherPreview(
+    Map<String, dynamic> d,
+  ) {
+    final minOrder = (d['minOrderAmount'] as num?)?.toDouble() ?? 0.0;
+    final pct = (d['discountPercent'] as num?)?.toDouble() ?? 0.0;
+    final amt = (d['discountAmount'] as num?)?.toDouble() ?? 0.0;
+    final maxDisc = (d['maxDiscountAmount'] as num?)?.toDouble() ?? 0.0;
+
+    final eligible = _subtotal >= minOrder;
+    final missing = minOrder > _subtotal ? (minOrder - _subtotal) : 0.0;
+    double est = pct > 0 ? (_subtotal * pct / 100.0) : amt;
+    if (maxDisc > 0 && est > maxDisc) est = maxDisc;
+    if (est > _subtotal) est = _subtotal;
+    return (eligible: eligible, missingAmount: missing, estimatedSavings: est);
+  }
+
+  void _clearAppliedVoucher() {
+    setState(() {
+      _appliedDiscountCode = null;
+      _discountAmount = 0.0;
+      _voucherController.clear();
+    });
+  }
+
+  Future<void> _applyVoucher({String? codeOverride}) async {
+    final code = (codeOverride ?? _voucherController.text).trim().toUpperCase();
     if (code.isEmpty) return;
+    _voucherController.text = code;
 
     setState(() => _isValidatingVoucher = true);
     try {
@@ -133,11 +198,11 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
           _discountAmount = (data['discountAmount'] as num?)?.toDouble() ?? 0.0;
           _isValidatingVoucher = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Áp dụng mã "$code" thành công! Giảm ${currencyFormatter.format(_discountAmount)}'),
-            backgroundColor: const Color(0xFF059669),
-          ),
+        showAutoDismissSnackBar(
+          context,
+          message: 'Áp dụng mã "$code" thành công! Giảm ${currencyFormatter.format(_discountAmount)}',
+          duration: const Duration(seconds: 3),
+          backgroundColor: const Color(0xFF059669),
         );
       } else {
         setState(() {
@@ -145,40 +210,41 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
           _discountAmount = 0.0;
           _isValidatingVoucher = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(data['message']?.toString() ?? 'Mã giảm giá không hợp lệ hoặc chưa đạt điều kiện'),
-            backgroundColor: const Color(0xFFDC2626),
-          ),
+        showAutoDismissSnackBar(
+          context,
+          message: data['message']?.toString() ?? 'Mã giảm giá không hợp lệ hoặc chưa đạt điều kiện',
+          duration: const Duration(seconds: 3),
+          backgroundColor: const Color(0xFFDC2626),
         );
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _isValidatingVoucher = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Không thể kiểm tra mã giảm giá với máy chủ: $e'),
-          backgroundColor: const Color(0xFFDC2626),
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: 'Không thể kiểm tra mã giảm giá với máy chủ: $e',
+        duration: const Duration(seconds: 3),
+        backgroundColor: const Color(0xFFDC2626),
       );
     }
   }
 
   Future<void> _submitOrder() async {
     if (_cartItems.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Vui lòng chọn ít nhất 1 món ăn trước khi đặt')),
+      showAutoDismissSnackBar(
+        context,
+        message: 'Vui lòng chọn ít nhất 1 món ăn trước khi đặt',
       );
       return;
     }
 
     if (_orderType == 1 && _selectedTableId == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng chọn bàn phục vụ')));
+      showAutoDismissSnackBar(context, message: 'Vui lòng chọn bàn phục vụ');
       return;
     }
 
     if (_orderType == 3 && _addressController.text.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Vui lòng nhập địa chỉ giao hàng')));
+      showAutoDismissSnackBar(context, message: 'Vui lòng nhập địa chỉ giao hàng');
       return;
     }
 
@@ -186,8 +252,9 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
         (item['product_id'] ?? item['productId']) is! int ||
         ((item['product_id'] ?? item['productId']) as int) <= 0 ||
         (item['quantity'] as num? ?? 0) <= 0)) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Giỏ hàng chứa món không hợp lệ, vui lòng kiểm tra lại')),
+      showAutoDismissSnackBar(
+        context,
+        message: 'Giỏ hàng chứa món không hợp lệ, vui lòng kiểm tra lại',
       );
       return;
     }
@@ -239,29 +306,27 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
         final bool isOffline = result['isOffline'] == true;
         final int? orderId = result['orderId'] as int?;
         if (!isOffline && (orderId == null || orderId <= 0)) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Máy chủ trả về đơn không hợp lệ; kiểm tra danh sách đơn trước khi đặt lại.')),
+          showAutoDismissSnackBar(
+            context,
+            message: 'Máy chủ trả về đơn không hợp lệ; kiểm tra danh sách đơn trước khi đặt lại.',
           );
           return;
         }
         await _dbHelper.clearCart();
         if (!mounted) return;
         if (isOffline) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(result['message']?.toString() ?? 'Đơn đã lưu ngoại tuyến, sẽ đồng bộ khi có mạng.'),
-              backgroundColor: const Color(0xFFD97706),
-            ),
+          showAutoDismissSnackBar(
+            context,
+            message: result['message']?.toString() ?? 'Đơn đã lưu ngoại tuyến, sẽ đồng bộ khi có mạng.',
+            backgroundColor: const Color(0xFFD97706),
           );
           Navigator.pop(context);
           return;
         }
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message']?.toString() ?? 'Đặt hàng thành công!'),
-            backgroundColor: const Color(0xFF059669),
-            behavior: SnackBarBehavior.floating,
-          ),
+        showAutoDismissSnackBar(
+          context,
+          message: result['message']?.toString() ?? 'Đặt hàng thành công!',
+          backgroundColor: const Color(0xFF059669),
         );
         Navigator.pushReplacement(
           context,
@@ -270,17 +335,18 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
           ),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(result['message']?.toString() ?? 'Đặt hàng thất bại'),
-            backgroundColor: const Color(0xFFDC2626),
-          ),
+        showAutoDismissSnackBar(
+          context,
+          message: result['message']?.toString() ?? 'Đặt hàng thất bại',
+          backgroundColor: const Color(0xFFDC2626),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Lỗi gửi đơn hàng: $e'), backgroundColor: const Color(0xFFDC2626)),
+        showAutoDismissSnackBar(
+          context,
+          message: 'Lỗi gửi đơn hàng: $e',
+          backgroundColor: const Color(0xFFDC2626),
         );
       }
     } finally {
@@ -522,6 +588,8 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                                         },
                                       ),
                                       const SizedBox(height: 14),
+                                      _buildAvailableVouchersSection(),
+                                      const SizedBox(height: 10),
                                       Row(
                                         children: [
                                           Expanded(
@@ -529,7 +597,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                                               controller: _voucherController,
                                               textCapitalization: TextCapitalization.characters,
                                               decoration: InputDecoration(
-                                                hintText: 'Nhập mã giảm giá (nếu có)',
+                                                hintText: 'Hoặc nhập mã giảm giá khác',
                                                 prefixIcon: const Icon(Icons.confirmation_number_outlined, size: 20),
                                                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
@@ -545,7 +613,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                             ),
-                                            onPressed: _isValidatingVoucher ? null : _applyVoucher,
+                                            onPressed: _isValidatingVoucher ? null : () => _applyVoucher(),
                                             child: _isValidatingVoucher
                                                 ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                                                 : const Text('Áp dụng', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -557,10 +625,27 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                                         Row(
                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           children: [
-                                            Text('Giảm giá (${_appliedDiscountCode ?? ""}):',
-                                                style: const TextStyle(fontSize: 14, color: Color(0xFF059669), fontWeight: FontWeight.w600)),
-                                            Text('-${currencyFormatter.format(_discountAmount)}',
-                                                style: const TextStyle(fontSize: 14, color: Color(0xFF059669), fontWeight: FontWeight.bold)),
+                                            Expanded(
+                                              child: Text(
+                                                'Giảm giá (${_appliedDiscountCode ?? ""}):',
+                                                style: const TextStyle(fontSize: 14, color: Color(0xFF059669), fontWeight: FontWeight.w600),
+                                              ),
+                                            ),
+                                            Text(
+                                              '-${currencyFormatter.format(_discountAmount)}',
+                                              style: const TextStyle(fontSize: 14, color: Color(0xFF059669), fontWeight: FontWeight.bold),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            TextButton(
+                                              onPressed: _clearAppliedVoucher,
+                                              style: TextButton.styleFrom(
+                                                foregroundColor: const Color(0xFFDC2626),
+                                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                                minimumSize: Size.zero,
+                                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                              ),
+                                              child: const Text('Bỏ mã', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                            ),
                                           ],
                                         ),
                                       ],
@@ -647,6 +732,152 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                         ),
                       ),
                     ),
+    );
+  }
+
+  Widget _buildAvailableVouchersSection() {
+    if (_isLoadingDiscounts) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 6),
+        child: LinearProgressIndicator(minHeight: 2),
+      );
+    }
+    if (_availableDiscounts.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final sorted = List<Map<String, dynamic>>.from(_availableDiscounts)
+      ..sort((a, b) {
+        final ea = _computeVoucherPreview(a).eligible ? 0 : 1;
+        final eb = _computeVoucherPreview(b).eligible ? 0 : 1;
+        if (ea != eb) return ea.compareTo(eb);
+        return _computeVoucherPreview(b)
+            .estimatedSavings
+            .compareTo(_computeVoucherPreview(a).estimatedSavings);
+      });
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Row(
+          children: [
+            Icon(Icons.local_offer_rounded, size: 16, color: Color(0xFFD97706)),
+            SizedBox(width: 6),
+            Text(
+              'Mã giảm giá có sẵn cho đơn này',
+              style: TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Column(
+          children: sorted.map((d) {
+            final code = (d['code'] ?? '').toString().trim().toUpperCase();
+            final title = (d['title'] ?? code).toString();
+            final pct = (d['discountPercent'] as num?)?.toDouble() ?? 0.0;
+            final amt = (d['discountAmount'] as num?)?.toDouble() ?? 0.0;
+            final minOrder = (d['minOrderAmount'] as num?)?.toDouble() ?? 0.0;
+            final preview = _computeVoucherPreview(d);
+            final isApplied = _appliedDiscountCode == code;
+
+            final badgeText = pct > 0
+                ? 'Giảm ${pct.toStringAsFixed(pct.truncateToDouble() == pct ? 0 : 1)}%'
+                : 'Giảm ${currencyFormatter.format(amt)}';
+
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(10),
+                onTap: _isValidatingVoucher || !preview.eligible
+                    ? null
+                    : () {
+                        if (isApplied) {
+                          _clearAppliedVoucher();
+                        } else {
+                          _applyVoucher(codeOverride: code);
+                        }
+                      },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: isApplied
+                        ? const Color(0xFFECFDF5)
+                        : (preview.eligible ? const Color(0xFFFFFBEB) : const Color(0xFFF8FAFC)),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isApplied
+                          ? const Color(0xFF059669)
+                          : (preview.eligible ? const Color(0xFFF59E0B) : const Color(0xFFE2E8F0)),
+                      width: isApplied ? 1.5 : 1,
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: preview.eligible ? const Color(0xFF0F172A) : const Color(0xFF94A3B8),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          code,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 12,
+                            letterSpacing: 0.4,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              title,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w600,
+                                color: preview.eligible ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              preview.eligible
+                                  ? '$badgeText • Tiết kiệm ${currencyFormatter.format(preview.estimatedSavings)}'
+                                  : '$badgeText • Đơn tối thiểu ${currencyFormatter.format(minOrder)} (thiếu ${currencyFormatter.format(preview.missingAmount)})',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: preview.eligible ? const Color(0xFF059669) : const Color(0xFFD97706),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        isApplied
+                            ? 'Đang dùng'
+                            : (preview.eligible ? 'Dùng ngay' : 'Chưa đủ'),
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: isApplied
+                              ? const Color(0xFF059669)
+                              : (preview.eligible ? const Color(0xFF0F172A) : const Color(0xFF94A3B8)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
     );
   }
 

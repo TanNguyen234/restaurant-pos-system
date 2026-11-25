@@ -378,8 +378,20 @@ public class AccountRepository : BaseRepository
 
         string provider = AllowedOAuthProviders.First(p => p.Equals(dto.Provider.Trim(), StringComparison.OrdinalIgnoreCase));
         string email = dto.Email.Trim().ToLowerInvariant();
-        var existing = await context.Accounts
-            .FirstOrDefaultAsync(a => a.Email != null && a.Email.ToLower() == email);
+        string? providerId = string.IsNullOrWhiteSpace(dto.ProviderId) ? null : dto.ProviderId.Trim();
+
+        Account? existing = null;
+        if (providerId != null)
+        {
+            existing = await context.Accounts
+                .FirstOrDefaultAsync(a => a.OAuthProvider == provider && a.OAuthProviderId == providerId);
+        }
+
+        if (existing == null)
+        {
+            existing = await context.Accounts
+                .FirstOrDefaultAsync(a => a.Email != null && a.Email.ToLower() == email);
+        }
 
         if (existing != null)
         {

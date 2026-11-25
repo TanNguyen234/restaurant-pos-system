@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../models/product.dart';
 import '../repositories/product_repository.dart';
 import '../utils/database_helper.dart';
+import '../utils/snackbar_helper.dart';
 import '../widgets/skeleton_loading.dart';
 import 'cart_page.dart';
 
@@ -151,17 +152,13 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
     await _dbHelper.insertOrUpdateCart(cartItem);
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text('Đã thêm $_quantity x "${_detailProduct.productName}" vào giỏ hàng!'),
-        backgroundColor: const Color(0xFF0F172A),
-        duration: const Duration(seconds: 3),
-        action: SnackBarAction(
-          label: 'XEM GIỎ',
-          textColor: const Color(0xFFF59E0B),
-          onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CartPage())),
-        ),
-      ),
+    showAutoDismissSnackBar(
+      context,
+      message: 'Đã thêm $_quantity x "${_detailProduct.productName}" vào giỏ hàng!',
+      duration: const Duration(seconds: 3),
+      backgroundColor: const Color(0xFF0F172A),
+      actionLabel: 'XEM GIỎ',
+      onAction: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const CartPage())),
     );
   }
 

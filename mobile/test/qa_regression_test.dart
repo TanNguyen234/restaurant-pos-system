@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:restaurant_pos_app/main.dart';
 import 'package:restaurant_pos_app/models/order.dart';
 import 'package:restaurant_pos_app/models/user.dart';
 import 'package:restaurant_pos_app/repositories/order_repository.dart';
@@ -9,6 +12,10 @@ import 'package:restaurant_pos_app/services/qr_table_session.dart';
 import 'package:restaurant_pos_app/services/realtime_service.dart';
 import 'package:restaurant_pos_app/services/session_manager.dart';
 import 'package:restaurant_pos_app/utils/database_helper.dart';
+import 'package:restaurant_pos_app/utils/snackbar_helper.dart';
+import 'package:restaurant_pos_app/views/member/member_home_page.dart';
+import 'package:restaurant_pos_app/views/order/order_checkout_page.dart';
+import 'package:restaurant_pos_app/views/order/order_detail_page.dart';
 
 UserAccount _userWithRole(String role) => UserAccount(
       accountId: 1,
@@ -250,6 +257,206 @@ void main() {
       expect(events[1].target, 'KdsUpdated');
     });
   });
+
+  group('UX, VNPay Recovery, Checkout Vouchers, Deep-Link & User Orders tests', () {
+    tearDown(() {
+      HttpOverrides.global = null;
+    });
+
+    testWidgets('showAutoDismissSnackBar auto-dismisses even when accessibleNavigation is true', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: const MediaQueryData(accessibleNavigation: true),
+            child: Scaffold(
+              body: Builder(
+                builder: (ctx) => ElevatedButton(
+                  onPressed: () => showAutoDismissSnackBar(
+                    ctx,
+                    message: 'Đã thêm 1 x "Cà phê" vào giỏ',
+                    duration: const Duration(seconds: 2),
+                    actionLabel: 'GIỎ HÀNG',
+                    onAction: () {},
+                  ),
+                  child: const Text('Trigger'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('Trigger'));
+      await tester.pump();
+      expect(find.text('Đã thêm 1 x "Cà phê" vào giỏ'), findsOneWidget);
+      expect(find.text('GIỎ HÀNG'), findsOneWidget);
+
+      await tester.pump(const Duration(seconds: 3));
+      await tester.pumpAndSettle();
+      expect(find.text('Đã thêm 1 x "Cà phê" vào giỏ'), findsNothing);
+    });
+
+    test('MainNavigationPage parses VNPay return params and OAuth ticket from URI', () {
+      final vnp = MainNavigationPage.parseVnpayReturnFromUri(
+        Uri.parse('http://localhost:8088/?vnpayStatus=cancelled&orderId=42&code=24'),
+      );
+      expect(vnp, isNotNull);
+      expect(vnp!.status, 'cancelled');
+      expect(vnp.orderId, 42);
+      expect(vnp.code, '24');
+
+      expect(
+        MainNavigationPage.parseOAuthTicketFromUri(Uri.parse('http://localhost:8088/?oauthTicket=abc123')),
+        'abc123',
+      );
+      expect(
+        MainNavigationPage.parseOAuthTicketFromUri(Uri.parse('http://localhost:8088/#/?oauthTicket=xyz789')),
+        'xyz789',
+      );
+    });
+
+    testWidgets('OrderCheckoutPage renders active vouchers with eligibility & applies on 1 tap', (tester) async {
+      HttpOverrides.global = _MockHttpOverrides((method, uri, _) {
+        if (uri.path.endsWith('/api/table')) {
+          return (200, jsonEncode([{'tableId': 1, 'areaId': 1, 'tableName': 'Bàn T1-01', 'capacity': 4, 'status': 0}]));
+        }
+        if (uri.path.endsWith('/api/discount/active')) {
+          return (200, jsonEncode({
+            'success': true,
+            'data': [
+              {'discountId': 1, 'code': 'BANMOI10', 'title': 'Giảm 10% khách mới', 'discountPercent': 10, 'discountAmount': 0, 'minOrderAmount': 50000, 'maxDiscountAmount': 50000},
+              {'discountId': 2, 'code': 'GIAM20K', 'title': 'Giảm 20k đơn 100k', 'discountPercent': 0, 'discountAmount': 20000, 'minOrderAmount': 100000, 'maxDiscountAmount': 20000},
+            ],
+          }));
+        }
+        if (uri.path.endsWith('/api/discount/validate')) {
+          return (200, jsonEncode({'success': true, 'discountAmount': 6000}));
+        }
+        return (200, '{}');
+      });
+
+      await DatabaseHelper().insertOrUpdateCart({
+        'product_id': 1,
+        'product_name': 'Cà phê đen đá',
+        'price': 60000.0,
+        'quantity': 1,
+      });
+
+      await tester.pumpWidget(const MaterialApp(home: OrderCheckoutPage(preSelectedTableId: 1)));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Mã giảm giá có sẵn cho đơn này'), findsOneWidget);
+      expect(find.text('BANMOI10'), findsOneWidget);
+      expect(find.text('GIAM20K'), findsOneWidget);
+      expect(find.text('Dùng ngay'), findsOneWidget);
+      expect(find.text('Chưa đủ'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('BANMOI10'));
+      await tester.tap(find.text('BANMOI10'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Giảm giá (BANMOI10):'), findsOneWidget);
+      expect(find.text('Đang dùng'), findsOneWidget);
+    });
+
+    testWidgets('OrderDetailPage shows VNPay cancelled recovery banner and restores order back to cart', (tester) async {
+      bool cancelledApiCalled = false;
+      HttpOverrides.global = _MockHttpOverrides((method, uri, _) {
+        if (uri.path.endsWith('/api/order/77')) {
+          return (200, jsonEncode({
+            'orderId': 77,
+            'orderCode': 'ORD-VNPAY-77',
+            'tableId': 2,
+            'tableName': 'Bàn T1-02',
+            'customerName': 'Khách VNPay',
+            'totalAmount': 50000,
+            'discountAmount': 0,
+            'finalAmount': 50000,
+            'paidAmount': 0,
+            'status': 0,
+            'paymentStatus': 0,
+            'details': [
+              {'orderDetailId': 1, 'productId': 5, 'productName': 'Trà đào cam sả', 'quantity': 1, 'unitPrice': 50000, 'subTotal': 50000, 'cookingStatus': 0},
+            ],
+          }));
+        }
+        if (uri.path.contains('/api/payment/vietqr/77')) {
+          return (404, '{}');
+        }
+        if (uri.path.endsWith('/api/order/77/cancel-unpaid') && method == 'POST') {
+          cancelledApiCalled = true;
+          return (200, jsonEncode({'success': true, 'message': 'Đã hủy đơn chưa thanh toán'}));
+        }
+        return (200, '{}');
+      });
+
+      await tester.pumpWidget(
+        const MaterialApp(
+          home: OrderDetailPage(orderId: 77, vnpayStatus: 'cancelled', vnpayCode: '24'),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('Bạn đã hủy giao dịch VNPay (Mã 24)'), findsOneWidget);
+      expect(find.text('Tiền mặt tại quầy'), findsOneWidget);
+
+      await tester.ensureVisible(find.text('Hủy thanh toán & Khôi phục về giỏ hàng'));
+      await tester.tap(find.text('Hủy thanh toán & Khôi phục về giỏ hàng'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Khôi phục về giỏ'));
+      await tester.pumpAndSettle();
+
+      expect(cancelledApiCalled, isTrue);
+      final restored = await DatabaseHelper().getCartItems();
+      expect(restored.length, 1);
+      expect(restored.first['product_name'], 'Trà đào cam sả');
+    });
+
+    testWidgets('MemberHomePage auto-loads logged-in user orders on mount without manual search', (tester) async {
+      await SessionManager.instance.setSession(_userWithRole('MEMBER'));
+      HttpOverrides.global = _MockHttpOverrides((method, uri, _) {
+        if (uri.path.endsWith('/api/loyalty/me')) {
+          return (200, jsonEncode({
+            'success': true,
+            'data': {
+              'loyaltyPoints': 1250,
+              'tier': 'THÀNH VIÊN',
+              'availableVouchers': [],
+              'redeemedVoucherCodes': [],
+              'history': [],
+            },
+          }));
+        }
+        if (uri.path.contains('/api/order/lookup')) {
+          return (200, jsonEncode({
+            'success': true,
+            'data': [
+              {
+                'orderId': 6,
+                'orderCode': 'ORD-MEMBER-006',
+                'tableName': 'Bàn T1-01',
+                'customerName': 'Bùi Vĩnh Khang',
+                'totalAmount': 80000,
+                'discountAmount': 0,
+                'finalAmount': 80000,
+                'status': 1,
+                'paymentStatus': 0,
+                'details': [],
+              }
+            ],
+          }));
+        }
+        return (200, '{}');
+      });
+
+      await tester.pumpWidget(const MaterialApp(home: MemberHomePage()));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Đơn hàng của tôi (1)'), findsOneWidget);
+      expect(find.text('ORD-MEMBER-006'), findsOneWidget);
+    });
+  });
 }
 
 class _OfflineHttpOverrides extends HttpOverrides {
@@ -273,4 +480,141 @@ class _OfflineHttpClient implements HttpClient {
     return null;
   }
 }
+
+typedef _MockResponder = (int statusCode, String body) Function(String method, Uri uri, String body);
+
+class _MockHttpOverrides extends HttpOverrides {
+  final _MockResponder responder;
+  _MockHttpOverrides(this.responder);
+
+  @override
+  HttpClient createHttpClient(SecurityContext? context) => _MockHttpClient(responder);
+}
+
+class _MockHttpClient extends Fake implements HttpClient {
+  final _MockResponder responder;
+  _MockHttpClient(this.responder);
+
+  @override
+  set autoUncompress(bool _) {}
+  @override
+  Duration? connectionTimeout;
+  @override
+  Duration idleTimeout = const Duration(seconds: 15);
+
+  @override
+  Future<HttpClientRequest> openUrl(String method, Uri url) async =>
+      _MockHttpClientRequest(method, url, responder);
+  @override
+  Future<HttpClientRequest> getUrl(Uri url) => openUrl('GET', url);
+  @override
+  Future<HttpClientRequest> postUrl(Uri url) => openUrl('POST', url);
+  @override
+  Future<HttpClientRequest> putUrl(Uri url) => openUrl('PUT', url);
+  @override
+  Future<HttpClientRequest> deleteUrl(Uri url) => openUrl('DELETE', url);
+  @override
+  void close({bool force = false}) {}
+}
+
+class _MockHttpClientRequest extends Fake implements HttpClientRequest {
+  @override
+  final String method;
+  @override
+  final Uri uri;
+  final _MockResponder responder;
+  final _buffer = <int>[];
+
+  _MockHttpClientRequest(this.method, this.uri, this.responder);
+
+  @override
+  bool followRedirects = true;
+  @override
+  int maxRedirects = 5;
+  @override
+  int contentLength = -1;
+  @override
+  bool persistentConnection = false;
+  @override
+  final HttpHeaders headers = _MockHttpHeaders();
+  @override
+  Encoding encoding = utf8;
+
+  @override
+  void add(List<int> data) => _buffer.addAll(data);
+  @override
+  void write(Object? obj) => _buffer.addAll(utf8.encode(obj?.toString() ?? ''));
+  @override
+  Future addStream(Stream<List<int>> stream) async {
+    await for (final chunk in stream) {
+      _buffer.addAll(chunk);
+    }
+  }
+
+  @override
+  Future<HttpClientResponse> close() async {
+    final (code, body) = responder(method, uri, utf8.decode(_buffer, allowMalformed: true));
+    return _MockHttpClientResponse(code, utf8.encode(body));
+  }
+}
+
+class _MockHttpHeaders extends Fake implements HttpHeaders {
+  final Map<String, List<String>> _headers = {
+    'content-type': ['application/json; charset=utf-8'],
+  };
+
+  @override
+  void forEach(void Function(String name, List<String> values) action) => _headers.forEach(action);
+  @override
+  List<String>? operator [](String name) => _headers[name.toLowerCase()];
+  @override
+  String? value(String name) => _headers[name.toLowerCase()]?.first;
+  @override
+  void set(String name, Object value, {bool preserveHeaderCase = false}) {
+    _headers[name.toLowerCase()] = [value.toString()];
+  }
+
+  @override
+  void add(String name, Object value, {bool preserveHeaderCase = false}) {
+    _headers.putIfAbsent(name.toLowerCase(), () => []).add(value.toString());
+  }
+}
+
+class _MockHttpClientResponse extends Fake implements HttpClientResponse {
+  @override
+  final int statusCode;
+  final List<int> _bytes;
+  _MockHttpClientResponse(this.statusCode, this._bytes);
+
+  @override
+  String get reasonPhrase => statusCode == 200 ? 'OK' : 'Error';
+  @override
+  bool get isRedirect => false;
+  @override
+  bool get persistentConnection => false;
+  @override
+  List<RedirectInfo> get redirects => const [];
+  @override
+  int get contentLength => _bytes.length;
+  @override
+  final HttpHeaders headers = _MockHttpHeaders();
+  @override
+  HttpClientResponseCompressionState get compressionState =>
+      HttpClientResponseCompressionState.notCompressed;
+
+  @override
+  StreamSubscription<List<int>> listen(
+    void Function(List<int> event)? onData, {
+    Function? onError,
+    void Function()? onDone,
+    bool? cancelOnError,
+  }) =>
+      Stream<List<int>>.value(_bytes).listen(
+        onData,
+        onError: onError,
+        onDone: onDone,
+        cancelOnError: cancelOnError,
+      );
+}
+
 
