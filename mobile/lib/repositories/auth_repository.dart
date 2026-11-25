@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show SocketException;
+import 'package:http/http.dart' as http;
 import '../config/api_config.dart';
 import '../models/user.dart';
 import '../utils/database_helper.dart';
@@ -18,6 +20,27 @@ class AuthRepository {
     return {};
   }
 
+  Future<Map<String, dynamic>> _persistAuthResponse(
+    int statusCode,
+    Map<String, dynamic> data, {
+    required String fallbackError,
+    required String fallbackSuccess,
+  }) async {
+    if (statusCode != 200 || data['success'] != true || data['token'] == null) {
+      return {
+        'success': false,
+        'message': data['message']?.toString() ?? '$fallbackError (HTTP $statusCode)',
+      };
+    }
+
+    await _dbHelper.saveUserSession(data);
+    return {
+      'success': true,
+      'message': data['message']?.toString() ?? fallbackSuccess,
+      'user': UserAccount.fromMap(data),
+    };
+  }
+
   /// Đăng nhập tài khoản hệ thống POS
   Future<Map<String, dynamic>> login(String username, String password) async {
     try {
@@ -31,19 +54,12 @@ class AuthRepository {
       ).timeout(timeoutDuration);
 
       final data = _decodeJsonMap(response.bodyBytes);
-      if (response.statusCode != 200 || data['success'] != true || data['token'] == null) {
-        return {
-          'success': false,
-          'message': data['message']?.toString() ?? 'Đăng nhập thất bại (HTTP ${response.statusCode})',
-        };
-      }
-
-      await _dbHelper.saveUserSession(data);
-      return {
-        'success': true,
-        'message': data['message']?.toString() ?? 'Đăng nhập thành công',
-        'user': UserAccount.fromMap(data),
-      };
+      return await _persistAuthResponse(
+        response.statusCode,
+        data,
+        fallbackError: 'Đăng nhập thất bại',
+        fallbackSuccess: 'Đăng nhập thành công',
+      );
     } catch (e) {
       return {'success': false, 'message': 'Máy chủ xác thực không khả dụng: $e'};
     }
@@ -351,43 +367,91 @@ class AuthRepository {
     }
   }
 
-  /// Đăng nhập mạng xã hội OAuth (Google / Facebook / Zalo - Barem 1.10)
-  Future<Map<String, dynamic>> oauthLogin({
-    required String provider,
-    required String email,
-    required String fullName,
-    String? token,
-    String? avatar,
-  }) async {
+  /// Kiểm tra trạng thái cấu hình OAuth 2.0 thật từ Backend (Google / Facebook / Zalo)
+  Future<Map<String, dynamic>> getOAuthProvidersStatus() async {
     try {
-      final response = await ApiConfig.post(
-        Uri.parse('$baseUrl/oauth-login'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({
-          'provider': provider,
-          'token': token ?? 'oauth_verified_client',
-          'email': email.trim(),
-          'fullName': fullName.trim(),
-          'avatar': avatar,
-        }),
+      final response = await ApiConfig.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/auth/oauth/providers'),
       ).timeout(timeoutDuration);
-
+      if (response.statusCode != 200) return {};
       final data = _decodeJsonMap(response.bodyBytes);
-      if (response.statusCode != 200 || data['success'] != true || data['token'] == null) {
+      final providers = data['providers'];
+      if (providers is Map<String, dynamic>) return providers;
+      if (providers is Map) return Map<String, dynamic>.from(providers);
+      return {};
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// Tạo URL bắt đầu luồng OAuth 2.0 thật
+  Uri buildOAuthStartUri(
+    String provider, {
+    String? clientRedirect,
+    String? pollKey,
+  }) {
+    final query = <String, String>{};
+    if (clientRedirect != null && clientRedirect.trim().isNotEmpty) {
+      query['clientRedirect'] = clientRedirect.trim();
+    }
+    if (pollKey != null && pollKey.trim().isNotEmpty) {
+      query['pollKey'] = pollKey.trim();
+    }
+    final uri = Uri.parse('${ApiConfig.baseUrl}/api/auth/oauth/${provider.trim().toLowerCase()}/start');
+    return query.isEmpty ? uri : uri.replace(queryParameters: query);
+  }
+
+  /// Kiểm tra trạng thái ticket OAuth cho luồng Desktop/Mobile External Browser
+  Future<Map<String, dynamic>> pollOAuthTicket(String pollKey) async {
+    try {
+      final response = await ApiConfig.get(
+        Uri.parse('${ApiConfig.baseUrl}/api/auth/oauth/poll/${Uri.encodeComponent(pollKey.trim())}'),
+      ).timeout(timeoutDuration);
+      final data = _decodeJsonMap(response.bodyBytes);
+      if (response.statusCode != 200 && data['error'] == null) {
         return {
-          'success': false,
-          'message': data['message']?.toString() ?? 'Đăng nhập $provider thất bại (HTTP ${response.statusCode})',
+          'ready': false,
+          'error': data['message']?.toString() ?? 'HTTP ${response.statusCode}',
         };
       }
-
-      await _dbHelper.saveUserSession(data);
-      return {
-        'success': true,
-        'message': data['message']?.toString() ?? 'Đăng nhập $provider thành công',
-        'user': UserAccount.fromMap(data),
-      };
+      return data;
     } catch (e) {
-      return {'success': false, 'message': 'Lỗi kết nối $provider: $e'};
+      return {'ready': false, 'error': e.toString()};
     }
+  }
+
+  /// Đổi one-time OAuth ticket lấy JWT session (có retry backoff cho Android/Desktop socket wake-up)
+  Future<Map<String, dynamic>> exchangeOAuthTicket(String ticket) async {
+    const int maxAttempts = 5;
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        final response = await ApiConfig.post(
+          Uri.parse('${ApiConfig.baseUrl}/api/auth/oauth/exchange'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({'ticket': ticket.trim()}),
+        ).timeout(timeoutDuration);
+
+        final data = _decodeJsonMap(response.bodyBytes);
+        return await _persistAuthResponse(
+          response.statusCode,
+          data,
+          fallbackError: 'Đăng nhập OAuth thất bại',
+          fallbackSuccess: 'Đăng nhập OAuth thành công',
+        );
+      } on SocketException catch (e) {
+        if (attempt == maxAttempts) {
+          return {'success': false, 'message': 'Lỗi kết nối OAuth: $e'};
+        }
+        await Future.delayed(Duration(milliseconds: 500 * attempt));
+      } on http.ClientException catch (e) {
+        if (attempt == maxAttempts) {
+          return {'success': false, 'message': 'Lỗi kết nối OAuth: $e'};
+        }
+        await Future.delayed(Duration(milliseconds: 500 * attempt));
+      } catch (e) {
+        return {'success': false, 'message': 'Lỗi kết nối OAuth: $e'};
+      }
+    }
+    return {'success': false, 'message': 'Lỗi kết nối OAuth'};
   }
 }

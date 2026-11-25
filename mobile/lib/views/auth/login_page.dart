@@ -1,7 +1,12 @@
+import 'dart:async';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'package:uuid/uuid.dart';
 import '../../models/user.dart';
 import '../../repositories/auth_repository.dart';
 import '../../services/session_manager.dart';
+import '../../utils/snackbar_helper.dart';
 import 'register_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -20,6 +25,30 @@ class _LoginPageState extends State<LoginPage> {
   bool _isLoading = false;
   bool _obscurePassword = true;
   String? _errorMessage;
+  Map<String, dynamic> _oauthProviders = {};
+
+  @override
+  void initState() {
+    super.initState();
+    _loadOAuthProviders();
+  }
+
+  Future<void> _loadOAuthProviders() async {
+    final providers = await _authRepo.getOAuthProvidersStatus();
+    if (!mounted) return;
+    setState(() => _oauthProviders = providers);
+  }
+
+  Map<String, dynamic>? _findProviderConfig(String providerKey) {
+    final direct = _oauthProviders[providerKey];
+    if (direct is Map) return Map<String, dynamic>.from(direct);
+    for (final entry in _oauthProviders.entries) {
+      if (entry.key.toLowerCase() == providerKey.toLowerCase() && entry.value is Map) {
+        return Map<String, dynamic>.from(entry.value as Map);
+      }
+    }
+    return null;
+  }
 
   @override
   void dispose() {
@@ -50,12 +79,10 @@ class _LoginPageState extends State<LoginPage> {
         await SessionManager.instance.setSession(user);
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'Đăng nhập thành công'),
-          backgroundColor: const Color(0xFF059669),
-          behavior: SnackBarBehavior.floating,
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: result['message']?.toString() ?? 'Đăng nhập thành công',
+        backgroundColor: const Color(0xFF059669),
       );
       Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
     } else {
@@ -65,103 +92,154 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
-  Future<void> _showOAuthModal(String provider, Color brandColor) async {
-    final emailCtrl = TextEditingController();
-    final nameCtrl = TextEditingController();
+  Future<void> _startRealOAuth(String providerKey, String displayName, Color brandColor) async {
+    if (_oauthProviders.isEmpty) {
+      await _loadOAuthProviders();
+      if (!mounted) return;
+    }
 
-    final submitted = await showDialog<Map<String, String>>(
-      context: context,
-      builder: (ctx) {
-        String? localErr;
-        return StatefulBuilder(
-          builder: (ctx, setModalState) => AlertDialog(
-            title: Row(
-              children: [
-                CircleAvatar(
-                  radius: 16,
-                  backgroundColor: brandColor.withValues(alpha: 0.12),
-                  child: Icon(Icons.verified_user, color: brandColor, size: 18),
+    final cfg = _findProviderConfig(providerKey);
+    if (cfg != null && cfg['configured'] == false) {
+      final missingKeys = (cfg['missingEnvKeys'] as List? ?? [])
+          .map((e) => e.toString())
+          .where((e) => e.isNotEmpty)
+          .toList();
+      final callbackUrl = cfg['callbackUrl']?.toString() ?? '';
+
+      await showDialog<void>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Row(
+            children: [
+              Icon(Icons.settings_outlined, color: brandColor),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Chưa cấu hình OAuth $displayName',
+                  style: const TextStyle(fontSize: 17),
                 ),
-                const SizedBox(width: 10),
-                Expanded(child: Text('Đăng nhập với $provider', style: const TextStyle(fontSize: 17))),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'Chế độ Sandbox OAuth ($provider): Nhập email & tên hiển thị tài khoản khách hàng để đăng nhập hoặc tạo hội viên mới. Không cho phép đăng nhập chéo vào tài khoản nhân sự/Admin.',
-                    style: const TextStyle(fontSize: 12.5, color: Color(0xFF64748B), height: 1.4),
-                  ),
-                  const SizedBox(height: 14),
-                  TextField(
-                    controller: emailCtrl,
-                    keyboardType: TextInputType.emailAddress,
-                    decoration: InputDecoration(
-                      labelText: 'Email $provider *',
-                      hintText: 'khachhang@example.com',
-                      border: const OutlineInputBorder(),
-                      prefixIcon: const Icon(Icons.email_outlined),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  TextField(
-                    controller: nameCtrl,
-                    decoration: const InputDecoration(
-                      labelText: 'Họ và tên hiển thị',
-                      hintText: 'Nguyễn Văn A',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.person_outline),
-                    ),
-                  ),
-                  if (localErr != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: Text(localErr!, style: const TextStyle(color: Colors.red, fontSize: 12)),
-                    ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Hủy'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(backgroundColor: brandColor),
-                onPressed: () {
-                  final email = emailCtrl.text.trim();
-                  if (email.isEmpty || !email.contains('@')) {
-                    setModalState(() => localErr = 'Vui lòng nhập email hợp lệ');
-                    return;
-                  }
-                  final name = nameCtrl.text.trim().isEmpty
-                      ? email.split('@').first
-                      : nameCtrl.text.trim();
-                  Navigator.pop(ctx, {'email': email, 'fullName': name});
-                },
-                child: Text('Tiếp tục với $provider'),
               ),
             ],
           ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Đăng nhập $displayName sử dụng OAuth 2.0 thật và cần cấu hình khóa ứng dụng trong backend/.env:',
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF475569), height: 1.4),
+                ),
+                if (missingKeys.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'Biến môi trường còn thiếu trong backend/.env:',
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: SelectableText(
+                      missingKeys.join('\n'),
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Color(0xFFDC2626)),
+                    ),
+                  ),
+                ],
+                if (callbackUrl.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(
+                    'Callback URL cần đăng ký trong $displayName Developer Console:',
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF0F9FF),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFBAE6FD)),
+                    ),
+                    child: SelectableText(
+                      callbackUrl,
+                      style: const TextStyle(fontFamily: 'monospace', fontSize: 12, color: Color(0xFF0369A1)),
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Đã hiểu'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
+    if (kIsWeb) {
+      final origin = '${Uri.base.scheme}://${Uri.base.host}${Uri.base.hasPort ? ':${Uri.base.port}' : ''}';
+      final startUri = _authRepo.buildOAuthStartUri(providerKey, clientRedirect: origin);
+      final launched = await launchUrl(startUri, webOnlyWindowName: '_self');
+      if (!launched && mounted) {
+        showAutoDismissSnackBar(
+          context,
+          message: 'Không thể mở trang xác thực $displayName',
+          backgroundColor: const Color(0xFFDC2626),
         );
-      },
+      }
+      return;
+    }
+
+    final pollKey = const Uuid().v4();
+    final startUri = _authRepo.buildOAuthStartUri(providerKey, pollKey: pollKey);
+    final launched = await launchUrl(startUri, mode: LaunchMode.externalApplication);
+    if (!mounted) return;
+    if (!launched) {
+      showAutoDismissSnackBar(
+        context,
+        message: 'Không thể mở trình duyệt ngoài để xác thực $displayName',
+        backgroundColor: const Color(0xFFDC2626),
+      );
+      return;
+    }
+
+    final pollResult = await showDialog<Map<String, dynamic>>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _OAuthPollingDialog(
+        displayName: displayName,
+        brandColor: brandColor,
+        pollKey: pollKey,
+        authRepo: _authRepo,
+      ),
     );
 
-    if (submitted == null || !mounted) return;
+    if (!mounted || pollResult == null) return;
+    final pollError = pollResult['error']?.toString();
+    if (pollError != null && pollError.isNotEmpty) {
+      setState(() => _errorMessage = pollError);
+      return;
+    }
+
+    final ticket = pollResult['ticket']?.toString();
+    if (ticket == null || ticket.isEmpty) return;
+
     setState(() {
       _isLoading = true;
       _errorMessage = null;
     });
 
-    final result = await _authRepo.oauthLogin(
-      provider: provider,
-      email: submitted['email']!,
-      fullName: submitted['fullName']!,
-    );
-
+    final result = await _authRepo.exchangeOAuthTicket(ticket);
     if (!mounted) return;
     setState(() => _isLoading = false);
 
@@ -171,16 +249,14 @@ class _LoginPageState extends State<LoginPage> {
         await SessionManager.instance.setSession(user);
       }
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['message'] ?? 'Đăng nhập $provider thành công'),
-          backgroundColor: const Color(0xFF059669),
-          behavior: SnackBarBehavior.floating,
-        ),
+      showAutoDismissSnackBar(
+        context,
+        message: result['message']?.toString() ?? 'Đăng nhập $displayName thành công',
+        backgroundColor: const Color(0xFF059669),
       );
-      Navigator.of(context).pushNamedAndRemoveUntil('/', (route) => false);
+      Navigator.of(context).pushNamedAndRemoveUntil('/', (_) => false);
     } else {
-      setState(() => _errorMessage = result['message']?.toString());
+      setState(() => _errorMessage = result['message']?.toString() ?? 'Đăng nhập $displayName thất bại');
     }
   }
 
@@ -323,11 +399,10 @@ class _LoginPageState extends State<LoginPage> {
                         if (res['success'] == true) {
                           Navigator.pop(ctx);
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(res['message'] ?? 'Đặt lại mật khẩu thành công'),
-                                backgroundColor: const Color(0xFF059669),
-                              ),
+                            showAutoDismissSnackBar(
+                              context,
+                              message: res['message']?.toString() ?? 'Đặt lại mật khẩu thành công',
+                              backgroundColor: const Color(0xFF059669),
                             );
                           }
                         } else {
@@ -477,21 +552,21 @@ class _LoginPageState extends State<LoginPage> {
                         children: [
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: _isLoading ? null : () => _showOAuthModal('Google', const Color(0xFFDB4437)),
+                              onPressed: _isLoading ? null : () => _startRealOAuth('google', 'Google', const Color(0xFFDB4437)),
                               child: const Text('Google', overflow: TextOverflow.ellipsis),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: _isLoading ? null : () => _showOAuthModal('Facebook', const Color(0xFF1877F2)),
+                              onPressed: _isLoading ? null : () => _startRealOAuth('facebook', 'Facebook', const Color(0xFF1877F2)),
                               child: const Text('Facebook', overflow: TextOverflow.ellipsis),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: OutlinedButton(
-                              onPressed: _isLoading ? null : () => _showOAuthModal('Zalo', const Color(0xFF0068FF)),
+                              onPressed: _isLoading ? null : () => _startRealOAuth('zalo', 'Zalo', const Color(0xFF0068FF)),
                               child: const Text('Zalo', overflow: TextOverflow.ellipsis),
                             ),
                           ),
@@ -519,6 +594,117 @@ class _LoginPageState extends State<LoginPage> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _OAuthPollingDialog extends StatefulWidget {
+  final String displayName;
+  final Color brandColor;
+  final String pollKey;
+  final AuthRepository authRepo;
+
+  const _OAuthPollingDialog({
+    required this.displayName,
+    required this.brandColor,
+    required this.pollKey,
+    required this.authRepo,
+  });
+
+  @override
+  State<_OAuthPollingDialog> createState() => _OAuthPollingDialogState();
+}
+
+class _OAuthPollingDialogState extends State<_OAuthPollingDialog> {
+  Timer? _timer;
+  bool _isPollingRequest = false;
+  bool _completed = false;
+  late final DateTime _startedAt;
+
+  @override
+  void initState() {
+    super.initState();
+    _startedAt = DateTime.now();
+    _timer = Timer.periodic(const Duration(milliseconds: 1500), (_) => _pollOnce());
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _pollOnce() async {
+    if (!mounted || _completed || _isPollingRequest) return;
+    if (DateTime.now().difference(_startedAt) >= const Duration(seconds: 120)) {
+      _completed = true;
+      _timer?.cancel();
+      Navigator.of(context).pop({
+        'error': 'Hết thời gian chờ xác thực từ ${widget.displayName} (120s). Vui lòng thử lại.',
+      });
+      return;
+    }
+
+    _isPollingRequest = true;
+    final res = await widget.authRepo.pollOAuthTicket(widget.pollKey);
+    _isPollingRequest = false;
+    if (!mounted || _completed) return;
+
+    final err = res['error']?.toString();
+    if (err != null && err.isNotEmpty) {
+      _completed = true;
+      _timer?.cancel();
+      Navigator.of(context).pop({'error': err});
+      return;
+    }
+
+    final ticket = res['ticket']?.toString().trim();
+    if (res['ready'] == true && ticket != null && ticket.isNotEmpty) {
+      _completed = true;
+      _timer?.cancel();
+      Navigator.of(context).pop({'ticket': ticket});
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      title: Row(
+        children: [
+          Icon(Icons.verified_user_outlined, color: widget.brandColor),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              'Đang chờ xác thực từ ${widget.displayName}...',
+              style: const TextStyle(fontSize: 16),
+            ),
+          ),
+        ],
+      ),
+      content: const Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SizedBox(height: 8),
+          CircularProgressIndicator(),
+          SizedBox(height: 16),
+          Text(
+            'Vui lòng hoàn tất đăng nhập trên trình duyệt vừa mở, sau đó quay lại ứng dụng.',
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 13, color: Color(0xFF475569), height: 1.4),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            _completed = true;
+            _timer?.cancel();
+            Navigator.of(context).pop(null);
+          },
+          child: const Text('Hủy'),
+        ),
+      ],
     );
   }
 }

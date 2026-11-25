@@ -73,10 +73,12 @@ builder.Services.AddCors(options =>
 builder.Services.AddDbContext<RestaurantPosContext>(options =>
     options.UseSqlServer(builder.Configuration.GetConnectionString("RestaurantPosDb")));
 
-// 3. Đăng ký HttpContextAccessor, SiteProvider, JwtTokenService, EmailService và SignalR
+// 3. Đăng ký HttpContextAccessor, HttpClient, SiteProvider, JwtTokenService, OAuthProviderService, EmailService và SignalR
 builder.Services.AddHttpContextAccessor();
+builder.Services.AddHttpClient();
 builder.Services.AddScoped<SiteProvider>();
 builder.Services.AddSingleton<JwtTokenService>();
+builder.Services.AddSingleton<OAuthProviderService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<PosRealtimeNotifier>();
