@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/material.dart';
 import '../../models/area.dart';
 import '../../models/dining_table.dart';
 import '../../repositories/table_repository.dart';
 import '../../services/offline_sync_service.dart';
+import '../../services/realtime_service.dart';
 import '../../services/session_manager.dart';
 import '../order/order_checkout_page.dart';
 import '../order/order_detail_page.dart';
@@ -23,12 +25,19 @@ class _FloorTablePageState extends State<FloorTablePage>
   bool _isLoading = true;
   TabController? _tabController;
   Timer? _elapsedTimer;
+  StreamSubscription<PosRealtimeEvent>? _rtSub;
   final OfflineSyncService _syncService = OfflineSyncService();
 
   @override
   void initState() {
     super.initState();
     _syncService.initialize();
+    PosRealtimeService.instance.ensureStarted();
+    _rtSub = PosRealtimeService.instance.events.listen((ev) {
+      if (mounted && (ev.target == 'TableUpdated' || ev.target == 'OrderEvent')) {
+        _loadData();
+      }
+    });
     _loadData();
     _elapsedTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       if (mounted) setState(() {});
@@ -37,6 +46,7 @@ class _FloorTablePageState extends State<FloorTablePage>
 
   @override
   void dispose() {
+    _rtSub?.cancel();
     _elapsedTimer?.cancel();
     _tabController?.dispose();
     super.dispose();
@@ -1007,7 +1017,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                     _showChangeStatusDialog(table);
                   },
                 ),
-                if (table.status == 1) ...[
+                  if (table.status == 1) ...[
                   _buildActionTile(
                     icon: Icons.merge_type_rounded,
                     iconColor: const Color(0xFF7C3AED),
@@ -1080,7 +1090,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                       _handleTableTransfer(table);
                     },
                   ),
-                if (table.status == 1) ...[
+                  if (table.status == 1) ...[
                   _buildActionTile(
                     icon: Icons.check_circle_outline_rounded,
                     iconColor: const Color(0xFF059669),
@@ -1093,6 +1103,17 @@ class _FloorTablePageState extends State<FloorTablePage>
                     },
                   ),
                 ],
+                _buildActionTile(
+                  icon: Icons.qr_code_2_rounded,
+                  iconColor: const Color(0xFF059669),
+                  iconBg: const Color(0xFFECFDF5),
+                  title: 'Mã QR gọi món tại bàn',
+                  subtitle: 'Hiển thị mã QR để khách tự quét gọi món',
+                  onTap: () {
+                    Navigator.pop(bottomSheetCtx);
+                    _showQrSelfOrderDialog(table);
+                  },
+                ),
               ],
             ),
           ),
@@ -1150,6 +1171,79 @@ class _FloorTablePageState extends State<FloorTablePage>
           ),
           onTap: onTap,
         ),
+      ),
+    );
+  }
+
+  void _showQrSelfOrderDialog(DiningTable table) {
+    final baseOrigin = Uri.base.scheme.startsWith('http')
+        ? '${Uri.base.scheme}://${Uri.base.host}${Uri.base.hasPort ? ':${Uri.base.port}' : ''}'
+        : 'http://localhost:8088';
+    final qrTargetUrl = '$baseOrigin/?tableId=${table.id}';
+    final qrImageUrl =
+        'https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${Uri.encodeComponent(qrTargetUrl)}';
+
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(
+          children: [
+            const Icon(Icons.qr_code_2_rounded, color: Color(0xFF059669)),
+            const SizedBox(width: 8),
+            Expanded(child: Text('QR Gọi Món — ${table.name}', overflow: TextOverflow.ellipsis)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFE2E8F0)),
+              ),
+              child: Image.network(
+                qrImageUrl,
+                width: 190,
+                height: 190,
+                errorBuilder: (_, _, _) => const SizedBox(
+                  width: 190,
+                  height: 190,
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.qr_code_2_rounded, size: 96, color: Color(0xFF0F172A)),
+                      SizedBox(height: 6),
+                      Text('Mã QR Bàn #Table', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            SelectableText(
+              qrTargetUrl,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 12, color: Color(0xFF0284C7), fontWeight: FontWeight.w600),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Đóng')),
+          FilledButton.icon(
+            icon: const Icon(Icons.copy, size: 16),
+            label: const Text('Sao chép Link QR'),
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: qrTargetUrl));
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Đã sao chép link QR cho ${table.name}')),
+              );
+            },
+          ),
+        ],
       ),
     );
   }

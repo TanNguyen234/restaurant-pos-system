@@ -5,6 +5,7 @@ import '../models/category.dart';
 import '../models/product.dart';
 import '../repositories/category_repository.dart';
 import '../repositories/product_repository.dart';
+import '../services/qr_table_session.dart';
 import '../services/session_manager.dart';
 import '../utils/database_helper.dart';
 import '../widgets/skeleton_loading.dart';
@@ -248,6 +249,42 @@ class _HomePageState extends State<HomePage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              ValueListenableBuilder<int?>(
+                valueListenable: QrTableSession.instance.activeTableIdNotifier,
+                builder: (context, tableId, _) {
+                  if (tableId == null) return const SizedBox.shrink();
+                  final tName = QrTableSession.instance.activeTableName ?? 'Bàn #$tableId';
+                  return Container(
+                    width: double.infinity,
+                    margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFECFDF5),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFF10B981)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.qr_code_scanner_rounded, color: Color(0xFF059669), size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Đang gọi món QR tại $tName — Đơn gửi thẳng xuống bếp!',
+                            style: const TextStyle(color: Color(0xFF065F46), fontWeight: FontWeight.w600, fontSize: 12.5),
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 18, color: Color(0xFF065F46)),
+                          tooltip: 'Thoát chế độ QR bàn',
+                          padding: EdgeInsets.zero,
+                          constraints: const BoxConstraints(),
+                          onPressed: QrTableSession.instance.clear,
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
               _buildSearchBar(),
               _buildHorizontalCategories(),
               if (_featuredProducts.isNotEmpty && _selectedCategoryId == null && _searchController.text.isEmpty)

@@ -5,6 +5,8 @@ import '../../config/api_config.dart';
 import '../../models/dining_table.dart';
 import '../../repositories/order_repository.dart';
 import '../../repositories/table_repository.dart';
+import '../../services/qr_table_session.dart';
+import '../../services/session_manager.dart';
 import '../../utils/database_helper.dart';
 import '../../widgets/skeleton_loading.dart';
 import 'order_detail_page.dart';
@@ -53,7 +55,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
   @override
   void initState() {
     super.initState();
-    _selectedTableId = widget.preSelectedTableId;
+    _selectedTableId = widget.preSelectedTableId ?? QrTableSession.instance.activeTableId;
     if (widget.initialDiscountCode != null && widget.initialDiscountCode!.isNotEmpty) {
       _voucherController.text = widget.initialDiscountCode!;
     }
@@ -227,7 +229,10 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
         'items': itemsPayload,
       };
 
-      final result = await _orderRepo.createOrder(orderData);
+      final bool useQrSelfOrder = QrTableSession.instance.isQrOrderMode && !SessionManager.instance.isStaff;
+      final result = useQrSelfOrder
+          ? await _orderRepo.createQrSelfOrder(orderData)
+          : await _orderRepo.createOrder(orderData);
       if (!mounted) return;
 
       if (result['success'] == true) {

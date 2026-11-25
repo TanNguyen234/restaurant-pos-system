@@ -3,10 +3,14 @@ import 'package:intl/intl.dart';
 import 'models/product.dart';
 import 'models/user.dart';
 import 'repositories/product_repository.dart';
+import 'services/escpos_printer_service.dart';
 import 'services/offline_sync_service.dart';
+import 'services/qr_table_session.dart';
+import 'services/realtime_service.dart';
 import 'services/session_manager.dart';
 import 'utils/database_helper.dart';
 import 'views/admin/admin_category_page.dart';
+import 'views/admin/admin_inventory_page.dart';
 import 'views/admin/admin_order_list_page.dart';
 import 'views/admin/admin_product_page.dart';
 import 'views/admin/admin_user_page.dart';
@@ -30,6 +34,8 @@ void main() async {
   await DatabaseHelper().initWebPersistence();
   await SessionManager.instance.initialize();
   await OfflineSyncService().initialize();
+  await QrTableSession.instance.initFromUri(Uri.base);
+  PosRealtimeService.instance.ensureStarted();
   runApp(const RestaurantPosApp());
 }
 
@@ -171,6 +177,13 @@ class RestaurantPosApp extends StatelessWidget {
               () => const AdminUserPage(),
               guard: (s) => s.isManager,
               deniedReason: 'Chỉ Quản lý / Admin mới được phân quyền người dùng.',
+            );
+          case '/admin/inventory':
+            return _buildGuardedRoute(
+              settings,
+              () => const AdminInventoryPage(),
+              guard: (s) => s.isManager,
+              deniedReason: 'Chỉ Quản lý / Admin mới được quản lý kho nguyên liệu BOM.',
             );
           case '/product-detail':
             final arg = settings.arguments;
@@ -603,6 +616,64 @@ class _OperationsHubPage extends StatelessWidget {
     }
   }
 
+  Future<void> _showEscPosConfigModal(BuildContext context) async {
+    final cfg = await EscPosPrinterService.loadConfig();
+    if (!context.mounted) return;
+    final hostCtrl = TextEditingController(text: cfg.host);
+    final portCtrl = TextEditingController(text: '${cfg.port}');
+    int widthMm = cfg.paperWidthMm;
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setS) => AlertDialog(
+          title: const Text('Cấu hình máy in LAN ESC/POS'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: hostCtrl,
+                decoration: const InputDecoration(labelText: 'Địa chỉ IP máy in', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: portCtrl,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Cổng TCP (mặc định 9100)', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 10),
+              SegmentedButton<int>(
+                segments: const [
+                  ButtonSegment(value: 58, label: Text('Khổ 58mm')),
+                  ButtonSegment(value: 80, label: Text('Khổ 80mm')),
+                ],
+                selected: {widthMm},
+                onSelectionChanged: (v) => setS(() => widthMm = v.first),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Đóng')),
+            FilledButton(
+              onPressed: () async {
+                await EscPosPrinterService.saveConfig(EscPosPrinterConfig(
+                  host: hostCtrl.text.trim().isEmpty ? '192.168.1.200' : hostCtrl.text.trim(),
+                  port: int.tryParse(portCtrl.text.trim()) ?? 9100,
+                  paperWidthMm: widthMm,
+                ));
+                if (!ctx.mounted) return;
+                Navigator.pop(ctx);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Đã lưu cấu hình máy in ESC/POS')),
+                );
+              },
+              child: const Text('Lưu'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -773,6 +844,14 @@ class _OperationsHubPage extends StatelessWidget {
                             ),
                             const Divider(height: 1),
                             ListTile(
+                              leading: const Icon(Icons.inventory_rounded, color: Color(0xFF059669)),
+                              title: const Text('Quản trị Kho & Định lượng BOM'),
+                              subtitle: const Text('Tồn kho nguyên liệu, công thức món & cảnh báo sắp hết'),
+                              trailing: const Icon(Icons.chevron_right),
+                              onTap: () => go(const AdminInventoryPage()),
+                            ),
+                            const Divider(height: 1),
+                            ListTile(
                               leading: const Icon(Icons.manage_accounts_outlined, color: Color(0xFFDC2626)),
                               title: const Text('Quản trị Nhân sự & Vai trò (RBAC)'),
                               subtitle: const Text('Phân quyền và khóa/mở tài khoản'),
@@ -780,6 +859,14 @@ class _OperationsHubPage extends StatelessWidget {
                               onTap: () => go(const AdminUserPage()),
                             ),
                           ],
+                          const Divider(height: 1),
+                          ListTile(
+                            leading: const Icon(Icons.print_outlined, color: Color(0xFF0284C7)),
+                            title: const Text('Cấu hình Máy in Nhiệt ESC/POS LAN'),
+                            subtitle: const Text('Địa chỉ IP, cổng 9100 & khổ giấy 58mm / 80mm'),
+                            trailing: const Icon(Icons.chevron_right),
+                            onTap: () => _showEscPosConfigModal(context),
+                          ),
                           const Divider(height: 1),
                           ListTile(
                             leading: const Icon(Icons.badge_outlined, color: Color(0xFF475569)),
