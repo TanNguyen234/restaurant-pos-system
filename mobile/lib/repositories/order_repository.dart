@@ -44,6 +44,15 @@ class OrderRepository {
         body: jsonEncode(payload),
       ).timeout(timeoutDuration);
 
+      if (res.statusCode == 401) {
+        return {
+          'success': false,
+          'isOffline': false,
+          'sessionExpired': true,
+          'message': 'Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại (giỏ hàng được giữ nguyên).',
+        };
+      }
+
       final d = _decodeMap(res.bodyBytes);
       if (res.statusCode != 200 || d['success'] == false) {
         return {
@@ -263,6 +272,55 @@ class OrderRepository {
     return OrderModel.fromMap(_decodeMap(res.bodyBytes));
   }
 
+  /// Món bếp / pha chế đã làm xong, đang chờ phục vụ bưng ra bàn (cookingStatus = 2).
+  Future<List<KdsItemModel>> getReadyToServeItems() async {
+    final res = await ApiConfig.get(Uri.parse('$baseUrl/ready-to-serve')).timeout(timeoutDuration);
+    if (res.statusCode != 200) throw StateError('Không tải được danh sách món chờ bưng (HTTP ${res.statusCode})');
+    final List<dynamic> d = jsonDecode(utf8.decode(res.bodyBytes));
+    return d.map((e) => KdsItemModel.fromMap(Map<String, dynamic>.from(e as Map))).toList();
+  }
+
+  /// Phục vụ xác nhận đã giao một món ra bàn (cookingStatus 2 -> 3).
+  Future<Map<String, dynamic>> serveItem(int orderDetailId) async {
+    try {
+      final res = await ApiConfig.put(Uri.parse('$baseUrl/detail/$orderDetailId/serve')).timeout(timeoutDuration);
+      final d = _decodeMap(res.bodyBytes);
+      return {
+        'success': res.statusCode == 200 && d['success'] != false,
+        'message': d['message']?.toString() ?? 'Không cập nhật được trạng thái giao món (HTTP ${res.statusCode})',
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không kết nối được máy chủ: $e'};
+    }
+  }
+
+  /// Phục vụ / thu ngân báo đã bưng các món bếp làm xong ra bàn (cookingStatus 2 -> 3).
+  Future<Map<String, dynamic>> serveReadyItems(int orderId) async {
+    try {
+      final res = await ApiConfig.put(Uri.parse('$baseUrl/$orderId/serve-ready')).timeout(timeoutDuration);
+      final d = _decodeMap(res.bodyBytes);
+      return {
+        'success': res.statusCode == 200 && d['success'] != false,
+        'message': d['message']?.toString() ?? 'Không cập nhật được trạng thái giao món (HTTP ${res.statusCode})',
+        'servedCount': d['servedCount'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không kết nối được máy chủ: $e'};
+    }
+  }
+
+  /// Lấy đơn hàng dạng map thô (cùng cấu trúc `data` của /by-table) để POS thu ngân nạp lại hoá đơn không gắn bàn.
+  Future<Map<String, dynamic>?> getOrderMapById(int orderId) async {
+    try {
+      final res = await ApiConfig.get(Uri.parse('$baseUrl/$orderId')).timeout(timeoutDuration);
+      if (res.statusCode != 200) return null;
+      final d = _decodeMap(res.bodyBytes);
+      return d.isEmpty ? null : d;
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Cập nhật trạng thái đơn hàng (0: Mới, 1: Đang nấu, 2: Đã phục vụ, 3: Hoàn thành, 4: Hủy)
   Future<bool> updateOrderStatus(int orderId, int newStatus) async {
     try {
@@ -328,6 +386,7 @@ class OrderRepository {
     required double amount,
     String? transactionRef,
     String? note,
+    bool allowUnserved = false,
   }) async {
     try {
       final res = await ApiConfig.post(
@@ -339,12 +398,14 @@ class OrderRepository {
           'amount': amount,
           'transactionRef': transactionRef,
           'note': note,
+          if (allowUnserved) 'allowUnserved': true,
         }),
       ).timeout(timeoutDuration);
       final d = _decodeMap(res.bodyBytes);
       if (res.statusCode != 200 || d['success'] == false) {
         return {
           'success': false,
+          'errorCode': d['errorCode'],
           'message': d['message']?.toString() ?? 'Thanh toán chưa được xác nhận (HTTP ${res.statusCode})',
         };
       }

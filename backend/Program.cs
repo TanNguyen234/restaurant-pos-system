@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Diagnostics;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.FileProviders;
 using Microsoft.IdentityModel.Tokens;
 using WebApi.Hubs;
 using WebApi.Models;
@@ -154,7 +155,11 @@ using (var scope = app.Services.CreateScope())
     await DatabaseSchemaEnsurer.EnsureAsync(db, app.Logger);
 }
 
-Helper.ConfigureWebRoot(app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot"));
+// Ảnh tải lên (wwwroot/images/products, wwwroot/images/categories) và ảnh được phục vụ dùng chung một thư mục
+var webRoot = Helper.LocateWebRoot(app.Environment.WebRootPath, app.Environment.ContentRootPath);
+Helper.ConfigureWebRoot(webRoot);
+Helper.EnsureImageFolders();
+app.Logger.LogInformation("Thư mục ảnh (wwwroot): {WebRoot}", webRoot);
 
 // Global exception handler: không rò rỉ stack trace hoặc ex.Message
 app.UseExceptionHandler(errorApp =>
@@ -174,7 +179,7 @@ app.UseExceptionHandler(errorApp =>
 });
 
 app.UseCors("PosCorsPolicy");
-app.UseStaticFiles();
+app.UseStaticFiles(new StaticFileOptions { FileProvider = new PhysicalFileProvider(webRoot) });
 
 app.UseAuthentication();
 app.UseAuthorization();

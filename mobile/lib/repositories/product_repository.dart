@@ -29,6 +29,25 @@ class ProductRepository {
     throw const FormatException('Dữ liệu sản phẩm không đúng định dạng');
   }
 
+  /// Danh sách từ bộ nhớ đệm offline, có áp dụng ô tìm kiếm để không hiện lẫn món không liên quan.
+  static Future<PagedProductResult?> _cachedResult(int? categoryId, String? search) async {
+    final cached = await DatabaseHelper().getCachedProducts(categoryId: categoryId);
+    if (cached.isEmpty) return null;
+    var products = cached.map((e) => Product.fromMap(e)).toList();
+    final kw = search?.trim().toLowerCase() ?? '';
+    if (kw.isNotEmpty) {
+      products = products.where((p) => p.productName.toLowerCase().contains(kw)).toList();
+    }
+    return PagedProductResult(
+      data: products,
+      totalItems: products.length,
+      page: 1,
+      pageSize: products.length,
+      totalPages: 1,
+      fromCache: true,
+    );
+  }
+
   /// Lấy danh sách sản phẩm phân trang kèm tìm kiếm, lọc danh mục và sắp xếp
   static Future<PagedProductResult> getProducts({
     int page = 1,
@@ -54,30 +73,12 @@ class ProductRepository {
         return result;
       }
     } catch (_) {
-      final cached = await DatabaseHelper().getCachedProducts(categoryId: categoryId);
-      if (cached.isNotEmpty) {
-        final products = cached.map((e) => Product.fromMap(e)).toList();
-        return PagedProductResult(
-          data: products,
-          totalItems: products.length,
-          page: 1,
-          pageSize: products.length,
-          totalPages: 1,
-        );
-      }
+      final cached = await _cachedResult(categoryId, search);
+      if (cached != null) return cached;
       rethrow;
     }
-    final cached = await DatabaseHelper().getCachedProducts(categoryId: categoryId);
-    if (cached.isNotEmpty) {
-      final products = cached.map((e) => Product.fromMap(e)).toList();
-      return PagedProductResult(
-        data: products,
-        totalItems: products.length,
-        page: 1,
-        pageSize: products.length,
-        totalPages: 1,
-      );
-    }
+    final cachedFallback = await _cachedResult(categoryId, search);
+    if (cachedFallback != null) return cachedFallback;
     throw StateError('Không tải được danh sách sản phẩm');
   }
 
@@ -159,7 +160,7 @@ class ProductRepository {
         'message': _extractMessage(res.bodyBytes) ?? 'Không thể tạo sản phẩm (HTTP ${res.statusCode})',
       };
     } catch (e) {
-      return {'success': false, 'message': 'Không thể thêm sản phẩm: $e'};
+      return {'success': false, 'message': ApiConfig.describeError(e, 'Thêm sản phẩm')};
     }
   }
 
@@ -200,7 +201,7 @@ class ProductRepository {
         'message': _extractMessage(res.bodyBytes) ?? 'Không thể sửa sản phẩm (HTTP ${res.statusCode})',
       };
     } catch (e) {
-      return {'success': false, 'message': 'Không thể cập nhật sản phẩm: $e'};
+      return {'success': false, 'message': ApiConfig.describeError(e, 'Cập nhật sản phẩm')};
     }
   }
 

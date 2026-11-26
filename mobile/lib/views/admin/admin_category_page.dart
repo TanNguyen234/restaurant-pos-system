@@ -359,7 +359,9 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
                               borderRadius: BorderRadius.circular(16),
                               boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 8, offset: Offset(0, 2))],
                             ),
-                            child: ListTile(
+                            child: Material(
+                              type: MaterialType.transparency,
+                              child: ListTile(
                               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                               leading: ClipRRect(
                                 borderRadius: BorderRadius.circular(12),
@@ -429,6 +431,7 @@ class _AdminCategoryPageState extends State<AdminCategoryPage> {
                                   ),
                                 ],
                               ),
+                            ),
                             ),
                           );
                         },

@@ -13,6 +13,20 @@ class ApiConfig {
     return 'http://localhost:5138';
   }
 
+  /// Thông báo lỗi dễ hiểu cho người dùng. Lỗi mất kết nối (backend chưa chạy / sai cổng) không hiện nguyên văn SocketException.
+  static String describeError(Object error, String action) {
+    final text = error.toString();
+    final isNetwork = text.contains('SocketException') ||
+        text.contains('ClientException') ||
+        text.contains('Connection refused') ||
+        text.contains('Failed host lookup') ||
+        text.contains('refused the network connection');
+    if (isNetwork) {
+      return '$action thất bại: không kết nối được máy chủ ($baseUrl). Kiểm tra backend đã chạy rồi thử lại.';
+    }
+    return '$action thất bại: $text';
+  }
+
   static Future<Map<String, String>> authHeaders() async {
     try {
       final session = await DatabaseHelper().getCurrentSession();

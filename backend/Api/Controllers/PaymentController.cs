@@ -39,6 +39,25 @@ public class PaymentController : BaseController
         return string.IsNullOrWhiteSpace(hdr) ? null : hdr.Trim();
     }
 
+    /// <summary>Chỉ quản lý / admin được cho phép thu tiền khi còn món chưa giao.</summary>
+    private bool CanOverrideUnserved(bool requested) =>
+        requested && (User.IsInRole("ADMIN") || User.IsInRole("MANAGER"));
+
+    private IActionResult PaymentFailure(string message)
+    {
+        if (message.StartsWith(PaymentRepository.UnservedMessagePrefix, StringComparison.Ordinal))
+        {
+            return BadRequest(new
+            {
+                statusCode = 400,
+                success = false,
+                errorCode = "UNSERVED_ITEMS",
+                message = message.Substring(PaymentRepository.UnservedMessagePrefix.Length)
+            });
+        }
+        return BadRequest(new { statusCode = 400, success = false, message });
+    }
+
     [HttpPost("cash")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
     public async Task<IActionResult> ProcessCashPayment([FromBody] CashPaymentRequestDto dto)
@@ -48,10 +67,10 @@ public class PaymentController : BaseController
             return BadRequest(new { statusCode = 400, success = false, message = "Mã đơn hàng không hợp lệ" });
         }
 
-        var result = await Provider.Payment.ProcessCashPaymentAsync(dto.OrderId, dto.Note, GetCallerAccountId());
+        var result = await Provider.Payment.ProcessCashPaymentAsync(dto.OrderId, dto.Note, GetCallerAccountId(), CanOverrideUnserved(dto.AllowUnserved));
         if (!result.Success)
         {
-            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+            return PaymentFailure(result.Message);
         }
 
         await _realtime.NotifyOrderChangedAsync("OrderPaid", result.Payment);
@@ -82,11 +101,12 @@ public class PaymentController : BaseController
             dto.Amount,
             dto.TransactionRef,
             dto.Note,
-            GetCallerAccountId());
+            GetCallerAccountId(),
+            CanOverrideUnserved(dto.AllowUnserved));
 
         if (!result.Success)
         {
-            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+            return PaymentFailure(result.Message);
         }
 
         await _realtime.NotifyOrderChangedAsync("OrderPaid", result.Payment);
@@ -214,6 +234,15 @@ public class PaymentController : BaseController
             {
                 if (!callerId.HasValue) return Unauthorized(new { statusCode = 401, success = false, message = "Thiếu mã xác thực đơn khách vãng lai" });
                 return Forbid();
+            }
+        }
+
+        if (order.OrderType == 1 && !(User.IsInRole("ADMIN") || User.IsInRole("MANAGER")))
+        {
+            var unserved = await Provider.Payment.CountUnservedAsync(dto.OrderId);
+            if (unserved.Waiting + unserved.Ready > 0)
+            {
+                return PaymentFailure(PaymentRepository.BuildUnservedMessage(unserved.Waiting, unserved.Ready));
             }
         }
 
@@ -369,6 +398,8 @@ public class CashPaymentRequestDto
 {
     public int OrderId { get; set; }
     public string? Note { get; set; }
+    /// <summary>Quản lý / admin cho phép thu tiền dù còn món chưa giao.</summary>
+    public bool AllowUnserved { get; set; }
 }
 
 public class ConfirmPaymentRequestDto
@@ -378,6 +409,8 @@ public class ConfirmPaymentRequestDto
     public decimal? Amount { get; set; }
     public string? TransactionRef { get; set; }
     public string? Note { get; set; }
+    /// <summary>Quản lý / admin cho phép thu tiền dù còn món chưa giao.</summary>
+    public bool AllowUnserved { get; set; }
 }
 
 public class VnPayUrlRequestDto

@@ -11,6 +11,10 @@ class DiningTable {
   final DateTime? orderCreatedAt;
   final double runningTotal;
   final int itemCount;
+  final int pendingCount; // món chờ nấu
+  final int cookingCount; // món đang nấu
+  final int readyCount; // món đã xong, chờ bưng
+  final int servedCount; // món đã giao
   final int? nextReservationId;
   final String? nextReservationCustomer;
   final DateTime? nextReservationTime;
@@ -28,6 +32,10 @@ class DiningTable {
     this.orderCreatedAt,
     this.runningTotal = 0.0,
     this.itemCount = 0,
+    this.pendingCount = 0,
+    this.cookingCount = 0,
+    this.readyCount = 0,
+    this.servedCount = 0,
     this.nextReservationId,
     this.nextReservationCustomer,
     this.nextReservationTime,
@@ -127,6 +135,10 @@ class DiningTable {
     DateTime? orderCreatedAt,
     double? runningTotal,
     int? itemCount,
+    int? pendingCount,
+    int? cookingCount,
+    int? readyCount,
+    int? servedCount,
   }) {
     return DiningTable(
       id: id ?? this.id,
@@ -139,6 +151,10 @@ class DiningTable {
       orderCreatedAt: orderCreatedAt ?? this.orderCreatedAt,
       runningTotal: runningTotal ?? this.runningTotal,
       itemCount: itemCount ?? this.itemCount,
+      pendingCount: pendingCount ?? this.pendingCount,
+      cookingCount: cookingCount ?? this.cookingCount,
+      readyCount: readyCount ?? this.readyCount,
+      servedCount: servedCount ?? this.servedCount,
     );
   }
 
@@ -158,6 +174,10 @@ class DiningTable {
           : null,
       runningTotal: (map['runningTotal'] as num?)?.toDouble() ?? 0.0,
       itemCount: (map['itemCount'] as num?)?.toInt() ?? 0,
+      pendingCount: (map['pendingCount'] as num?)?.toInt() ?? 0,
+      cookingCount: (map['cookingCount'] as num?)?.toInt() ?? 0,
+      readyCount: (map['readyCount'] as num?)?.toInt() ?? 0,
+      servedCount: (map['servedCount'] as num?)?.toInt() ?? 0,
       nextReservationId: (map['nextReservationId'] as num?)?.toInt(),
       nextReservationCustomer: map['nextReservationCustomer']?.toString(),
       nextReservationTime: map['nextReservationTime'] != null
@@ -182,6 +202,10 @@ class DiningTable {
       'orderCreatedAt': orderCreatedAt?.toIso8601String(),
       'runningTotal': runningTotal,
       'itemCount': itemCount,
+      'pendingCount': pendingCount,
+      'cookingCount': cookingCount,
+      'readyCount': readyCount,
+      'servedCount': servedCount,
       'nextReservationId': nextReservationId,
       'nextReservationCustomer': nextReservationCustomer,
       'nextReservationTime': nextReservationTime?.toIso8601String(),

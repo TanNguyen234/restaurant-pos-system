@@ -11,6 +11,7 @@ import '../../services/receipt_printer_service.dart';
 import '../../services/session_manager.dart';
 import '../../utils/database_helper.dart';
 import '../../utils/snackbar_helper.dart';
+import '../../utils/unserved_payment_guard.dart';
 import '../../widgets/skeleton_loading.dart';
 import '../cart_page.dart';
 
@@ -359,11 +360,15 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     setState(() => _isProcessingPayment = true);
 
     final amountToPay = _order!.remainingAmount;
-    final result = await _orderRepo.confirmPayment(
-      orderId: _order!.orderId,
-      paymentMethod: _paymentMethod,
-      amount: amountToPay,
-      note: 'Thanh toán tại màn hình chi tiết đơn hàng',
+    final result = await payWithUnservedGuard(
+      context,
+      (allow) => _orderRepo.confirmPayment(
+        orderId: _order!.orderId,
+        paymentMethod: _paymentMethod,
+        amount: amountToPay,
+        note: 'Thanh toán tại màn hình chi tiết đơn hàng',
+        allowUnserved: allow,
+      ),
     );
 
     if (!mounted) return;
@@ -449,6 +454,19 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       backgroundColor: success ? const Color(0xFF059669) : const Color(0xFFDC2626),
     );
     if (success) _loadOrderDetails();
+  }
+
+  /// Phục vụ / thu ngân báo đã bưng các món bếp đã xong ra bàn (món 2 -> 3).
+  Future<void> _handleServeReady() async {
+    if (_order == null) return;
+    final res = await _orderRepo.serveReadyItems(_order!.orderId);
+    if (!mounted) return;
+    showAutoDismissSnackBar(
+      context,
+      message: res['message']?.toString() ?? '',
+      backgroundColor: res['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+    );
+    if (res['success'] == true) _loadOrderDetails();
   }
 
   Color _getStatusColor(int status) {
@@ -1064,6 +1082,21 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                         children: [
                           const Text('Cập nhật trạng thái đơn (Nhân viên)', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
                           const SizedBox(height: 12),
+                          if (order.items.any((i) => i.cookingStatus == 2) &&
+                              (SessionManager.instance.isWaiter || SessionManager.instance.isCashier || SessionManager.instance.isManager)) ...[
+                            SizedBox(
+                              width: double.infinity,
+                              child: FilledButton.icon(
+                                style: FilledButton.styleFrom(backgroundColor: const Color(0xFF059669)),
+                                onPressed: _handleServeReady,
+                                icon: const Icon(Icons.room_service_rounded, size: 18),
+                                label: Text(
+                                  'Đã bưng ${order.items.where((i) => i.cookingStatus == 2).fold<int>(0, (a, i) => a + i.quantity)} phần bếp đã xong ra bàn',
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                          ],
                           Wrap(
                             spacing: 8,
                             runSpacing: 8,

@@ -14,6 +14,8 @@ class AuthRepository {
   final DatabaseHelper _dbHelper = DatabaseHelper();
 
   Map<String, dynamic> _decodeJsonMap(List<int> bodyBytes) {
+    // Phản hồi rỗng (ví dụ 401 từ JWT) không phải JSON: trả map rỗng thay vì ném FormatException
+    if (bodyBytes.isEmpty) return {};
     final decoded = jsonDecode(utf8.decode(bodyBytes));
     if (decoded is Map<String, dynamic>) return decoded;
     if (decoded is Map) return Map<String, dynamic>.from(decoded);
@@ -226,6 +228,14 @@ class AuthRepository {
           'phoneNumber': (cleanPhone == null || cleanPhone.isEmpty) ? null : cleanPhone,
         }),
       ).timeout(timeoutDuration);
+
+      if (response.statusCode == 401) {
+        return {
+          'success': false,
+          'sessionExpired': true,
+          'message': 'Phiên đăng nhập đã hết hạn hoặc không hợp lệ. Vui lòng đăng nhập lại để lưu hồ sơ.',
+        };
+      }
 
       final data = _decodeJsonMap(response.bodyBytes);
       final ok = response.statusCode == 200 && data['success'] == true;

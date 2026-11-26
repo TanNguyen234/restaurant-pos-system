@@ -404,10 +404,10 @@ try {
 # -------------------------------------------------------------
 Write-Host "`n--- Phase 4: VietQR & VNPay Sandbox Payment Gateways ---" -ForegroundColor Yellow
 
-# Step 4.1: Generate VietQR for Order 1
+# Step 4.1: Generate VietQR for unpaid Order 3 (Order 1 is already Paid in seed -> API correctly returns 400)
 $sw = [System.Diagnostics.Stopwatch]::StartNew()
 try {
-    $qrResp = Invoke-RestMethod -Uri "$BaseUrl/api/payment/vietqr/1" -Method Get -Headers $authHeaders
+    $qrResp = Invoke-RestMethod -Uri "$BaseUrl/api/payment/vietqr/3" -Method Get -Headers $authHeaders
     $sw.Stop()
     $qr = $qrResp.data
     $pass = ($qrResp.success -eq $true -and $qr.qrCodeUrl.StartsWith("https://img.vietqr.io") -and $qr.accountNo -eq "102871234567")

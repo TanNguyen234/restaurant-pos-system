@@ -83,7 +83,7 @@ class CategoryRepository {
         'message': _extractMessage(res.bodyBytes) ?? 'Máy chủ từ chối tạo danh mục (HTTP ${res.statusCode})',
       };
     } catch (e) {
-      return {'success': false, 'message': 'Không lưu được danh mục: $e'};
+      return {'success': false, 'message': ApiConfig.describeError(e, 'Thêm danh mục')};
     }
   }
 
@@ -116,7 +116,7 @@ class CategoryRepository {
         'message': _extractMessage(res.bodyBytes) ?? 'Máy chủ từ chối cập nhật (HTTP ${res.statusCode})',
       };
     } catch (e) {
-      return {'success': false, 'message': 'Không cập nhật được danh mục: $e'};
+      return {'success': false, 'message': ApiConfig.describeError(e, 'Cập nhật danh mục')};
     }
   }
 

@@ -200,7 +200,10 @@ public class OAuthProviderService
                 $"?client_id={Uri.EscapeDataString(clientId)}" +
                 $"&redirect_uri={Uri.EscapeDataString(callbackUrl)}" +
                 "&response_type=code" +
-                $"&scope={Uri.EscapeDataString("email,public_profile")}" +
+                // Mac dinh chi xin public_profile (luon duoc cap). Quyen "email" phai duoc them trong
+                // App Dashboard -> Use cases -> Permissions, neu khong Facebook bao "Invalid Scopes: email".
+                // Khi da bat quyen email, dat FACEBOOK_SCOPES=public_profile,email trong .env.
+                $"&scope={Uri.EscapeDataString(ReadSetting("OAuth:Facebook:Scopes", "FACEBOOK_SCOPES") ?? "public_profile")}" +
                 $"&state={Uri.EscapeDataString(state)}",
 
             "zalo" =>

@@ -15,6 +15,43 @@ public static class Helper
         }
     }
 
+    /// <summary>
+    /// Xác định thư mục wwwroot thật chứa ảnh. Khi backend chạy từ thư mục khác (ví dụ bin/Debug) thì WebRootPath mặc định
+    /// có thể trỏ tới bản sao rỗng; hàm này tìm ngược lên các thư mục cha để gặp wwwroot/images của dự án.
+    /// Ảnh tải lên và ảnh được phục vụ luôn dùng chung kết quả này.
+    /// </summary>
+    public static string LocateWebRoot(string? configuredWebRoot, string contentRoot)
+    {
+        static bool HasImages(string wwwroot) => Directory.Exists(Path.Combine(wwwroot, "images"));
+
+        if (!string.IsNullOrWhiteSpace(configuredWebRoot) && HasImages(configuredWebRoot)) return configuredWebRoot;
+
+        var starts = new[] { contentRoot, AppContext.BaseDirectory, Directory.GetCurrentDirectory() };
+        foreach (var start in starts)
+        {
+            if (string.IsNullOrWhiteSpace(start)) continue;
+            var dir = new DirectoryInfo(start);
+            for (int depth = 0; depth < 7 && dir != null; depth++, dir = dir.Parent)
+            {
+                var direct = Path.Combine(dir.FullName, "wwwroot");
+                if (HasImages(direct)) return direct;
+                var nested = Path.Combine(dir.FullName, "backend", "wwwroot");
+                if (HasImages(nested)) return nested;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(configuredWebRoot)) return configuredWebRoot;
+        return Path.Combine(contentRoot, "wwwroot");
+    }
+
+    /// <summary>Tạo sẵn thư mục ảnh sản phẩm và danh mục để việc lưu ảnh không phụ thuộc vào có thư mục từ trước.</summary>
+    public static void EnsureImageFolders()
+    {
+        var root = ResolveWebRoot();
+        Directory.CreateDirectory(Path.Combine(root, "images", "products"));
+        Directory.CreateDirectory(Path.Combine(root, "images", "categories"));
+    }
+
     private static string ResolveWebRoot()
     {
         if (!string.IsNullOrWhiteSpace(_webRootPath)) return _webRootPath;

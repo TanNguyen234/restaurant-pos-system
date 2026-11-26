@@ -38,7 +38,7 @@ public class KdsController : BaseController
 
     /// <summary>
     /// PUT /api/kds/{orderDetailId}/status
-    /// Updates cooking status: 0 = Pending, 1 = Cooking, 2 = Ready, 3 = Served
+    /// Updates cooking status for the kitchen: 0 = Pending, 1 = Cooking, 2 = Ready. (3 = Served is set by waiters via /api/order/{id}/serve-ready)
     /// </summary>
     [HttpPut("{orderDetailId:int}/status")]
     [HttpPut("order-detail/{orderDetailId:int}/status")]
@@ -46,7 +46,13 @@ public class KdsController : BaseController
     {
         if (dto == null || dto.CookingStatus < 0 || dto.CookingStatus > 3)
         {
-            return BadRequest(new { statusCode = 400, success = false, message = "Trạng thái chế biến không hợp lệ (0: Chờ nấu, 1: Đang nấu, 2: Đã xong, 3: Đã giao)" });
+            return BadRequest(new { statusCode = 400, success = false, message = "Trạng thái chế biến không hợp lệ (0: Chờ nấu, 1: Đang nấu, 2: Đã xong)" });
+        }
+
+        // Bước "Đã giao" thuộc về phục vụ (PUT /api/order/{id}/serve-ready); bếp và pha chế chỉ báo tới "Đã xong"
+        if (dto.CookingStatus == 3)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = "Bước 'Đã giao' do phục vụ xác nhận. Bếp chỉ báo tới 'Đã xong'." });
         }
 
         var result = await Provider.Order.UpdateCookingStatusAsync(orderDetailId, dto.CookingStatus);
@@ -57,6 +63,7 @@ public class KdsController : BaseController
 
         await _realtime.NotifyKdsChangedAsync(new { orderDetailId, cookingStatus = dto.CookingStatus });
         await _realtime.NotifyOrderChangedAsync("KdsCookingStatus", new { orderDetailId, cookingStatus = dto.CookingStatus });
+        await _realtime.NotifyTableChangedAsync(new { orderDetailId, cookingStatus = dto.CookingStatus });
 
         return Ok(new
         {

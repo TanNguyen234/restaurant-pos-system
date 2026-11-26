@@ -301,6 +301,11 @@ class _ShiftManagementPageState extends State<ShiftManagementPage> {
               _buildSummaryLine('Két tiền dự kiến:', _currencyFormat.format((report['expectedCashInDrawer'] as num?) ?? 0)),
               _buildSummaryLine('Thực tế kiểm đếm:', _currencyFormat.format((report['actualCashInDrawer'] as num?) ?? 0), isBold: true),
               _buildSummaryLine('Kết quả:', (report['discrepancyNote'] ?? '').toString(), isBold: true),
+              const Divider(),
+              _buildSummaryLine(
+                'Đơn mang về:',
+                '${(report['takeawayOrders'] as num?)?.toInt() ?? 0} đơn (đã giao ${(report['takeawayServed'] as num?)?.toInt() ?? 0}, chờ giao ${(report['takeawayPending'] as num?)?.toInt() ?? 0})',
+              ),
             ],
           ),
         ),
@@ -521,6 +526,30 @@ class _ShiftManagementPageState extends State<ShiftManagementPage> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: const Color(0xFFFDE68A)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.shopping_bag_outlined, size: 18, color: Color(0xFFB45309)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Đơn mang về trong ca: ${(shift['takeawayOrders'] as num?)?.toInt() ?? 0} đơn • '
+                        'đã giao ${(shift['takeawayServed'] as num?)?.toInt() ?? 0} • '
+                        'chờ giao ${(shift['takeawayPending'] as num?)?.toInt() ?? 0}',
+                        style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF92400E)),
+                      ),
+                    ),
+                  ],
+                ),
               ),
               const SizedBox(height: 12),
               Row(

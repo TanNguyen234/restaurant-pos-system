@@ -293,6 +293,17 @@ public class OrderRepository : BaseRepository
         }
     }
 
+    private static string? ResolveDeliveryAddress(CreateOrderDto dto)
+    {
+        if (!string.IsNullOrWhiteSpace(dto.DeliveryAddress)) return dto.DeliveryAddress.Trim();
+        // Tương thích đơn xếp hàng offline cũ: địa chỉ nằm trong ghi chú dạng "Giao tới: <địa chỉ> | <ghi chú>"
+        const string prefix = "Giao tới:";
+        var note = dto.Note?.Trim();
+        if (string.IsNullOrEmpty(note) || !note.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return null;
+        var addr = note.Substring(prefix.Length).Split('|')[0].Trim();
+        return addr.Length == 0 ? null : addr;
+    }
+
     public async Task<(bool Success, string Message, OrderDto? Order)> CreateOrderAsync(CreateOrderDto dto, int? authenticatedAccountId = null)
     {
         ClearInventoryEventBuffer();
@@ -331,6 +342,27 @@ public class OrderRepository : BaseRepository
             {
                 var existingDto = await GetOrderByIdAsync(existingByOffline.OrderId, includeGuestToken: true);
                 return (true, "Đơn hàng đã được đồng bộ trước đó (Idempotent)", existingDto);
+            }
+        }
+
+        // Ràng buộc loại đơn: 1 = Tại bàn (bắt buộc có bàn), 2 = Mang về (không gắn bàn), 3 = Giao hàng (không gắn bàn, cần SĐT + địa chỉ)
+        int orderType = dto.OrderType is >= 1 and <= 3 ? dto.OrderType : 1;
+        string? deliveryAddress = null;
+        if (orderType == 1)
+        {
+            if (!dto.TableId.HasValue || dto.TableId.Value <= 0)
+                return (false, "Đơn tại bàn phải chọn bàn. Nếu khách mang về hoặc cần giao hàng, hãy chọn loại đơn tương ứng.", null);
+        }
+        else
+        {
+            dto.TableId = null;
+            if (orderType == 3)
+            {
+                deliveryAddress = ResolveDeliveryAddress(dto);
+                if (string.IsNullOrWhiteSpace(dto.PhoneNumber))
+                    return (false, "Đơn giao hàng bắt buộc có số điện thoại khách", null);
+                if (string.IsNullOrWhiteSpace(deliveryAddress))
+                    return (false, "Đơn giao hàng bắt buộc có địa chỉ giao", null);
             }
         }
 
@@ -415,7 +447,8 @@ public class OrderRepository : BaseRepository
                         AccountId = effectiveAccountId,
                         CustomerName = string.IsNullOrWhiteSpace(dto.CustomerName) ? "Khách vãng lai" : dto.CustomerName.Trim(),
                         PhoneNumber = string.IsNullOrWhiteSpace(dto.PhoneNumber) ? null : dto.PhoneNumber.Trim(),
-                        OrderType = dto.OrderType is >= 1 and <= 3 ? dto.OrderType : 1,
+                        OrderType = orderType,
+                        DeliveryAddress = deliveryAddress,
                         Note = dto.Note?.Trim(),
                         DiscountCode = appliedCode,
                         TotalAmount = serverTotal,
@@ -646,6 +679,7 @@ public class OrderRepository : BaseRepository
                 CustomerName = ord.CustomerName,
                 PhoneNumber = ord.PhoneNumber,
                 OrderType = ord.OrderType,
+            DeliveryAddress = ord.DeliveryAddress,
                 Note = ord.Note,
                 DiscountCode = ord.DiscountCode,
                 TotalAmount = ord.TotalAmount,
@@ -808,6 +842,7 @@ public class OrderRepository : BaseRepository
                 CustomerName = ord.CustomerName,
                 PhoneNumber = ord.PhoneNumber,
                 OrderType = ord.OrderType,
+                DeliveryAddress = ord.DeliveryAddress,
                 Note = ord.Note,
                 DiscountCode = ord.DiscountCode,
                 TotalAmount = ord.TotalAmount,
@@ -898,6 +933,7 @@ public class OrderRepository : BaseRepository
             CustomerName = ord.CustomerName,
             PhoneNumber = ord.PhoneNumber,
             OrderType = ord.OrderType,
+                DeliveryAddress = ord.DeliveryAddress,
             Note = ord.Note,
             DiscountCode = ord.DiscountCode,
             TotalAmount = ord.TotalAmount,
@@ -1237,6 +1273,124 @@ public class OrderRepository : BaseRepository
         return items;
     }
 
+    /// <summary>
+    /// Đồng bộ trạng thái bàn theo tiến độ bếp: có món đã xong chờ bưng và không còn món chưa xong thì bàn là "Chờ phục vụ" (2),
+    /// ngược lại là "Có khách" (1). Chỉ đụng tới bàn đang ở trạng thái 1 hoặc 2.
+    /// </summary>
+    private async Task SyncTableWaitingStatusAsync(Order order)
+    {
+        if (!order.TableId.HasValue || order.PaymentStatus == 1 || order.Status >= 3) return;
+        var table = await context.DiningTables.FindAsync(order.TableId.Value);
+        if (table == null || (table.Status != 1 && table.Status != 2)) return;
+
+        var statuses = await context.OrderDetails
+            .Where(d => d.OrderId == order.OrderId && d.CookingStatus != 4)
+            .Select(d => d.CookingStatus)
+            .ToListAsync();
+
+        bool waiting = statuses.Count > 0 && statuses.All(s => s >= 2) && statuses.Any(s => s == 2);
+        int desired = waiting ? 2 : 1;
+        if (table.Status == desired) return;
+
+        table.Status = desired;
+        table.UpdatedAt = DateTime.Now;
+        context.DiningTables.Update(table);
+        await context.SaveChangesAsync();
+    }
+
+    /// <summary>Đơn không còn món nào chưa giao (món đã hủy không tính).</summary>
+    public static async Task<bool> AllActiveItemsServedAsync(RestaurantPosContext ctx, int orderId)
+    {
+        return !await ctx.OrderDetails.AnyAsync(d => d.OrderId == orderId && d.CookingStatus != 3 && d.CookingStatus != 4);
+    }
+
+    /// <summary>
+    /// Đơn mang về trả trước được giữ mở cho tới khi phục vụ giao hết món. Khi đã thanh toán và mọi món đã giao
+    /// thì chuyển sang Hoàn thành. Trả về true nếu đơn vừa được hoàn tất.
+    /// </summary>
+    public static async Task<bool> TryCompleteTakeawayAsync(RestaurantPosContext ctx, Order order)
+    {
+        if (order.OrderType != 2 || order.PaymentStatus != 1 || order.Status >= 3) return false;
+        if (!await AllActiveItemsServedAsync(ctx, order.OrderId)) return false;
+        order.Status = 3;
+        order.CompletedAt = DateTime.Now;
+        ctx.Orders.Update(order);
+        await ctx.SaveChangesAsync();
+        return true;
+    }
+
+    /// <summary>Danh sách món bếp đã làm xong (2) đang chờ phục vụ bưng ra bàn, cũ nhất trước.</summary>
+    public async Task<List<KdsItemDto>> GetReadyToServeItemsAsync()
+    {
+        var items = await GetKdsItemsAsync();
+        return items
+            .Where(i => i.CookingStatus == 2)
+            .OrderBy(i => i.FinishedCookingAt ?? i.OrderCreatedAt)
+            .ToList();
+    }
+
+    /// <summary>Phục vụ/thu ngân đánh dấu một món đã xong (2) là đã giao (3).</summary>
+    public async Task<(bool Success, string Message, int? OrderId)> ServeItemAsync(int orderDetailId)
+    {
+        using var tx = await context.Database.BeginTransactionAsync();
+        try
+        {
+            var detail = await context.OrderDetails.FindAsync(orderDetailId);
+            if (detail == null) return (false, "Không tìm thấy món ăn trong đơn hàng", null);
+            if (detail.CookingStatus == 3) return (false, "Món này đã được giao trước đó", detail.OrderId);
+            if (detail.CookingStatus != 2) return (false, "Món chưa được bếp làm xong nên chưa thể giao", detail.OrderId);
+
+            var order = await context.Orders.FindAsync(detail.OrderId);
+            if (order == null || order.Status == 3 || order.Status == 4)
+                return (false, "Đơn hàng đã hoàn tất hoặc đã hủy", detail.OrderId);
+
+            detail.CookingStatus = 3;
+            await context.SaveChangesAsync();
+            await SyncTableWaitingStatusAsync(order);
+            bool completed = await TryCompleteTakeawayAsync(context, order);
+            await tx.CommitAsync();
+            return (true, completed ? "Đã giao món. Đơn mang về đã hoàn tất" : "Đã xác nhận giao món ra bàn", detail.OrderId);
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            return (false, "Lỗi cập nhật trạng thái giao món", null);
+        }
+    }
+
+    /// <summary>Phục vụ/thu ngân đánh dấu mọi món đã xong (2) của đơn thành đã giao (3).</summary>
+    public async Task<(bool Success, string Message, int ServedCount)> ServeReadyItemsAsync(int orderId)
+    {
+        using var tx = await context.Database.BeginTransactionAsync();
+        try
+        {
+            var order = await context.Orders.FindAsync(orderId);
+            if (order == null) return (false, "Không tìm thấy đơn hàng", 0);
+            if (order.Status == 3 || order.Status == 4)
+                return (false, "Đơn hàng đã hoàn tất hoặc đã hủy", 0);
+
+            var ready = await context.OrderDetails
+                .Where(d => d.OrderId == orderId && d.CookingStatus == 2)
+                .ToListAsync();
+            if (ready.Count == 0)
+                return (false, "Không có món nào đã xong đang chờ bưng", 0);
+
+            foreach (var d in ready) d.CookingStatus = 3;
+            await context.SaveChangesAsync();
+            await SyncTableWaitingStatusAsync(order);
+            bool completed = await TryCompleteTakeawayAsync(context, order);
+            await tx.CommitAsync();
+            return (true,
+                $"Đã đánh dấu {ready.Sum(d => d.Quantity)} phần đã giao ra bàn" + (completed ? ". Đơn mang về đã hoàn tất" : ""),
+                ready.Sum(d => d.Quantity));
+        }
+        catch (Exception)
+        {
+            await tx.RollbackAsync();
+            return (false, "Lỗi cập nhật trạng thái giao món", 0);
+        }
+    }
+
     public async Task<(bool Success, string Message)> UpdateCookingStatusAsync(int orderDetailId, int newStatus)
     {
         if (newStatus < 0 || newStatus > 3)
@@ -1278,6 +1432,7 @@ public class OrderRepository : BaseRepository
                 await context.SaveChangesAsync();
             }
 
+            await SyncTableWaitingStatusAsync(order);
             await tx.CommitAsync();
             return (true, "Cập nhật trạng thái chế biến món ăn thành công");
         }
@@ -1404,6 +1559,7 @@ public class OrderRepository : BaseRepository
             LastLowStockAlerts = deductResult.LowStockAlerts;
             LastAvailabilityChanges = deductResult.AvailabilityChanges;
 
+            await SyncTableWaitingStatusAsync(order);
             await tx.CommitAsync();
 
             return (true, $"Đã thêm thành công {validated.Items.Count} món vào đơn #{order.OrderCode}", await GetOrderByIdAsync(orderId));
@@ -1512,6 +1668,8 @@ public class OrderRepository : BaseRepository
             var invRepo = new InventoryRepository(context);
             LastAvailabilityChanges = await invRepo.RestoreForVoidAsync(orderId, detail.ProductId, actualVoidQty, modAttrIds, order.AccountId);
 
+            await SyncTableWaitingStatusAsync(order);
+            await TryCompleteTakeawayAsync(context, order);
             await tx.CommitAsync();
 
             return (true, "Đã hủy món thành công", await GetOrderByIdAsync(orderId));

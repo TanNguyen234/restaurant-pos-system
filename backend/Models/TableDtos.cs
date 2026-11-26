@@ -12,6 +12,11 @@ public class TableResponseDto
     public DateTime? OrderCreatedAt { get; set; }
     public decimal RunningTotal { get; set; } = 0;
     public int ItemCount { get; set; } = 0;
+    // Số phần món theo tiến độ bếp (0 chờ nấu, 1 đang nấu, 2 đã xong chờ bưng, 3 đã giao); không tính món đã hủy
+    public int PendingCount { get; set; } = 0;
+    public int CookingCount { get; set; } = 0;
+    public int ReadyCount { get; set; } = 0;
+    public int ServedCount { get; set; } = 0;
     public int? NextReservationId { get; set; }
     public string? NextReservationCustomer { get; set; }
     public DateTime? NextReservationTime { get; set; }

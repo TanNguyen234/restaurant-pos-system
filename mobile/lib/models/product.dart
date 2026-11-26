@@ -215,12 +215,16 @@ class PagedProductResult {
   final int totalPages;
   final List<Product> data;
 
+  /// true khi máy chủ không phản hồi và danh sách lấy từ bộ nhớ đệm offline (không có ảnh mới, có thể cũ).
+  final bool fromCache;
+
   PagedProductResult({
     required this.totalItems,
     required this.page,
     required this.pageSize,
     required this.totalPages,
     required this.data,
+    this.fromCache = false,
   });
 
   factory PagedProductResult.fromMap(Map<String, dynamic> map) {

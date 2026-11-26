@@ -29,6 +29,7 @@ import 'views/order/order_checkout_page.dart';
 import 'views/order/order_detail_page.dart';
 import 'views/product_detail_page.dart';
 import 'views/table/floor_table_page.dart';
+import 'views/waiter/waiter_serve_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -592,16 +593,16 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
         label: 'Sơ đồ bàn',
       ),
       const _NavItemSpec(
+        page: WaiterServePage(),
+        icon: Icon(Icons.room_service_outlined),
+        selectedIcon: Icon(Icons.room_service_rounded),
+        label: 'Chờ bưng',
+      ),
+      const _NavItemSpec(
         page: HomePage(),
         icon: Icon(Icons.restaurant_menu_outlined),
         selectedIcon: Icon(Icons.restaurant_menu_rounded),
         label: 'Thực đơn',
-      ),
-      _NavItemSpec(
-        page: const CartPage(),
-        icon: _cartBadgeIcon(false),
-        selectedIcon: _cartBadgeIcon(true),
-        label: 'Giỏ hàng',
       ),
       _NavItemSpec(
         page: const OrdersSyncPage(),
@@ -634,7 +635,9 @@ class _MainNavigationPageState extends State<MainNavigationPage> {
         return Scaffold(
           body: IndexedStack(
             index: safeIndex,
-            children: tabs.map((t) => t.page).toList(),
+            // Gắn key theo phiên đăng nhập: đăng nhập / đăng xuất / đổi tài khoản thì mọi tab được dựng lại và tải dữ liệu của người dùng mới
+            // (nếu không, IndexedStack giữ nguyên trạng thái cũ nên danh sách đơn của hội viên bị trống hoặc lỗi thời)
+            children: tabs.map((t) => KeyedSubtree(key: ValueKey('$roleKey:${t.label}'), child: t.page)).toList(),
           ),
           bottomNavigationBar: NavigationBar(
             selectedIndex: safeIndex,
@@ -855,11 +858,12 @@ class _OperationsHubPage extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 16),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
+                    Material(
+                      color: Colors.white,
+                      clipBehavior: Clip.antiAlias,
+                      shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        side: const BorderSide(color: Color(0xFFE2E8F0)),
                       ),
                       child: Column(
                         children: [
@@ -869,22 +873,6 @@ class _OperationsHubPage extends StatelessWidget {
                             subtitle: const Text('Xem danh sách món ăn, giá và thêm vào giỏ'),
                             trailing: const Icon(Icons.chevron_right),
                             onTap: () => go(const HomePage()),
-                          ),
-                          const Divider(height: 1),
-                          ListTile(
-                            leading: const Icon(Icons.shopping_cart_checkout_outlined, color: Color(0xFF0284C7)),
-                            title: const Text('Giỏ hàng & Tạo đơn nhanh'),
-                            subtitle: const Text('Kiểm tra giỏ hàng cục bộ và thanh toán'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => go(const CartPage()),
-                          ),
-                          const Divider(height: 1),
-                          ListTile(
-                            leading: const Icon(Icons.sync_rounded, color: Color(0xFFD97706)),
-                            title: const Text('Hàng đợi đồng bộ đơn Offline'),
-                            subtitle: const Text('Xem trạng thái SQLite / đẩy đơn còn tồn'),
-                            trailing: const Icon(Icons.chevron_right),
-                            onTap: () => go(const OrdersSyncPage()),
                           ),
                           if (canAccessCashier) ...[
                             const Divider(height: 1),

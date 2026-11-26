@@ -261,6 +261,11 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
       return;
     }
 
+    if (_orderType == 3 && _phoneController.text.trim().isEmpty) {
+      showAutoDismissSnackBar(context, message: 'Vui lòng nhập số điện thoại để giao hàng');
+      return;
+    }
+
     if (_cartItems.any((item) =>
         (item['product_id'] ?? item['productId']) is! int ||
         ((item['product_id'] ?? item['productId']) as int) <= 0 ||
@@ -301,6 +306,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
         'customerName': _customerNameController.text.trim().isEmpty ? 'Khách lẻ' : _customerNameController.text.trim(),
         'phoneNumber': _phoneController.text.trim().isEmpty ? null : _phoneController.text.trim(),
         'orderType': _orderType,
+        if (_orderType == 3) 'deliveryAddress': _addressController.text.trim(),
         'note': composedNote.isEmpty ? null : composedNote,
         'discountCode': _appliedDiscountCode,
         'totalAmount': _subtotal,
@@ -353,6 +359,12 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
           message: result['message']?.toString() ?? 'Đặt hàng thất bại',
           backgroundColor: const Color(0xFFDC2626),
         );
+        if (result['sessionExpired'] == true) {
+          // Token hết hạn: xóa phiên cũ (giỏ hàng vẫn còn) và đưa người dùng về màn đăng nhập
+          await SessionManager.instance.logout();
+          if (!mounted) return;
+          Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+        }
       }
     } catch (e) {
       if (mounted) {

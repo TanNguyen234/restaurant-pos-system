@@ -36,7 +36,10 @@ function Ensure-EnvFiles {
         @{ Example = (Join-Path $BackendDir ".env.example"); Target = (Join-Path $BackendDir ".env"); Name = "backend\.env" },
         @{ Example = (Join-Path $MobileDir ".env.example"); Target = (Join-Path $MobileDir ".env"); Name = "mobile\.env" }
     )
+    $rootEnv = Join-Path $ProjectRoot ".env"
     foreach ($p in $pairs) {
+        # Backend doc ../.env (root) khi khong co backend\.env -> khong tao ban sao tu template de tranh ghi de cau hinh DB o root
+        if ($p.Name -eq "backend\.env" -and (Test-Path $rootEnv)) { continue }
         if (-not (Test-Path $p.Target) -and (Test-Path $p.Example)) {
             Copy-Item -Path $p.Example -Destination $p.Target
             Write-Host "[ENV] Da tao $($p.Name) tu file .env.example" -ForegroundColor Green
@@ -99,16 +102,36 @@ function Start-FlutterClient([string]$Device) {
     }
 }
 
+function Get-DbServerInstance {
+    # Lay "Server=..." tu ConnectionStrings__RestaurantPosDb trong .env (root hoac backend), sau do appsettings.json
+    foreach ($envFile in @((Join-Path $ProjectRoot ".env"), (Join-Path $BackendDir ".env"))) {
+        if (-not (Test-Path $envFile)) { continue }
+        $line = Get-Content $envFile -Encoding UTF8 | Where-Object { $_ -match '^\s*ConnectionStrings__RestaurantPosDb\s*=' } | Select-Object -First 1
+        if ($line -and $line -match 'Server=([^;]+)') { return $Matches[1].Trim() }
+    }
+    $appSettings = Join-Path $BackendDir "appsettings.json"
+    if (Test-Path $appSettings) {
+        $cs = (Get-Content $appSettings -Raw -Encoding UTF8 | ConvertFrom-Json).ConnectionStrings.RestaurantPosDb
+        if ($cs -and $cs -match 'Server=([^;]+)') { return $Matches[1].Trim() }
+    }
+    return ".\SQLEXPRESS"
+}
+
 function Reset-AcceptanceDb {
     $sqlFile = Join-Path $ProjectRoot "RestaurantPos_Acceptance.sql"
     if (-not (Test-Path $sqlFile)) {
         Write-Host "[LOI] Khong tim thay file $sqlFile" -ForegroundColor Red
         exit 1
     }
-    Write-Host "[DB] Dang nap lai RestaurantPos_Acceptance.sql vao .\SQLEXPRESS..." -ForegroundColor Cyan
-    Invoke-Sqlcmd -ServerInstance ".\SQLEXPRESS" -InputFile $sqlFile
-    $counts = Invoke-Sqlcmd -ServerInstance ".\SQLEXPRESS" -Database "RestaurantPos_Acceptance" -Query "SELECT (SELECT COUNT(*) FROM Areas) AS Areas, (SELECT COUNT(*) FROM DiningTables) AS Tables, (SELECT COUNT(*) FROM Products) AS Products, (SELECT COUNT(*) FROM Accounts) AS Accounts, (SELECT COUNT(*) FROM Ingredients) AS Ingredients, (SELECT COUNT(*) FROM ProductRecipes) AS Recipes"
-    $counts | Format-Table -AutoSize
+    $server = Get-DbServerInstance
+    Write-Host "[DB] Dang nap lai RestaurantPos_Acceptance.sql vao $server..." -ForegroundColor Cyan
+    # -I: bat QUOTED_IDENTIFIER (bat buoc cho filtered index), -f 65001: doc file UTF-8
+    & sqlcmd -S $server -E -C -I -f 65001 -b -i $sqlFile | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        Write-Host "[LOI] Nap SQL that bai (exit $LASTEXITCODE). Kiem tra SQL Server '$server'." -ForegroundColor Red
+        exit 1
+    }
+    & sqlcmd -S $server -E -C -d "RestaurantPos_Acceptance" -W -Q "SET NOCOUNT ON; SELECT (SELECT COUNT(*) FROM sys.tables) AS Tables_, (SELECT COUNT(*) FROM DiningTables) AS DiningTables, (SELECT COUNT(*) FROM Products) AS Products, (SELECT COUNT(*) FROM Accounts) AS Accounts, (SELECT COUNT(*) FROM Ingredients) AS Ingredients, (SELECT COUNT(*) FROM ProductRecipes) AS Recipes"
     Write-Host "[DB] Khoi phuc DB mau thanh cong!" -ForegroundColor Green
 }
 

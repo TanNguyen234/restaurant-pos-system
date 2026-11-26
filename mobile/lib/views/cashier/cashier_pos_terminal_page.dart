@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../models/category.dart';
 import '../../models/dining_table.dart';
+import '../../models/order.dart';
 import '../../models/payment.dart';
 import '../../models/product.dart';
 import '../../repositories/category_repository.dart';
@@ -11,6 +12,7 @@ import '../../repositories/product_repository.dart';
 import '../../repositories/table_repository.dart';
 import '../../services/realtime_service.dart';
 import '../../services/receipt_printer_service.dart';
+import '../../utils/unserved_payment_guard.dart';
 import '../../widgets/skeleton_loading.dart';
 
 class CashierPosTerminalPage extends StatefulWidget {
@@ -37,6 +39,12 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
   DiningTable? _selectedTable;
   Map<String, dynamic>? _activeOrder;
 
+  /// 1: Tại bàn, 2: Mang về, 3: Giao hàng. Loại 2 và 3 không gắn bàn.
+  int _orderType = 1;
+  final _custNameCtl = TextEditingController();
+  final _custPhoneCtl = TextEditingController();
+  final _custAddressCtl = TextEditingController();
+
   final List<Map<String, dynamic>> _billItems = [];
 
   double _customerCashTendered = 0.0;
@@ -52,9 +60,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
     PosRealtimeService.instance.ensureStarted();
     _rtSub = PosRealtimeService.instance.events.listen((ev) {
       if (mounted && (ev.target == 'OrderEvent' || ev.target == 'TableUpdated')) {
-        if (_selectedTable != null) {
-          _fetchTableOrder(_selectedTable!.id, preserveUnsent: true);
-        }
+        _refreshActiveOrder(preserveUnsent: true);
       }
     });
     _loadInitialData();
@@ -63,6 +69,9 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
   @override
   void dispose() {
     _rtSub?.cancel();
+    _custNameCtl.dispose();
+    _custPhoneCtl.dispose();
+    _custAddressCtl.dispose();
     super.dispose();
   }
 
@@ -76,8 +85,11 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
       final prodsResult = await ProductRepository.getProducts(page: 1, pageSize: 100);
       final allTables = await TableRepository.getAllTables();
 
+      final keepOrderId = _orderType != 1 ? _activeOrderId : null;
       DiningTable? targetTable;
-      if (widget.initialTableId != null && allTables.isNotEmpty) {
+      if (_orderType != 1) {
+        targetTable = null; // Đang bán mang về / giao hàng: không tự gắn bàn
+      } else if (widget.initialTableId != null && allTables.isNotEmpty) {
         targetTable = allTables.firstWhere((t) => t.id == widget.initialTableId, orElse: () => allTables.first);
       } else if (allTables.isNotEmpty) {
         final occupied = allTables.where((t) => t.isOccupied).toList();
@@ -95,6 +107,13 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
 
       if (targetTable != null) {
         await _fetchTableOrder(targetTable.id);
+      } else if (_orderType != 1) {
+        if (keepOrderId != null) {
+          await _fetchOrderById(keepOrderId);
+          if (_activeOrder == null) _resetWalkInDraft(); // đơn đã thanh toán xong: dọn thông tin khách
+        } else {
+          _resetWalkInDraft();
+        }
       }
     } catch (e) {
       if (!mounted) return;
@@ -107,6 +126,110 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
 
   Future<void> _fetchTableOrder(int tableId, {bool preserveUnsent = false}) async {
     final order = await TableRepository.getActiveOrderByTable(tableId);
+    _applyActiveOrder(order, preserveUnsent: preserveUnsent);
+  }
+
+  int? get _activeOrderId {
+    final id = _activeOrder?['orderId'] ?? _activeOrder?['id'];
+    return id is int ? id : null;
+  }
+
+  /// Nạp lại đơn không gắn bàn (mang về / giao hàng) theo mã đơn. Đơn đã thanh toán hoặc đã hủy thì xoá khỏi POS.
+  Future<void> _fetchOrderById(int orderId, {bool preserveUnsent = false}) async {
+    final order = await _orderRepo.getOrderMapById(orderId);
+    final status = (order?['status'] as num?)?.toInt();
+    final paid = (order?['paymentStatus'] as num?)?.toInt() == 1;
+    final isTakeaway = (order?['orderType'] as num?)?.toInt() == 2;
+    // Đơn mang về trả trước vẫn giữ lại (hiện trạng thái món) cho tới khi phục vụ giao hết món; các đơn khác đóng khi đã trả
+    final open = order != null && status != 4 && status != 3 && (!paid || isTakeaway);
+    _applyActiveOrder(open ? order : null, preserveUnsent: preserveUnsent);
+  }
+
+  Future<void> _refreshActiveOrder({bool preserveUnsent = false}) async {
+    if (!mounted) return;
+    if (_selectedTable != null) {
+      await _fetchTableOrder(_selectedTable!.id, preserveUnsent: preserveUnsent);
+    } else if (_orderType != 1 && _activeOrderId != null) {
+      final code = _activeOrder?['orderCode'];
+      await _fetchOrderById(_activeOrderId!, preserveUnsent: preserveUnsent);
+      if (mounted && _activeOrder == null) {
+        _resetWalkInDraft();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Đơn ${code ?? ''} đã hoàn tất: phục vụ đã giao hết món'), backgroundColor: const Color(0xFF059669)),
+        );
+      }
+    }
+  }
+
+  String get _orderTypeLabel => _orderType == 3 ? 'Giao hàng' : 'Mang về';
+
+  void _resetWalkInDraft() {
+    if (!mounted) return;
+    setState(() {
+      _activeOrder = null;
+      _billItems.clear();
+      _discountAmount = 0.0;
+      _discountPercent = 0.0;
+      _alreadyPaidAmount = 0.0;
+      _customerCashTendered = 0.0;
+      _numpadBuffer = '';
+      _custNameCtl.clear();
+      _custPhoneCtl.clear();
+      _custAddressCtl.clear();
+    });
+  }
+
+  Future<void> _setOrderType(int type) async {
+    if (type == _orderType) return;
+    if (type == 1) {
+      setState(() => _orderType = 1);
+      _showTablePickerModal();
+      return;
+    }
+    setState(() {
+      _orderType = type;
+      _selectedTable = null;
+      _activeOrder = null;
+      // Giữ các món chưa gửi, bỏ món của đơn bàn đang xem
+      _billItems.removeWhere((i) => i['isExisting'] == true);
+      _discountAmount = 0.0;
+      _discountPercent = 0.0;
+      _alreadyPaidAmount = 0.0;
+    });
+  }
+
+  /// Kiểm tra thông tin bắt buộc theo loại đơn trước khi tạo đơn. Trả về thông báo lỗi hoặc null nếu hợp lệ.
+  String? _validateOrderContext() {
+    if (_orderType == 1 && _selectedTable == null) {
+      return 'Đơn tại bàn phải chọn bàn. Chọn "Mang về" hoặc "Giao hàng" nếu khách không dùng bàn.';
+    }
+    if (_orderType == 3) {
+      if (_custPhoneCtl.text.trim().isEmpty) return 'Đơn giao hàng cần số điện thoại khách.';
+      if (_custAddressCtl.text.trim().isEmpty) return 'Đơn giao hàng cần địa chỉ giao.';
+    }
+    return null;
+  }
+
+  Map<String, dynamic> _buildOrderPayload(List<Map<String, dynamic>> items) {
+    final name = _custNameCtl.text.trim();
+    final phone = _custPhoneCtl.text.trim();
+    final address = _custAddressCtl.text.trim();
+    final isTable = _orderType == 1 && _selectedTable != null;
+    return {
+      'tableId': isTable ? _selectedTable!.id : null,
+      'customerName': name.isNotEmpty
+          ? name
+          : (isTable ? 'Khách tại ${_selectedTable!.name}' : (_orderType == 3 ? 'Khách giao hàng' : 'Khách mang về')),
+      if (phone.isNotEmpty) 'phoneNumber': phone,
+      'orderType': isTable ? 1 : _orderType,
+      if (_orderType == 3) 'deliveryAddress': address,
+      // Giữ địa chỉ trong ghi chú để đơn xếp hàng offline (không có trường riêng) vẫn đồng bộ được
+      if (_orderType == 3) 'note': 'Giao tới: $address',
+      'items': items,
+    };
+  }
+
+  void _applyActiveOrder(Map<String, dynamic>? order, {bool preserveUnsent = false}) {
     if (!mounted) return;
     final unsentDrafts = preserveUnsent
         ? _billItems.where((i) => i['isExisting'] != true).map((i) => Map<String, dynamic>.from(i)).toList()
@@ -140,6 +263,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
             'quantity': (d['quantity'] as num?)?.toInt() ?? 1,
             'modifierLabel': rawMods.join(', '),
             'isExisting': true,
+            'cookingStatus': (d['cookingStatus'] as num?)?.toInt() ?? 0,
           });
         }
       }
@@ -379,9 +503,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
         backgroundColor: res['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
       ),
     );
-    if (_selectedTable != null) {
-      await _fetchTableOrder(_selectedTable!.id, preserveUnsent: true);
-    }
+    await _refreshActiveOrder(preserveUnsent: true);
   }
 
   void _onNumpadPress(String key) {
@@ -523,8 +645,8 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                         ),
                       );
                     }
-                    if (_selectedTable != null && res['success'] == true) {
-                      await _fetchTableOrder(_selectedTable!.id);
+                    if (res['success'] == true) {
+                      await _refreshActiveOrder();
                       return;
                     }
                   }
@@ -551,7 +673,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
       isDuplicate: true,
       order: {
         'orderCode': _activeOrder?['orderCode'] ?? 'ORD-REPRINT',
-        'tableName': _selectedTable?.name ?? 'Mang về',
+        'tableName': _selectedTable?.name ?? _orderTypeLabel,
         'customerName': _activeOrder?['customerName'] ?? 'Khách lẻ',
         'totalAmount': _subtotal,
         'discountAmount': _discountAmount,
@@ -579,19 +701,29 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
     }
 
     if (_billItems.isEmpty) return null;
-    final res = await _orderRepo.createOrder({
-      'tableId': _selectedTable?.id,
-      'customerName': _selectedTable != null ? 'Khách tại ${_selectedTable!.name}' : 'Khách quầy POS',
-      'orderType': _selectedTable != null ? 1 : 2,
-      'items': _billItems
-          .map((i) => {
-                'productId': i['productId'],
-                'quantity': i['quantity'],
-                'unitPrice': i['price'],
-                if (i['modifiers'] is List && (i['modifiers'] as List).isNotEmpty) 'modifiers': i['modifiers'],
-              })
-          .toList(),
-    });
+    final ctxError = _validateOrderContext();
+    if (ctxError != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctxError), backgroundColor: const Color(0xFFDC2626)));
+      }
+      return null;
+    }
+    final res = await _orderRepo.createOrder(_buildOrderPayload(_billItems
+        .map((i) => <String, dynamic>{
+              'productId': i['productId'],
+              'quantity': i['quantity'],
+              'unitPrice': i['price'],
+              if (i['modifiers'] is List && (i['modifiers'] as List).isNotEmpty) 'modifiers': i['modifiers'],
+            })
+        .toList()));
+    if (res['isOffline'] == true) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(res['message']?.toString() ?? 'Đã lưu đơn ngoại tuyến'), backgroundColor: const Color(0xFFD97706)),
+        );
+      }
+      return null;
+    }
     if (res['success'] != true) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -607,6 +739,9 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
         discountPercent: _discountPercent > 0 ? _discountPercent : null,
         discountAmount: _discountPercent > 0 ? null : _discountAmount,
       );
+    }
+    if (_selectedTable == null && newId != null) {
+      await _fetchOrderById(newId);
     }
     if (_selectedTable != null) {
       await _fetchTableOrder(_selectedTable!.id);
@@ -883,11 +1018,15 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                       : () async {
                           setModalState(() => isSubmitting = true);
                           if (cashPortion > 0) {
-                            final cRes = await _orderRepo.confirmPayment(
-                              orderId: orderId,
-                              paymentMethod: 'Cash',
-                              amount: cashPortion,
-                              note: 'Split Pay - Tiền mặt',
+                            final cRes = await payWithUnservedGuard(
+                              context,
+                              (allow) => _orderRepo.confirmPayment(
+                                orderId: orderId,
+                                paymentMethod: 'Cash',
+                                amount: cashPortion,
+                                note: 'Split Pay - Tiền mặt',
+                                allowUnserved: allow,
+                              ),
                             );
                             if (cRes['success'] != true) {
                               setModalState(() => isSubmitting = false);
@@ -900,11 +1039,16 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                             }
                           }
                           if (qrPortion > 0) {
-                            final qRes = await _orderRepo.confirmPayment(
-                              orderId: orderId,
-                              paymentMethod: 'VietQR',
-                              amount: qrPortion,
-                              note: 'Split Pay - Chuyển khoản VietQR',
+                            if (!mounted) return;
+                            final qRes = await payWithUnservedGuard(
+                              context,
+                              (allow) => _orderRepo.confirmPayment(
+                                orderId: orderId,
+                                paymentMethod: 'VietQR',
+                                amount: qrPortion,
+                                note: 'Split Pay - Chuyển khoản VietQR',
+                                allowUnserved: allow,
+                              ),
                             );
                             if (qRes['success'] != true) {
                               setModalState(() => isSubmitting = false);
@@ -917,9 +1061,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                             }
                           }
                           if (ctx.mounted) Navigator.pop(ctx);
-                          if (_selectedTable != null) {
-                            await _loadInitialData();
-                          }
+                          await _loadInitialData();
                           if (mounted) {
                             ScaffoldMessenger.of(context).showSnackBar(
                               const SnackBar(content: Text('Thanh toán hỗn hợp thành công & đã giải phóng bàn!'), backgroundColor: Color(0xFF059669)),
@@ -940,7 +1082,14 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
   }
 
   Future<bool> _submitNewItemsToTable({bool silent = false}) async {
-    if (_selectedTable == null) return false;
+    final ctxError = _validateOrderContext();
+    if (ctxError != null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(ctxError), backgroundColor: const Color(0xFFDC2626)));
+      }
+      return false;
+    }
+    final target = _selectedTable != null ? 'bàn ${_selectedTable!.name}' : _orderTypeLabel.toLowerCase();
     final newItems = _billItems.where((i) => i['isExisting'] != true).toList();
     if (newItems.isEmpty) {
       if (!silent) {
@@ -959,20 +1108,25 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
         .toList();
 
     if (_activeOrder == null) {
-      final res = await _orderRepo.createOrder({
-        'tableId': _selectedTable!.id,
-        'customerName': 'Khách tại bàn ${_selectedTable!.name}',
-        'orderType': 1,
-        'items': itemsPayload,
-      });
+      final res = await _orderRepo.createOrder(_buildOrderPayload(itemsPayload));
       if (!mounted) return false;
+      if (res['success'] == true && res['isOffline'] == true) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(res['message']?.toString() ?? 'Đã lưu đơn ngoại tuyến'), backgroundColor: const Color(0xFFD97706)),
+        );
+        return false; // Chưa có đơn thật trên máy chủ nên chưa thể thanh toán
+      }
       if (res['success'] == true) {
         if (!silent) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Đã tạo đơn cho bàn ${_selectedTable!.name}!'), backgroundColor: const Color(0xFF059669)),
+            SnackBar(content: Text('Đã gửi đơn $target xuống bếp!'), backgroundColor: const Color(0xFF059669)),
           );
         }
-        await _fetchTableOrder(_selectedTable!.id);
+        if (_selectedTable != null) {
+          await _fetchTableOrder(_selectedTable!.id);
+        } else if (res['orderId'] is int) {
+          await _fetchOrderById(res['orderId'] as int);
+        }
         return true;
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -988,10 +1142,10 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
       if (res['success'] == true) {
         if (!silent) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Đã gọi thêm ${newItems.length} món vào bàn ${_selectedTable!.name}!'), backgroundColor: const Color(0xFF059669)),
+            SnackBar(content: Text('Đã gọi thêm ${newItems.length} món vào $target!'), backgroundColor: const Color(0xFF059669)),
           );
         }
-        await _fetchTableOrder(_selectedTable!.id);
+        await _refreshActiveOrder();
         return true;
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1004,6 +1158,12 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
 
   Future<void> _settleCashPayment() async {
     if (_billItems.isEmpty) return;
+    if ((_activeOrder?['paymentStatus'] as num?)?.toInt() == 1) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Đơn này đã thanh toán, đang chờ phục vụ giao món.'), backgroundColor: Color(0xFFD97706)),
+      );
+      return;
+    }
     final tendered = _customerCashTendered;
     if (tendered < _remainingAmount) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -1015,18 +1175,22 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
     final orderId = await _ensureActiveOrderForPayment();
     if (orderId == null || !mounted) return;
 
-    final res = await _orderRepo.confirmPayment(
-      orderId: orderId,
-      paymentMethod: 'Cash',
-      amount: _remainingAmount,
-      note: 'Thanh toán tiền mặt tại POS Thu Ngân (Khách đưa: ${_currencyFormat.format(tendered)})',
+    final res = await payWithUnservedGuard(
+      context,
+      (allow) => _orderRepo.confirmPayment(
+        orderId: orderId,
+        paymentMethod: 'Cash',
+        amount: _remainingAmount,
+        note: 'Thanh toán tiền mặt tại POS Thu Ngân (Khách đưa: ${_currencyFormat.format(tendered)})',
+        allowUnserved: allow,
+      ),
     );
     if (!mounted) return;
 
     if (res['success'] == true) {
       final receiptSnapshot = {
         'orderCode': _activeOrder?['orderCode'] ?? 'ORD-$orderId',
-        'tableName': _selectedTable?.name ?? 'Mang về',
+        'tableName': _selectedTable?.name ?? _orderTypeLabel,
         'customerName': _activeOrder?['customerName'] ?? 'Khách thanh toán POS',
         'totalAmount': _subtotal,
         'discountAmount': _discountAmount,
@@ -1060,7 +1224,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
       isPreCheckBill: true,
       order: {
         'orderCode': _activeOrder?['orderCode'] ?? 'ORD-PRECHECK',
-        'tableName': _selectedTable?.name ?? 'Mang về',
+        'tableName': _selectedTable?.name ?? _orderTypeLabel,
         'customerName': 'Khách in tạm tính',
         'totalAmount': _subtotal,
         'discountAmount': _discountAmount,
@@ -1219,6 +1383,248 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
     );
   }
 
+  /// Trạng thái chế biến từ KDS: 0 chờ nấu, 1 đang nấu, 2 đã xong (chờ phục vụ), 3 đã giao.
+  String _cookingLabel(int status) => switch (status) {
+        1 => 'Đang nấu',
+        2 => 'Đã xong - chờ giao',
+        3 => 'Đã giao',
+        _ => 'Đã gửi bếp',
+      };
+
+  Color _cookingColor(int status) => switch (status) {
+        1 => const Color(0xFFF59E0B),
+        2 => const Color(0xFF10B981),
+        3 => const Color(0xFF22C55E),
+        _ => const Color(0xFF38BDF8),
+      };
+
+  Widget _buildOrderTypeBar() {
+    InputDecoration deco(String label, IconData icon) => InputDecoration(
+          isDense: true,
+          labelText: label,
+          labelStyle: const TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+          prefixIcon: Icon(icon, size: 16, color: const Color(0xFF94A3B8)),
+          prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF334155))),
+          focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFF59E0B))),
+        );
+    const fieldStyle = TextStyle(color: Colors.white, fontSize: 13);
+    final locked = _activeOrder != null && _orderType != 1; // Đơn đã tạo: không đổi thông tin khách tại đây
+
+    Widget chip(int type, String label, IconData icon) {
+      final selected = _orderType == type;
+      return Expanded(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2),
+          child: ChoiceChip(
+            showCheckmark: false,
+            selected: selected,
+            avatar: Icon(icon, size: 14, color: selected ? Colors.white : const Color(0xFF94A3B8)),
+            label: Text(label, style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: selected ? Colors.white : const Color(0xFF94A3B8))),
+            selectedColor: const Color(0xFF0284C7),
+            backgroundColor: const Color(0xFF0F172A),
+            side: const BorderSide(color: Color(0xFF334155)),
+            padding: EdgeInsets.zero,
+            labelPadding: const EdgeInsets.only(right: 2),
+            visualDensity: VisualDensity.compact,
+            onSelected: (_activeOrder != null && !selected && _orderType != 1)
+                ? null // Đơn không bàn đang mở: thanh toán trước khi đổi loại
+                : (_) => _setOrderType(type),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      color: const Color(0xFF1E293B),
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 170),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  chip(1, 'Tại bàn', Icons.table_restaurant_rounded),
+                  chip(2, 'Mang về', Icons.shopping_bag_outlined),
+                  chip(3, 'Giao hàng', Icons.delivery_dining_rounded),
+                ],
+              ),
+              if (_orderType != 1 && _activeOrder != null) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        (_activeOrder?['paymentStatus'] as num?)?.toInt() == 1
+                            ? 'Đã thanh toán • chờ phục vụ giao món'
+                            : 'Chưa thanh toán',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          color: (_activeOrder?['paymentStatus'] as num?)?.toInt() == 1 ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                        ),
+                      ),
+                    ),
+                    TextButton.icon(
+                      style: TextButton.styleFrom(
+                        foregroundColor: const Color(0xFFF59E0B),
+                        padding: const EdgeInsets.symmetric(horizontal: 4),
+                        minimumSize: Size.zero,
+                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      ),
+                      onPressed: _resetWalkInDraft,
+                      icon: const Icon(Icons.add_circle_outline_rounded, size: 15),
+                      label: const Text('Đơn mới', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              ],
+              if (_orderType != 1) ...[
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _custNameCtl,
+                        enabled: !locked,
+                        style: fieldStyle,
+                        decoration: deco('Tên khách', Icons.person_outline),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: TextField(
+                        controller: _custPhoneCtl,
+                        enabled: !locked,
+                        keyboardType: TextInputType.phone,
+                        style: fieldStyle,
+                        decoration: deco(_orderType == 3 ? 'SĐT (bắt buộc)' : 'SĐT', Icons.phone_outlined),
+                      ),
+                    ),
+                  ],
+                ),
+                if (_orderType == 3) ...[
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: _custAddressCtl,
+                    enabled: !locked,
+                    style: fieldStyle,
+                    decoration: deco('Địa chỉ giao (bắt buộc)', Icons.location_on_outlined),
+                  ),
+                ],
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: TextButton.icon(
+                    style: TextButton.styleFrom(
+                      foregroundColor: const Color(0xFF38BDF8),
+                      padding: const EdgeInsets.symmetric(horizontal: 4),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    onPressed: _showPendingOrdersModal,
+                    icon: const Icon(Icons.pending_actions_rounded, size: 15),
+                    label: const Text('Đơn đang chờ', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Danh sách đơn mang về / giao hàng chưa thanh toán để thu ngân mở lại (thu tiền khi khách lấy hàng / COD).
+  Future<void> _showPendingOrdersModal() async {
+    List<OrderModel> pending = [];
+    try {
+      final res = await _orderRepo.getAdminOrders(fromDate: DateTime.now().subtract(const Duration(days: 3)));
+      pending = (res['orders'] as List<OrderModel>)
+          .where((o) => o.status != 4 && o.status != 3 && ((o.orderType == 2) || (o.orderType == 3 && o.paymentStatus == 0)))
+          .toList()
+        ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Không tải được đơn đang chờ: $e'), backgroundColor: const Color(0xFFDC2626)),
+      );
+      return;
+    }
+    if (!mounted) return;
+    final picked = await showModalBottomSheet<OrderModel>(
+      context: context,
+      backgroundColor: const Color(0xFF1E293B),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxHeight: MediaQuery.of(ctx).size.height * 0.7),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Đơn mang về / giao hàng đang xử lý', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                if (pending.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 24),
+                    child: Center(child: Text('Không có đơn nào đang chờ', style: TextStyle(color: Color(0xFF94A3B8)))),
+                  )
+                else
+                  Flexible(
+                    child: Material(
+                      type: MaterialType.transparency,
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: pending.length,
+                        separatorBuilder: (_, _) => const Divider(color: Color(0xFF334155), height: 1),
+                        itemBuilder: (_, i) {
+                          final o = pending[i];
+                          return ListTile(
+                            dense: true,
+                            leading: Icon(o.orderType == 3 ? Icons.delivery_dining_rounded : Icons.shopping_bag_outlined, color: const Color(0xFFF59E0B)),
+                            title: Text('${o.orderCode} • ${o.customerName}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13)),
+                            subtitle: Text(
+                              '${o.orderType == 3 ? 'Giao hàng' : 'Mang về'} • ${o.paymentStatus == 1 ? 'Đã thanh toán' : 'Chưa thanh toán'} • ${o.statusText}${(o.phoneNumber ?? '').isNotEmpty ? ' • ${o.phoneNumber}' : ''}',
+                              style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5),
+                            ),
+                            trailing: Text(_currencyFormat.format(o.finalAmount), style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 12.5)),
+                            onTap: () => Navigator.pop(ctx, o),
+                          );
+                        },
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+    if (picked == null || !mounted) return;
+    final map = await _orderRepo.getOrderMapById(picked.orderId);
+    if (!mounted) return;
+    if (map == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Không mở được đơn này'), backgroundColor: Color(0xFFDC2626)),
+      );
+      return;
+    }
+    setState(() {
+      _orderType = picked.orderType;
+      _selectedTable = null;
+      _custNameCtl.text = (map['customerName'] ?? '').toString();
+      _custPhoneCtl.text = (map['phoneNumber'] ?? '').toString();
+      _custAddressCtl.text = (map['deliveryAddress'] ?? '').toString();
+    });
+    _applyActiveOrder(map);
+  }
+
   Widget _buildBillPanel() {
     return Container(
       color: const Color(0xFF1E293B),
@@ -1231,7 +1637,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
               children: [
                 Expanded(
                   child: Text(
-                    'HÓA ĐƠN: ${_selectedTable?.name ?? "Mang về"}',
+                    'HÓA ĐƠN: ${_selectedTable?.name ?? _orderTypeLabel}',
                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -1264,6 +1670,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
               ],
             ),
           ),
+          _buildOrderTypeBar(),
           Expanded(
             flex: 3,
             child: _billItems.isEmpty
@@ -1297,8 +1704,8 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 Text(
-                                  '${_currencyFormat.format(item['price'])} ${isExisting ? "• [Đã gửi bếp]" : "• [Mới thêm]"}',
-                                  style: TextStyle(color: isExisting ? const Color(0xFF38BDF8) : const Color(0xFF94A3B8), fontSize: 11),
+                                  '${_currencyFormat.format(item['price'])} • [${isExisting ? _cookingLabel((item['cookingStatus'] as int?) ?? 0) : "Mới thêm"}]',
+                                  style: TextStyle(color: isExisting ? _cookingColor((item['cookingStatus'] as int?) ?? 0) : const Color(0xFF94A3B8), fontSize: 11),
                                 ),
                               ],
                             ),
@@ -1463,7 +1870,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                         child: ElevatedButton(
                           style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7), foregroundColor: Colors.white, padding: const EdgeInsets.symmetric(vertical: 10)),
                           onPressed: () => _submitNewItemsToTable(),
-                          child: const Text('Gọi thêm', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                          child: Text(_activeOrder == null ? 'Tạo đơn & gửi bếp' : 'Gọi thêm', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                         ),
                       ),
                       const SizedBox(width: 6),
@@ -1544,7 +1951,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
             appBar: AppBar(
               backgroundColor: const Color(0xFF1E293B),
               title: Text(
-                _selectedTable != null ? 'POS • ${_selectedTable!.name}' : 'POS Thu Ngân',
+                _selectedTable != null ? 'POS • ${_selectedTable!.name}' : (_orderType == 1 ? 'POS Thu Ngân' : 'POS • $_orderTypeLabel'),
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 17),
               ),
               actions: [
@@ -1659,7 +2066,10 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                   return InkWell(
                     onTap: () {
                       Navigator.pop(ctx);
-                      setState(() => _selectedTable = t);
+                      setState(() {
+                        _selectedTable = t;
+                        _orderType = 1;
+                      });
                       _fetchTableOrder(t.id);
                     },
                     child: Container(

@@ -69,12 +69,39 @@ public class PaymentRepository : BaseRepository
         context.DiningTables.Update(table);
     }
 
+    /// <summary>Tiền tố thông báo lỗi để controller nhận ra lỗi "còn món chưa giao" và trả mã lỗi UNSERVED_ITEMS.</summary>
+    public const string UnservedMessagePrefix = "[CHUA_GIAO] ";
+
+    /// <summary>
+    /// Đếm số phần món còn hiệu lực của đơn mà phục vụ chưa xác nhận giao ra bàn
+    /// (Waiting = chờ nấu / đang nấu, Ready = bếp đã xong chờ bưng). Món đã hủy không tính.
+    /// </summary>
+    public async Task<(int Waiting, int Ready)> CountUnservedAsync(int orderId)
+    {
+        var rows = await context.OrderDetails
+            .Where(d => d.OrderId == orderId && d.CookingStatus != 3 && d.CookingStatus != 4)
+            .Select(d => new { d.CookingStatus, d.Quantity })
+            .ToListAsync();
+        int waiting = rows.Where(r => r.CookingStatus < 2).Sum(r => r.Quantity);
+        int ready = rows.Where(r => r.CookingStatus == 2).Sum(r => r.Quantity);
+        return (waiting, ready);
+    }
+
+    public static string BuildUnservedMessage(int waiting, int ready)
+    {
+        var parts = new List<string>();
+        if (waiting > 0) parts.Add($"{waiting} phần chờ nấu/đang nấu");
+        if (ready > 0) parts.Add($"{ready} phần bếp đã xong chờ bưng");
+        return $"{UnservedMessagePrefix}Còn {string.Join(" và ", parts)}. Phục vụ cần xác nhận đã giao món ra bàn trước khi thu tiền.";
+    }
+
     public async Task<(bool Success, string Message, PaymentDto? Payment)> ProcessCashPaymentAsync(
         int orderId,
         string? note = null,
-        int? cashierAccountId = null)
+        int? cashierAccountId = null,
+        bool allowUnserved = false)
     {
-        return await ProcessPaymentAsync(orderId, "Cash", null, null, note, cashierAccountId);
+        return await ProcessPaymentAsync(orderId, "Cash", null, null, note, cashierAccountId, allowUnserved);
     }
 
     public async Task<(bool Success, string Message, PaymentDto? Payment)> ProcessPaymentAsync(
@@ -83,7 +110,8 @@ public class PaymentRepository : BaseRepository
         decimal? amount = null,
         string? transactionRef = null,
         string? note = null,
-        int? processedByAccountId = null)
+        int? processedByAccountId = null,
+        bool allowUnserved = false)
     {
         using var tx = await context.Database.BeginTransactionAsync();
         try
@@ -92,6 +120,17 @@ public class PaymentRepository : BaseRepository
             if (order == null) return (false, "Không tìm thấy đơn hàng", null);
             if (order.Status == 4) return (false, "Không thể thanh toán đơn hàng đã bị hủy", null);
             if (order.PaymentStatus == 1) return (false, "Đơn hàng này đã được thanh toán trước đó", null);
+
+            // Đơn tại bàn chỉ được thu tiền khi mọi món đã giao ra bàn (quản lý / admin có thể cho phép ngoại lệ)
+            if (order.OrderType == 1 && !allowUnserved)
+            {
+                var unserved = await CountUnservedAsync(orderId);
+                if (unserved.Waiting + unserved.Ready > 0)
+                {
+                    await tx.RollbackAsync();
+                    return (false, BuildUnservedMessage(unserved.Waiting, unserved.Ready), null);
+                }
+            }
 
             decimal alreadyPaid = await context.Payments
                 .Where(p => p.OrderId == orderId && p.Status == 1)
@@ -154,8 +193,13 @@ public class PaymentRepository : BaseRepository
             if (isFullyPaid)
             {
                 order.PaymentStatus = 1;
-                order.Status = 3; // Completed
-                order.CompletedAt = DateTime.Now;
+                // Đơn mang về trả trước: giữ đơn mở (vẫn hiện trạng thái món) cho tới khi phục vụ giao hết món
+                bool keepOpen = order.OrderType == 2 && !await OrderRepository.AllActiveItemsServedAsync(context, order.OrderId);
+                if (!keepOpen)
+                {
+                    order.Status = 3; // Completed
+                    order.CompletedAt = DateTime.Now;
+                }
                 context.Orders.Update(order);
 
                 if (order.TableId.HasValue)
@@ -518,8 +562,12 @@ public class PaymentRepository : BaseRepository
             if (totalPaid >= order.FinalAmount)
             {
                 order.PaymentStatus = 1;
-                order.Status = 3;
-                order.CompletedAt = DateTime.Now;
+                bool keepOpen = order.OrderType == 2 && !await OrderRepository.AllActiveItemsServedAsync(context, order.OrderId);
+                if (!keepOpen)
+                {
+                    order.Status = 3;
+                    order.CompletedAt = DateTime.Now;
+                }
                 context.Orders.Update(order);
 
                 if (order.TableId.HasValue)

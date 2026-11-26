@@ -92,6 +92,61 @@ public class OrderController : BaseController
         });
     }
 
+    /// <summary>GET /api/order/ready-to-serve: món bếp đã xong đang chờ phục vụ bưng ra bàn.</summary>
+    [HttpGet("ready-to-serve")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public async Task<IActionResult> GetReadyToServe()
+    {
+        var items = await Provider.Order.GetReadyToServeItemsAsync();
+        return Ok(items);
+    }
+
+    /// <summary>PUT /api/order/detail/{orderDetailId}/serve: xác nhận giao một món ra bàn (2 -> 3).</summary>
+    [HttpPut("detail/{orderDetailId:int}/serve")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public async Task<IActionResult> ServeItem(int orderDetailId)
+    {
+        var result = await Provider.Order.ServeItemAsync(orderDetailId);
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        await _realtime.NotifyKdsChangedAsync(new { orderDetailId, served = true });
+        await _realtime.NotifyOrderChangedAsync("ItemsServed", new { orderId = result.OrderId, orderDetailId });
+        await _realtime.NotifyTableChangedAsync(new { orderId = result.OrderId });
+
+        return Ok(new { statusCode = 200, success = true, message = result.Message, orderDetailId });
+    }
+
+    /// <summary>
+    /// PUT /api/order/{id}/serve-ready
+    /// Phục vụ / thu ngân báo đã bưng các món bếp làm xong (cookingStatus 2) ra bàn (chuyển sang 3: đã giao).
+    /// </summary>
+    [HttpPut("{id:int}/serve-ready")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
+    public async Task<IActionResult> ServeReadyItems(int id)
+    {
+        var result = await Provider.Order.ServeReadyItemsAsync(id);
+        if (!result.Success)
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        await _realtime.NotifyKdsChangedAsync(new { orderId = id, served = result.ServedCount });
+        await _realtime.NotifyOrderChangedAsync("ItemsServed", new { orderId = id, servedCount = result.ServedCount });
+        await _realtime.NotifyTableChangedAsync(new { orderId = id });
+
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = result.Message,
+            orderId = id,
+            servedCount = result.ServedCount
+        });
+    }
+
     [HttpGet("admin")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER")]
     public async Task<IActionResult> GetAdminOrders(

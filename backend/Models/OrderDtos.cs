@@ -24,6 +24,7 @@ public class CreateOrderDto
     public string? CustomerName { get; set; }
     public string? PhoneNumber { get; set; }
     public int OrderType { get; set; } = 1; // 1: DineIn, 2: Takeaway, 3: Delivery
+    public string? DeliveryAddress { get; set; }
     public string? Note { get; set; }
     public string? DiscountCode { get; set; }
     public decimal? TotalAmount { get; set; }
@@ -74,6 +75,7 @@ public class OrderDto
     public string? CustomerName { get; set; }
     public string? PhoneNumber { get; set; }
     public int OrderType { get; set; }
+    public string? DeliveryAddress { get; set; }
     public string OrderTypeText => OrderType switch
     {
         2 => "Mang về (Takeaway)",

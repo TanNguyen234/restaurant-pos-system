@@ -891,6 +891,16 @@ public class TableRepository : BaseRepository
                 .GroupBy(d => d.OrderId)
                 .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
 
+        var cookingCounts = orderIds.Count == 0
+            ? new Dictionary<int, Dictionary<int, int>>()
+            : context.OrderDetails
+                .Where(d => orderIds.Contains(d.OrderId) && d.CookingStatus != 4)
+                .GroupBy(d => new { d.OrderId, d.CookingStatus })
+                .Select(g => new { g.Key.OrderId, g.Key.CookingStatus, Qty = g.Sum(x => x.Quantity) })
+                .ToList()
+                .GroupBy(x => x.OrderId)
+                .ToDictionary(g => g.Key, g => g.ToDictionary(x => x.CookingStatus, x => x.Qty));
+
         var upcomingReservations = context.Reservations
             .Where(r => tableIds.Contains(r.TableId) && (r.Status == 0 || r.Status == 1))
             .OrderBy(r => r.ArrivalTime)
@@ -916,6 +926,11 @@ public class TableRepository : BaseRepository
                 detailsCount.TryGetValue(ord.OrderId, out count);
             }
 
+            var byStatus = new Dictionary<int, int>();
+            if (ord != null) cookingCounts.TryGetValue(ord.OrderId, out byStatus!);
+            byStatus ??= new Dictionary<int, int>();
+            int CountOf(int st) => byStatus.TryGetValue(st, out var q) ? q : 0;
+
             upcomingReservations.TryGetValue(t.TableId, out var nextRes);
 
             return new TableResponseDto
@@ -930,6 +945,10 @@ public class TableRepository : BaseRepository
                 OrderCreatedAt = ord?.CreatedAt,
                 RunningTotal = ord?.FinalAmount ?? (ord?.TotalAmount ?? 0),
                 ItemCount = count,
+                PendingCount = CountOf(0),
+                CookingCount = CountOf(1),
+                ReadyCount = CountOf(2),
+                ServedCount = CountOf(3),
                 NextReservationId = nextRes?.ReservationId,
                 NextReservationCustomer = nextRes?.CustomerName,
                 NextReservationTime = nextRes?.ArrivalTime,

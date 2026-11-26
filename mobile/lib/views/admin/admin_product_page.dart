@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
+import '../../widgets/picked_images_preview.dart';
 import 'package:intl/intl.dart';
 import '../../config/api_config.dart';
 import '../../models/category.dart';
@@ -27,6 +28,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
   List<Product> _products = [];
   bool _isLoading = true;
   String? _errorMessage;
+  bool _fromCache = false;
 
   int _currentPage = 1;
   final int _pageSize = 10;
@@ -77,6 +79,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
       if (!mounted) return;
       setState(() {
         _products = result.data;
+        _fromCache = result.fromCache;
         _currentPage = result.page;
         _totalPages = result.totalPages > 0 ? result.totalPages : 1;
         _totalItems = result.totalItems;
@@ -324,18 +327,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
                 ),
                 if (pickedImages.isNotEmpty) ...[
                   const SizedBox(height: 8),
-                  SizedBox(
-                    height: 64,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: pickedImages.length,
-                      separatorBuilder: (_, _) => const SizedBox(width: 8),
-                      itemBuilder: (_, idx) => ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.memory(pickedImages[idx], width: 64, height: 64, fit: BoxFit.cover),
-                      ),
-                    ),
-                  ),
+                  PickedImagesPreview(images: pickedImages),
                 ],
                 const SizedBox(height: 8),
                 TextField(
@@ -596,6 +588,25 @@ class _AdminProductPageState extends State<AdminProductPage> {
               ],
             ),
           ),
+          if (_fromCache)
+            Container(
+              width: double.infinity,
+              color: const Color(0xFFFEF3C7),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              child: Row(
+                children: [
+                  const Icon(Icons.cloud_off_rounded, size: 18, color: Color(0xFFB45309)),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'Không kết nối được máy chủ: đang hiển thị dữ liệu offline (không có ảnh, có thể cũ). Kiểm tra backend rồi bấm làm mới.',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF92400E)),
+                    ),
+                  ),
+                  TextButton(onPressed: () => _loadProducts(page: _currentPage), child: const Text('Làm mới')),
+                ],
+              ),
+            ),
           Expanded(
             child: _isLoading
                 ? const Center(child: CircularProgressIndicator())
@@ -631,7 +642,9 @@ class _AdminProductPageState extends State<AdminProductPage> {
                                     borderRadius: BorderRadius.circular(14),
                                     boxShadow: const [BoxShadow(color: Color(0x0A000000), blurRadius: 6, offset: Offset(0, 2))],
                                   ),
-                                  child: ListTile(
+                                  child: Material(
+                                    type: MaterialType.transparency,
+                                    child: ListTile(
                                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                     leading: ClipRRect(
                                       borderRadius: BorderRadius.circular(10),
@@ -744,6 +757,7 @@ class _AdminProductPageState extends State<AdminProductPage> {
                                         ),
                                       ],
                                     ),
+                                  ),
                                   ),
                                 );
                               },

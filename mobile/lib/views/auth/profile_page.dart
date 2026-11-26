@@ -57,6 +57,8 @@ class _ProfilePageState extends State<ProfilePage> {
     super.dispose();
   }
 
+  bool _isWaiterRole(UserAccount? u) => u?.role.toUpperCase() == 'WAITER';
+
   Future<void> _loadProfile() async {
     setState(() {
       _isLoading = true;
@@ -69,7 +71,7 @@ class _ProfilePageState extends State<ProfilePage> {
       await SessionManager.instance.setSession(remote);
     }
     List<OrderModel> orders = [];
-    if (session != null) {
+    if (session != null && !_isWaiterRole(session)) {
       try {
         orders = await _orderRepo.lookupOrders('');
       } catch (_) {}
@@ -112,6 +114,12 @@ class _ProfilePageState extends State<ProfilePage> {
         message: res['message']?.toString() ?? 'Không thể cập nhật hồ sơ',
         backgroundColor: const Color(0xFFDC2626),
       );
+      if (res['sessionExpired'] == true) {
+        // Token hết hạn: xóa phiên cũ và đưa người dùng về màn đăng nhập
+        await SessionManager.instance.logout();
+        if (!mounted) return;
+        Navigator.of(context).pushNamedAndRemoveUntil('/login', (route) => false);
+      }
     }
   }
 
@@ -476,9 +484,11 @@ class _ProfilePageState extends State<ProfilePage> {
                             ),
                             const SizedBox(height: 16),
 
-                            // My Orders Section
-                            _buildMyOrdersSection(),
-                            const SizedBox(height: 16),
+                            // My Orders Section (phục vụ không cần xem danh sách đơn ở hồ sơ)
+                            if (!_isWaiterRole(user)) ...[
+                              _buildMyOrdersSection(),
+                              const SizedBox(height: 16),
+                            ],
 
                             // Account Actions
                             Material(

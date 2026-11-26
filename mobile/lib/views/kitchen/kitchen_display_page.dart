@@ -568,17 +568,23 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
                           ),
                         )
                       else
+                        // Bước "Đã giao" do phục vụ xác nhận, bếp/pha chế chỉ theo dõi
                         Expanded(
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: const Color(0xFF10B981),
-                              side: const BorderSide(color: Color(0xFF10B981)),
-                              padding: const EdgeInsets.symmetric(vertical: 10),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4)),
                             ),
-                            onPressed: () => _updateCookingStatus(item.orderDetailId, 3),
-                            icon: const Icon(Icons.room_service_rounded, size: 16),
-                            label: const Text('Đã giao món', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            child: const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.hourglass_bottom_rounded, size: 16, color: Color(0xFF10B981)),
+                                SizedBox(width: 6),
+                                Text('Chờ phục vụ bưng món', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 13)),
+                              ],
+                            ),
                           ),
                         ),
                     ],

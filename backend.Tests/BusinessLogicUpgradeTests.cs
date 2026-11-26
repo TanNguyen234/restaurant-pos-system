@@ -1,3 +1,9 @@
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.DependencyInjection;
 using System.Globalization;
 using System.Net;
 using System.Security.Cryptography;
@@ -96,6 +102,516 @@ public class BusinessLogicUpgradeTests
             Context.Dispose();
             Connection.Dispose();
         }
+    }
+
+    [Fact]
+    public async Task TableStatus_AutoWaiting_WhenAllItemsReady_ThenBackToOccupied_AfterServed()
+    {
+        using var fx = new TestFixture();
+        var repo = new OrderRepository(fx.Context);
+        var created = await repo.CreateOrderAsync(new CreateOrderDto
+        {
+            TableId = 1,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(created.Success, created.Message);
+        int detailId = fx.Context.OrderDetails.Single().OrderDetailId;
+
+        await repo.UpdateCookingStatusAsync(detailId, 1);
+        fx.Context.ChangeTracker.Clear();
+        Assert.Equal(1, (await fx.Context.DiningTables.FindAsync(1))!.Status); // đang nấu: vẫn Có khách
+
+        await repo.UpdateCookingStatusAsync(detailId, 2);
+        fx.Context.ChangeTracker.Clear();
+        Assert.Equal(2, (await fx.Context.DiningTables.FindAsync(1))!.Status); // xong hết: Chờ phục vụ
+
+        var served = await repo.ServeReadyItemsAsync(created.Order!.OrderId);
+        Assert.True(served.Success, served.Message);
+        Assert.Equal(1, served.ServedCount);
+        fx.Context.ChangeTracker.Clear();
+        Assert.Equal(3, fx.Context.OrderDetails.Single().CookingStatus);
+        Assert.Equal(1, (await fx.Context.DiningTables.FindAsync(1))!.Status); // đã giao: về Có khách
+
+        var again = await repo.ServeReadyItemsAsync(created.Order.OrderId);
+        Assert.False(again.Success); // không còn món chờ bưng
+    }
+
+    [Fact]
+    public async Task TableList_ReportsCookingProgressCounts()
+    {
+        using var fx = new TestFixture();
+        var repo = new OrderRepository(fx.Context);
+        var created = await repo.CreateOrderAsync(new CreateOrderDto
+        {
+            TableId = 1,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 2 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(created.Success, created.Message);
+        int detailId = fx.Context.OrderDetails.Single().OrderDetailId;
+        await repo.UpdateCookingStatusAsync(detailId, 1);
+
+        var tables = new TableRepository(fx.Context).GetAllEnrichedTables();
+        var t1 = tables.Single(t => t.TableId == 1);
+        Assert.Equal(2, t1.ItemCount);
+        Assert.Equal(2, t1.CookingCount);
+        Assert.Equal(0, t1.PendingCount);
+        Assert.Equal(0, t1.ReadyCount);
+    }
+
+    [Fact]
+    public async Task ServeItem_OnlyReadyItems_AndListsReadyToServe()
+    {
+        using var fx = new TestFixture();
+        var repo = new OrderRepository(fx.Context);
+        var created = await repo.CreateOrderAsync(new CreateOrderDto
+        {
+            TableId = 1,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(created.Success, created.Message);
+        int detailId = fx.Context.OrderDetails.Single().OrderDetailId;
+
+        var tooEarly = await repo.ServeItemAsync(detailId); // món còn chờ nấu
+        Assert.False(tooEarly.Success);
+        Assert.Empty(await repo.GetReadyToServeItemsAsync());
+
+        await repo.UpdateCookingStatusAsync(detailId, 2);
+        var ready = await repo.GetReadyToServeItemsAsync();
+        Assert.Single(ready);
+        Assert.Equal(detailId, ready[0].OrderDetailId);
+
+        var served = await repo.ServeItemAsync(detailId);
+        Assert.True(served.Success, served.Message);
+        Assert.Empty(await repo.GetReadyToServeItemsAsync());
+        fx.Context.ChangeTracker.Clear();
+        Assert.Equal(3, fx.Context.OrderDetails.Single().CookingStatus);
+        Assert.Equal(1, (await fx.Context.DiningTables.FindAsync(1))!.Status);
+
+        var again = await repo.ServeItemAsync(detailId);
+        Assert.False(again.Success);
+    }
+
+    [Fact]
+    public async Task Payment_DineIn_BlockedUntilAllItemsServed_ManagerCanOverride()
+    {
+        using var fx = new TestFixture();
+        var orderRepo = new OrderRepository(fx.Context);
+        var payRepo = new PaymentRepository(fx.Context);
+        var created = await orderRepo.CreateOrderAsync(new CreateOrderDto
+        {
+            TableId = 1,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(created.Success, created.Message);
+        int orderId = created.Order!.OrderId;
+        int detailId = fx.Context.OrderDetails.Single().OrderDetailId;
+
+        // 1) Món chờ nấu: chặn
+        var blocked1 = await payRepo.ProcessPaymentAsync(orderId, "Cash", null, null, null, 2);
+        Assert.False(blocked1.Success);
+        Assert.StartsWith(PaymentRepository.UnservedMessagePrefix, blocked1.Message);
+
+        // 2) Bếp đã xong nhưng chưa bưng: vẫn chặn
+        await orderRepo.UpdateCookingStatusAsync(detailId, 2);
+        var blocked2 = await payRepo.ProcessPaymentAsync(orderId, "Cash", null, null, null, 2);
+        Assert.False(blocked2.Success);
+        Assert.Contains("chờ bưng", blocked2.Message);
+        fx.Context.ChangeTracker.Clear();
+        Assert.Equal(0, fx.Context.Payments.Count());
+        Assert.Equal(2, (await fx.Context.DiningTables.FindAsync(1))!.Status); // bàn vẫn có khách (Chờ phục vụ)
+
+        // 3) Quản lý cho phép ngoại lệ: thu được
+        // (dùng đơn thứ hai để giữ nguyên đơn trên cho bước 4)
+        var created2 = await orderRepo.CreateOrderAsync(new CreateOrderDto
+        {
+            TableId = 2,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(created2.Success, created2.Message);
+        var forced = await payRepo.ProcessPaymentAsync(created2.Order!.OrderId, "Cash", null, null, null, 2, allowUnserved: true);
+        Assert.True(forced.Success, forced.Message);
+
+        // 4) Phục vụ giao hết món: thu bình thường
+        var served = await orderRepo.ServeReadyItemsAsync(orderId);
+        Assert.True(served.Success, served.Message);
+        var ok = await payRepo.ProcessPaymentAsync(orderId, "Cash", null, null, null, 2);
+        Assert.True(ok.Success, ok.Message);
+        fx.Context.ChangeTracker.Clear();
+        Assert.Equal(0, (await fx.Context.DiningTables.FindAsync(1))!.Status);
+    }
+
+    [Fact]
+    public async Task Payment_Takeaway_NotBlockedByUnservedItems()
+    {
+        using var fx = new TestFixture();
+        var orderRepo = new OrderRepository(fx.Context);
+        var payRepo = new PaymentRepository(fx.Context);
+        var created = await orderRepo.CreateOrderAsync(new CreateOrderDto
+        {
+            OrderType = 2,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(created.Success, created.Message);
+        var pay = await payRepo.ProcessPaymentAsync(created.Order!.OrderId, "Cash", null, null, null, 2);
+        Assert.True(pay.Success, pay.Message); // trả trước khi bếp làm là bình thường với mang về
+    }
+
+    [Fact]
+    public async Task Takeaway_PaidUpFront_StaysOpen_UntilServed_AndIsRecordedInShift()
+    {
+        using var fx = new TestFixture();
+        var orderRepo = new OrderRepository(fx.Context);
+        var payRepo = new PaymentRepository(fx.Context);
+        var shiftRepo = new ShiftRepository(fx.Context);
+
+        var shift = await shiftRepo.OpenShiftAsync(new OpenShiftDto { AccountId = 2, InitialCash = 0 });
+        Assert.True(shift.Success, shift.Message);
+
+        var created = await orderRepo.CreateOrderAsync(new CreateOrderDto
+        {
+            OrderType = 2,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(created.Success, created.Message);
+        int orderId = created.Order!.OrderId;
+        int detailId = fx.Context.OrderDetails.Single().OrderDetailId;
+
+        // Thu ngân tạo đơn xong là thanh toán luôn
+        var pay = await payRepo.ProcessPaymentAsync(orderId, "Cash", null, null, null, 2);
+        Assert.True(pay.Success, pay.Message);
+        fx.Context.ChangeTracker.Clear();
+        var afterPay = await fx.Context.Orders.FindAsync(orderId);
+        Assert.Equal(1, afterPay!.PaymentStatus);
+        Assert.NotEqual(3, afterPay.Status); // vẫn giữ đơn, chưa hoàn tất
+        Assert.Null(afterPay.CompletedAt);
+
+        // Bếp làm xong: vẫn còn trong danh sách chờ bưng của waiter
+        await orderRepo.UpdateCookingStatusAsync(detailId, 2);
+        Assert.Single(await orderRepo.GetReadyToServeItemsAsync());
+
+        // Ca hiện tại ghi nhận 1 đơn mang về đang chờ giao
+        var cur1 = await shiftRepo.GetCurrentShiftAsync(2);
+        Assert.Equal(1, cur1!.TakeawayOrders);
+        Assert.Equal(0, cur1.TakeawayServed);
+        Assert.Equal(1, cur1.TakeawayPending);
+
+        // Waiter bưng món: đơn hoàn tất
+        var served = await orderRepo.ServeItemAsync(detailId);
+        Assert.True(served.Success, served.Message);
+        Assert.Contains("hoàn tất", served.Message);
+        fx.Context.ChangeTracker.Clear();
+        var done = await fx.Context.Orders.FindAsync(orderId);
+        Assert.Equal(3, done!.Status);
+        Assert.NotNull(done.CompletedAt);
+
+        var cur2 = await shiftRepo.GetCurrentShiftAsync(2);
+        Assert.Equal(1, cur2!.TakeawayServed);
+        Assert.Equal(0, cur2.TakeawayPending);
+    }
+
+    [Fact]
+    public async Task Takeaway_ServedBeforePayment_CompletesRightAtPayment()
+    {
+        using var fx = new TestFixture();
+        var orderRepo = new OrderRepository(fx.Context);
+        var payRepo = new PaymentRepository(fx.Context);
+        var created = await orderRepo.CreateOrderAsync(new CreateOrderDto
+        {
+            OrderType = 2,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(created.Success, created.Message);
+        int detailId = fx.Context.OrderDetails.Single().OrderDetailId;
+        await orderRepo.UpdateCookingStatusAsync(detailId, 2);
+        await orderRepo.ServeItemAsync(detailId); // giao trước, chưa trả tiền: chưa hoàn tất
+        fx.Context.ChangeTracker.Clear();
+        Assert.NotEqual(3, (await fx.Context.Orders.FindAsync(created.Order!.OrderId))!.Status);
+
+        var pay = await payRepo.ProcessPaymentAsync(created.Order.OrderId, "Cash", null, null, null, 2);
+        Assert.True(pay.Success, pay.Message);
+        fx.Context.ChangeTracker.Clear();
+        Assert.Equal(3, (await fx.Context.Orders.FindAsync(created.Order.OrderId))!.Status);
+    }
+
+    private sealed class FakeFormFile : Microsoft.AspNetCore.Http.IFormFile
+    {
+        private readonly byte[] _bytes;
+        public FakeFormFile(string fileName, byte[] bytes) { FileName = fileName; _bytes = bytes; }
+        public string ContentType => "application/octet-stream";
+        public string ContentDisposition => "form-data";
+        public Microsoft.AspNetCore.Http.IHeaderDictionary Headers => new Microsoft.AspNetCore.Http.HeaderDictionary();
+        public long Length => _bytes.Length;
+        public string Name => "files";
+        public string FileName { get; }
+        public Stream OpenReadStream() => new MemoryStream(_bytes);
+        public void CopyTo(Stream target) => target.Write(_bytes, 0, _bytes.Length);
+        public Task CopyToAsync(Stream target, CancellationToken cancellationToken = default) => target.WriteAsync(_bytes, 0, _bytes.Length, cancellationToken);
+    }
+
+    [Fact]
+    public async Task Helper_SaveImage_CopiesIntoWebRootImagesFolder_AndWebRootIsLocatedFromBinFolder()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "pos_img_" + Guid.NewGuid().ToString("N"));
+        var wwwroot = Path.Combine(tmp, "backend", "wwwroot");
+        Directory.CreateDirectory(Path.Combine(wwwroot, "images", "products"));
+        var binDir = Path.Combine(tmp, "backend", "bin", "Debug", "net10.0");
+        Directory.CreateDirectory(binDir);
+        try
+        {
+            // Backend chạy từ bin/Debug với WebRootPath rỗng: vẫn phải tìm ra wwwroot của dự án
+            var located = WebApi.Services.Helper.LocateWebRoot(Path.Combine(binDir, "wwwroot"), binDir);
+            Assert.Equal(wwwroot, located);
+
+            WebApi.Services.Helper.ConfigureWebRoot(located);
+            WebApi.Services.Helper.EnsureImageFolders();
+            byte[] png = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0 };
+            var name = await WebApi.Services.Helper.SaveImageAsync(new FakeFormFile("anh mon.PNG", png), "images/products");
+            Assert.True(File.Exists(Path.Combine(wwwroot, "images", "products", name)));
+            Assert.EndsWith(".png", name);
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    private static WebApi.Api.Controllers.ProductController BuildProductController(RestaurantPosContext ctx)
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        services.AddSingleton(ctx);
+        var accessor = new Microsoft.AspNetCore.Http.HttpContextAccessor();
+        services.AddSingleton<Microsoft.AspNetCore.Http.IHttpContextAccessor>(accessor);
+        services.AddScoped<SiteProvider>();
+        var sp = services.BuildServiceProvider();
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext { RequestServices = sp };
+        accessor.HttpContext = http;
+        var controller = new WebApi.Api.Controllers.ProductController(new WebApi.Services.PosRealtimeNotifier(null!));
+        controller.ControllerContext = new Microsoft.AspNetCore.Mvc.ControllerContext { HttpContext = http };
+        return controller;
+    }
+
+    [Fact]
+    public async Task ProductController_CreateAndUpdate_WithUploadedImages_SavesFilesAndUpdatesImageUrl()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "pos_prod_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(tmp, "images", "products"));
+        try
+        {
+            WebApi.Services.Helper.ConfigureWebRoot(tmp);
+            using var fx = new TestFixture();
+            var controller = BuildProductController(fx.Context);
+            short catId = fx.Context.Products.First().CategoryId;
+            byte[] png = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0 };
+
+            // Tạo mới kèm 2 ảnh
+            var created = await controller.Post(
+                new WebApi.Api.Controllers.ProductFormDto { CategoryId = catId, ProductName = "Món ảnh", Price = 30000 },
+                null,
+                new List<Microsoft.AspNetCore.Http.IFormFile> { new FakeFormFile("a.png", png), new FakeFormFile("b.png", png) });
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(created);
+            var product = fx.Context.Products.Single(p => p.ProductName == "Món ảnh");
+            var firstFiles = product.ImageUrl.Split(';');
+            Assert.Equal(2, firstFiles.Length);
+            foreach (var f in firstFiles) Assert.True(File.Exists(Path.Combine(tmp, "images", "products", f)));
+
+            // Cập nhật: đổi ảnh mới
+            var updated = await controller.Put(
+                product.ProductId,
+                new WebApi.Api.Controllers.ProductFormDto { CategoryId = catId, ProductName = "Món ảnh sửa", Price = 32000, ImageUrl = product.ImageUrl },
+                null,
+                new List<Microsoft.AspNetCore.Http.IFormFile> { new FakeFormFile("c.jpg", new byte[] { 0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0 }) });
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(updated);
+            fx.Context.ChangeTracker.Clear();
+            var after = fx.Context.Products.Single(p => p.ProductId == product.ProductId);
+            Assert.Equal("Món ảnh sửa", after.ProductName);
+            Assert.EndsWith(".jpg", after.ImageUrl);
+            Assert.True(File.Exists(Path.Combine(tmp, "images", "products", after.ImageUrl)));
+            foreach (var f in firstFiles) Assert.False(File.Exists(Path.Combine(tmp, "images", "products", f))); // ảnh cũ được dọn
+
+            // Cập nhật không đổi ảnh (chỉ giữ tên file cũ)
+            var again = await controller.Put(
+                product.ProductId,
+                new WebApi.Api.Controllers.ProductFormDto { CategoryId = catId, ProductName = "Món ảnh sửa lần 2", Price = 33000, ImageUrl = after.ImageUrl },
+                null,
+                null);
+            Assert.IsType<Microsoft.AspNetCore.Mvc.OkObjectResult>(again);
+            fx.Context.ChangeTracker.Clear();
+            Assert.Equal(after.ImageUrl, fx.Context.Products.Single(p => p.ProductId == product.ProductId).ImageUrl);
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    private sealed class AlwaysAdminAuthHandler : Microsoft.AspNetCore.Authentication.AuthenticationHandler<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions>
+    {
+        public AlwaysAdminAuthHandler(
+            Microsoft.Extensions.Options.IOptionsMonitor<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions> options,
+            Microsoft.Extensions.Logging.ILoggerFactory logger,
+            System.Text.Encodings.Web.UrlEncoder encoder) : base(options, logger, encoder) { }
+
+        protected override Task<Microsoft.AspNetCore.Authentication.AuthenticateResult> HandleAuthenticateAsync()
+        {
+            var identity = new System.Security.Claims.ClaimsIdentity(new[]
+            {
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.NameIdentifier, "1"),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "ADMIN")
+            }, "Test");
+            var ticket = new Microsoft.AspNetCore.Authentication.AuthenticationTicket(new System.Security.Claims.ClaimsPrincipal(identity), "Test");
+            return Task.FromResult(Microsoft.AspNetCore.Authentication.AuthenticateResult.Success(ticket));
+        }
+    }
+
+    [Fact]
+    public async Task Http_ProductCreateThenUpdate_MultipartWithImages_ReturnsOk_OnRealKestrelPipeline()
+    {
+        var tmp = Path.Combine(Path.GetTempPath(), "pos_http_" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(Path.Combine(tmp, "images", "products"));
+        try
+        {
+            WebApi.Services.Helper.ConfigureWebRoot(tmp);
+            using var fx = new TestFixture();
+
+            var builder = Microsoft.AspNetCore.Builder.WebApplication.CreateBuilder();
+            builder.WebHost.UseUrls("http://127.0.0.1:0");
+            builder.Logging.ClearProviders();
+            builder.Services.AddDbContext<RestaurantPosContext>(o => o.UseSqlite(fx.Connection));
+            builder.Services.AddHttpContextAccessor();
+            builder.Services.AddScoped<SiteProvider>();
+            builder.Services.AddSignalR();
+            builder.Services.AddSingleton<WebApi.Services.PosRealtimeNotifier>();
+            builder.Services.AddControllers()
+                .AddApplicationPart(typeof(WebApi.Api.Controllers.ProductController).Assembly)
+                .AddJsonOptions(o => o.JsonSerializerOptions.ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles);
+            builder.Services.AddAuthentication("Test")
+                .AddScheme<Microsoft.AspNetCore.Authentication.AuthenticationSchemeOptions, AlwaysAdminAuthHandler>("Test", _ => { });
+            builder.Services.AddAuthorization();
+
+            await using var app = builder.Build();
+            app.UseAuthentication();
+            app.UseAuthorization();
+            app.MapControllers();
+            await app.StartAsync();
+            var baseUrl = app.Urls.First();
+            using var http = new HttpClient { BaseAddress = new Uri(baseUrl) };
+
+            short catId = fx.Context.Products.First().CategoryId;
+            byte[] png = { 0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0 };
+            byte[] jpg = { 0xFF, 0xD8, 0xFF, 0xE0, 0, 0, 0, 0, 0, 0, 0, 0 };
+
+            MultipartFormDataContent Form(string name, decimal price, string? imageUrl, params (string field, string file, byte[] bytes)[] files)
+            {
+                var form = new MultipartFormDataContent();
+                form.Add(new StringContent(catId.ToString()), "CategoryId");
+                form.Add(new StringContent(name), "ProductName");
+                form.Add(new StringContent(price.ToString(System.Globalization.CultureInfo.InvariantCulture)), "Price");
+                form.Add(new StringContent("Ly"), "Unit");
+                form.Add(new StringContent(""), "Description");
+                form.Add(new StringContent("false"), "IsFeatured");
+                form.Add(new StringContent("true"), "IsAvailable");
+                if (imageUrl != null) form.Add(new StringContent(imageUrl), "ImageUrl");
+                foreach (var f in files) form.Add(new ByteArrayContent(f.bytes), f.field, f.file);
+                return form;
+            }
+
+            // Tạo mới kèm ảnh
+            var create = await http.PostAsync("/api/product", Form("Món HTTP", 30000, null, ("files", "a.png", png), ("files", "b.png", png)));
+            var createBody = await create.Content.ReadAsStringAsync();
+            Assert.True(create.IsSuccessStatusCode, $"POST {(int)create.StatusCode}: {createBody}");
+            int id = System.Text.Json.JsonDocument.Parse(createBody).RootElement.GetProperty("product").GetProperty("productId").GetInt32();
+
+            // Cập nhật có ảnh mới
+            var upd1 = await http.PutAsync($"/api/product/{id}", Form("Món HTTP sửa", 31000, null, ("files", "c.jpg", jpg)));
+            var upd1Body = await upd1.Content.ReadAsStringAsync();
+            Assert.True(upd1.IsSuccessStatusCode, $"PUT(ảnh) {(int)upd1.StatusCode}: {upd1Body}");
+
+            // Cập nhật không đổi ảnh (giữ ImageUrl hiện tại như app gửi)
+            fx.Context.ChangeTracker.Clear();
+            var current = fx.Context.Products.Single(p => p.ProductId == id).ImageUrl;
+            var upd2 = await http.PutAsync($"/api/product/{id}", Form("Món HTTP sửa 2", 32000, current));
+            var upd2Body = await upd2.Content.ReadAsStringAsync();
+            Assert.True(upd2.IsSuccessStatusCode, $"PUT(giữ ảnh) {(int)upd2.StatusCode}: {upd2Body}");
+
+            // Cập nhật bằng 1 ảnh qua trường "file" (đường đơn)
+            var upd3 = await http.PutAsync($"/api/product/{id}", Form("Món HTTP sửa 3", 33000, null, ("file", "d.png", png)));
+            var upd3Body = await upd3.Content.ReadAsStringAsync();
+            Assert.True(upd3.IsSuccessStatusCode, $"PUT(file) {(int)upd3.StatusCode}: {upd3Body}");
+
+            await app.StopAsync();
+        }
+        finally
+        {
+            try { Directory.Delete(tmp, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task OrderType_DineIn_RequiresTable()
+    {
+        using var fx = new TestFixture();
+        var repo = new OrderRepository(fx.Context);
+        var res = await repo.CreateOrderAsync(new CreateOrderDto
+        {
+            OrderType = 1,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.False(res.Success);
+        Assert.Contains("phải chọn bàn", res.Message);
+    }
+
+    [Fact]
+    public async Task OrderType_Takeaway_IgnoresTable_And_LeavesTableFree()
+    {
+        using var fx = new TestFixture();
+        var repo = new OrderRepository(fx.Context);
+        var res = await repo.CreateOrderAsync(new CreateOrderDto
+        {
+            OrderType = 2,
+            TableId = 1,
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(res.Success, res.Message);
+        Assert.Null(res.Order!.TableId);
+        fx.Context.ChangeTracker.Clear();
+        Assert.Equal(0, (await fx.Context.DiningTables.FindAsync(1))!.Status);
+    }
+
+    [Fact]
+    public async Task OrderType_Delivery_RequiresPhoneAndAddress_AndStoresAddress()
+    {
+        using var fx = new TestFixture();
+        var repo = new OrderRepository(fx.Context);
+        var items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } };
+
+        var noPhone = await repo.CreateOrderAsync(new CreateOrderDto { OrderType = 3, DeliveryAddress = "12 Lê Lợi", Items = items }, authenticatedAccountId: 2);
+        Assert.False(noPhone.Success);
+        Assert.Contains("số điện thoại", noPhone.Message);
+
+        var noAddr = await repo.CreateOrderAsync(new CreateOrderDto { OrderType = 3, PhoneNumber = "0901234567", Items = items }, authenticatedAccountId: 2);
+        Assert.False(noAddr.Success);
+        Assert.Contains("địa chỉ", noAddr.Message);
+
+        var ok = await repo.CreateOrderAsync(new CreateOrderDto { OrderType = 3, PhoneNumber = "0901234567", DeliveryAddress = "12 Lê Lợi", Items = items }, authenticatedAccountId: 2);
+        Assert.True(ok.Success, ok.Message);
+        Assert.Equal("12 Lê Lợi", ok.Order!.DeliveryAddress);
+        Assert.Null(ok.Order.TableId);
+    }
+
+    [Fact]
+    public async Task OrderType_Delivery_OfflineLegacy_AddressParsedFromNote()
+    {
+        using var fx = new TestFixture();
+        var repo = new OrderRepository(fx.Context);
+        var res = await repo.CreateOrderAsync(new CreateOrderDto
+        {
+            OrderType = 3,
+            PhoneNumber = "0901234567",
+            Note = "Giao tới: 5 Nguyễn Huệ | ít đá",
+            Items = new List<CreateOrderItemDto> { new() { ProductId = 1, Quantity = 1 } }
+        }, authenticatedAccountId: 2);
+        Assert.True(res.Success, res.Message);
+        Assert.Equal("5 Nguyễn Huệ", res.Order!.DeliveryAddress);
     }
 
     [Fact]
@@ -295,7 +811,7 @@ public class BusinessLogicUpgradeTests
         Assert.Contains("Deposit", orderRes.Order.PaymentMethods);
 
         // Finalize 0đ remaining completes order cleanly
-        var finalize = await payRepo.ProcessPaymentAsync(orderRes.Order.OrderId, "Cash", 0m, null, null, 2);
+        var finalize = await payRepo.ProcessPaymentAsync(orderRes.Order.OrderId, "Cash", 0m, null, null, 2, allowUnserved: true);
         Assert.True(finalize.Success);
         Assert.True(finalize.Payment!.IsFullyPaid);
         Assert.Equal(3, (await fx.Context.Orders.FindAsync(orderRes.Order.OrderId))!.Status);
@@ -455,7 +971,7 @@ public class BusinessLogicUpgradeTests
         Assert.False(blockedCancel.Success);
 
         // Pay remaining 50,000đ by Cash via Cashier 1 (Account 2) -> awards +90 loyalty pts to Member 8
-        var finalCash = await payRepo.ProcessPaymentAsync(staffOrder.Order.OrderId, "Cash", 50000m, null, null, processedByAccountId: 2);
+        var finalCash = await payRepo.ProcessPaymentAsync(staffOrder.Order.OrderId, "Cash", 50000m, null, null, processedByAccountId: 2, allowUnserved: true);
         Assert.True(finalCash.Success);
         Assert.True(finalCash.Payment!.IsFullyPaid);
 
@@ -501,7 +1017,7 @@ public class BusinessLogicUpgradeTests
         }, authenticatedAccountId: 2);
         Assert.True(paid.Success);
 
-        var payRes = await payRepo.ProcessPaymentAsync(paid.Order!.OrderId, "Cash", paid.Order.FinalAmount, null, null, 2);
+        var payRes = await payRepo.ProcessPaymentAsync(paid.Order!.OrderId, "Cash", paid.Order.FinalAmount, null, null, 2, allowUnserved: true);
         Assert.True(payRes.Success);
 
         var top = await orderRepo.GetTopSellingProductsAsync();

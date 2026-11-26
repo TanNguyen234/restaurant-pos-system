@@ -23,6 +23,9 @@ IF COL_LENGTH('Accounts', 'EmailVerificationExpiry') IS NULL
 IF COL_LENGTH('Products', 'AutoDisabledByStock') IS NULL
     ALTER TABLE Products ADD AutoDisabledByStock BIT NOT NULL CONSTRAINT DF_Products_AutoDisabledByStock DEFAULT 0;
 
+IF COL_LENGTH('Orders', 'DeliveryAddress') IS NULL
+    ALTER TABLE Orders ADD DeliveryAddress NVARCHAR(500) NULL;
+
 IF COL_LENGTH('Orders', 'GuestAccessToken') IS NULL
     ALTER TABLE Orders ADD GuestAccessToken NVARCHAR(64) NULL;
 

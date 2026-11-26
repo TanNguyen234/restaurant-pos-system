@@ -31,6 +31,10 @@ public class CurrentShiftDto
     public decimal TotalRevenue => TotalCashSales + TotalTransferSales + TotalVnPaySales;
     public decimal ExpectedCash => InitialCash + TotalCashSales;
     public int TotalOrders { get; set; }
+    /// <summary>Số đơn mang về đã thu tiền trong ca; đã giao hết món / còn chờ phục vụ giao.</summary>
+    public int TakeawayOrders { get; set; }
+    public int TakeawayServed { get; set; }
+    public int TakeawayPending { get; set; }
     public decimal TotalDiscount { get; set; }
     public int Status { get; set; }
     public string? Note { get; set; }
@@ -53,12 +57,27 @@ public class ZReportDto
     public decimal ActualCashInDrawer { get; set; }
     public decimal Discrepancy { get; set; }
     public int TotalCompletedOrders { get; set; }
+    public int TakeawayOrders { get; set; }
+    public int TakeawayServed { get; set; }
+    public int TakeawayPending { get; set; }
     public string DiscrepancyNote => Discrepancy == 0 ? "Khớp két 100%" : (Discrepancy > 0 ? $"Dư tiền: +{Discrepancy:N0}đ" : $"Thiếu tiền: {Discrepancy:N0}đ");
 }
 
 public class ShiftRepository : BaseRepository
 {
     public ShiftRepository(RestaurantPosContext context) : base(context) { }
+
+    /// <summary>Đơn mang về (đã thu tiền trong ca, không tính đơn hủy): tổng, đã giao xong, còn chờ giao.</summary>
+    private async Task<(int Total, int Served, int Pending)> CountTakeawayAsync(List<int> orderIds)
+    {
+        if (orderIds.Count == 0) return (0, 0, 0);
+        var statuses = await context.Orders
+            .Where(o => orderIds.Contains(o.OrderId) && o.OrderType == 2 && o.Status != 4)
+            .Select(o => o.Status)
+            .ToListAsync();
+        int served = statuses.Count(s => s == 3);
+        return (statuses.Count, served, statuses.Count - served);
+    }
 
     private async Task<List<Payment>> GetShiftPaymentsAsync(Shift shift, DateTime endTime)
     {
@@ -103,6 +122,7 @@ public class ShiftRepository : BaseRepository
             ? await context.Orders.Where(o => orderIds.Contains(o.OrderId)).SumAsync(o => (decimal?)o.DiscountAmount) ?? 0
             : 0;
         var staff = await context.Accounts.FindAsync(shift.AccountId);
+        var takeaway = await CountTakeawayAsync(orderIds);
 
         return new CurrentShiftDto
         {
@@ -115,6 +135,9 @@ public class ShiftRepository : BaseRepository
             TotalTransferSales = transfer,
             TotalVnPaySales = vnpay,
             TotalOrders = orderIds.Count,
+            TakeawayOrders = takeaway.Total,
+            TakeawayServed = takeaway.Served,
+            TakeawayPending = takeaway.Pending,
             TotalDiscount = totalDiscount,
             Status = shift.Status,
             Note = shift.Note
@@ -185,6 +208,7 @@ public class ShiftRepository : BaseRepository
 
         var cashier = await context.Accounts.FindAsync(shift.AccountId);
 
+        var takeawayCounts = await CountTakeawayAsync(payments.Select(p => p.OrderId).Distinct().ToList());
         var report = new ZReportDto
         {
             ShiftId = shift.ShiftId,
@@ -200,7 +224,10 @@ public class ShiftRepository : BaseRepository
             ExpectedCashInDrawer = expectedCash,
             ActualCashInDrawer = dto.ActualCash,
             Discrepancy = discrepancy,
-            TotalCompletedOrders = payments.Select(p => p.OrderId).Distinct().Count()
+            TotalCompletedOrders = payments.Select(p => p.OrderId).Distinct().Count(),
+            TakeawayOrders = takeawayCounts.Total,
+            TakeawayServed = takeawayCounts.Served,
+            TakeawayPending = takeawayCounts.Pending
         };
 
         shift.ZReportJson = JsonSerializer.Serialize(report);

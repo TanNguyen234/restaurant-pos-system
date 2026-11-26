@@ -569,7 +569,9 @@ void main() {
     // -------------------------------------------------------------
     // BƯỚC 4: CHUYỂN SANG TAB GIỎ HÀNG (CART PAGE)
     // -------------------------------------------------------------
-    await tester.tap(find.text('Giỏ hàng'));
+    // Phục vụ không còn tab Giỏ hàng trên thanh điều hướng; giỏ hàng chỉ mở qua route khi cần
+    expect(find.descendant(of: find.byType(NavigationBar), matching: find.text('Giỏ hàng')), findsNothing);
+    tester.state<NavigatorState>(find.byType(Navigator).first).pushNamed('/cart');
     await tester.pumpAndSettle();
 
     expect(find.text('Giỏ hàng gọi món'), findsOneWidget);
