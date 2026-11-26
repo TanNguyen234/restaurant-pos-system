@@ -12,17 +12,31 @@ public class PaymentController : BaseController
 {
     private readonly IConfiguration _configuration;
     private readonly PosRealtimeNotifier _realtime;
+    private readonly IHttpClientFactory _httpClientFactory;
 
-    public PaymentController(IConfiguration configuration, PosRealtimeNotifier realtime)
+    public PaymentController(
+        IConfiguration configuration,
+        PosRealtimeNotifier realtime,
+        IHttpClientFactory httpClientFactory)
     {
         _configuration = configuration;
         _realtime = realtime;
+        _httpClientFactory = httpClientFactory;
     }
 
     private int? GetCallerAccountId()
     {
         var claim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
         return int.TryParse(claim, out int id) && id > 0 ? id : null;
+    }
+
+    private bool IsStaffUser() =>
+        User.IsInRole("ADMIN") || User.IsInRole("MANAGER") || User.IsInRole("CASHIER") || User.IsInRole("WAITER");
+
+    private string? ReadGuestToken()
+    {
+        var hdr = Request.Headers["X-Guest-Token"].FirstOrDefault();
+        return string.IsNullOrWhiteSpace(hdr) ? null : hdr.Trim();
     }
 
     [HttpPost("cash")]
@@ -88,9 +102,7 @@ public class PaymentController : BaseController
         });
     }
 
-    [HttpGet("vietqr/{orderId:int}")]
-    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
-    public async Task<IActionResult> GenerateVietQr(int orderId, [FromQuery] decimal? amount = null)
+    private async Task<IActionResult?> AuthorizeOrderPaymentAccessAsync(int orderId, string unauthMessage, string? queryGuestToken = null)
     {
         var order = await Provider.Order.GetOrderByIdAsync(orderId);
         if (order == null)
@@ -98,11 +110,30 @@ public class PaymentController : BaseController
             return NotFound(new { statusCode = 404, success = false, message = "Không tìm thấy đơn hàng" });
         }
 
-        bool isStaff = User.IsInRole("ADMIN") || User.IsInRole("MANAGER") || User.IsInRole("CASHIER") || User.IsInRole("WAITER");
-        if (!isStaff && order.AccountId.HasValue && GetCallerAccountId() != order.AccountId.Value)
+        if (!IsStaffUser())
         {
-            return Forbid();
+            int? callerId = GetCallerAccountId();
+            if (order.AccountId.HasValue)
+            {
+                if (!callerId.HasValue) return Unauthorized(new { statusCode = 401, success = false, message = unauthMessage });
+                if (order.AccountId.Value != callerId.Value) return Forbid();
+            }
+            else if (!await Provider.Order.VerifyGuestTokenAsync(orderId, ReadGuestToken() ?? queryGuestToken?.Trim()))
+            {
+                if (!callerId.HasValue) return Unauthorized(new { statusCode = 401, success = false, message = "Thiếu mã xác thực đơn khách vãng lai" });
+                return Forbid();
+            }
         }
+
+        return null;
+    }
+
+    [HttpGet("vietqr/{orderId:int}")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GenerateVietQr(int orderId, [FromQuery] decimal? amount = null)
+    {
+        var denied = await AuthorizeOrderPaymentAccessAsync(orderId, "Vui lòng đăng nhập để lấy mã VietQR");
+        if (denied != null) return denied;
 
         var result = await Provider.Payment.GenerateVietQrAsync(orderId, _configuration, amount);
         if (!result.Success)
@@ -119,9 +150,45 @@ public class PaymentController : BaseController
         });
     }
 
+    [HttpGet("vietqr/{orderId:int}/image")]
+    [AllowAnonymous]
+    public async Task<IActionResult> GetVietQrImage(
+        int orderId,
+        [FromQuery] decimal? amount = null,
+        [FromQuery] string? guestToken = null)
+    {
+        var denied = await AuthorizeOrderPaymentAccessAsync(orderId, "Vui lòng đăng nhập để tải mã QR thanh toán", guestToken);
+        if (denied != null) return denied;
+
+        var result = await Provider.Payment.GenerateVietQrAsync(orderId, _configuration, amount);
+        if (!result.Success || result.QrResult == null || string.IsNullOrWhiteSpace(result.QrResult.QrCodeUrl))
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = result.Message });
+        }
+
+        try
+        {
+            var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(8);
+            using var upstream = await client.GetAsync(result.QrResult.QrCodeUrl);
+            if (!upstream.IsSuccessStatusCode)
+            {
+                return StatusCode(StatusCodes.Status502BadGateway, new { statusCode = 502, success = false, message = "Không tải được ảnh QR từ cổng VietQR" });
+            }
+
+            var bytes = await upstream.Content.ReadAsByteArrayAsync();
+            var contentType = upstream.Content.Headers.ContentType?.MediaType ?? "image/png";
+            return File(bytes, contentType);
+        }
+        catch (Exception)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { statusCode = 502, success = false, message = "Lỗi kết nối máy chủ ảnh VietQR" });
+        }
+    }
+
     [HttpPost("vnpay/create-url")]
     [HttpPost("create-vnpay-url")]
-    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
+    [AllowAnonymous]
     public async Task<IActionResult> CreateVnPayUrl([FromBody] VnPayUrlRequestDto dto)
     {
         if (dto == null || dto.OrderId <= 0)
@@ -135,10 +202,19 @@ public class PaymentController : BaseController
             return NotFound(new { statusCode = 404, success = false, message = "Không tìm thấy đơn hàng" });
         }
 
-        bool isStaff = User.IsInRole("ADMIN") || User.IsInRole("MANAGER") || User.IsInRole("CASHIER") || User.IsInRole("WAITER");
-        if (!isStaff && order.AccountId.HasValue && GetCallerAccountId() != order.AccountId.Value)
+        if (!IsStaffUser())
         {
-            return Forbid();
+            int? callerId = GetCallerAccountId();
+            if (order.AccountId.HasValue)
+            {
+                if (!callerId.HasValue) return Unauthorized(new { statusCode = 401, success = false, message = "Vui lòng đăng nhập để thanh toán VNPay" });
+                if (order.AccountId.Value != callerId.Value) return Forbid();
+            }
+            else if (!await Provider.Order.VerifyGuestTokenAsync(dto.OrderId, ReadGuestToken()))
+            {
+                if (!callerId.HasValue) return Unauthorized(new { statusCode = 401, success = false, message = "Thiếu mã xác thực đơn khách vãng lai" });
+                return Forbid();
+            }
         }
 
         string? tmnCode = _configuration["VNPay:TmnCode"] ?? _configuration["VNP_TMN_CODE"];
@@ -152,7 +228,7 @@ public class PaymentController : BaseController
         }
 
         string clientIp = HttpContext.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1";
-        var result = await Provider.Payment.GenerateVnPayUrlAsync(dto.OrderId, tmnCode, hashSecret, vnpUrl, returnUrl, clientIp, dto.OrderInfo);
+        var result = await Provider.Payment.GenerateVnPayUrlAsync(dto.OrderId, tmnCode, hashSecret, vnpUrl, returnUrl, clientIp, dto.OrderInfo, dto.Amount);
         if (!result.Success)
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });

@@ -11,6 +11,11 @@ class DiningTable {
   final DateTime? orderCreatedAt;
   final double runningTotal;
   final int itemCount;
+  final int? nextReservationId;
+  final String? nextReservationCustomer;
+  final DateTime? nextReservationTime;
+  final DateTime? nextReservationExpiresAt;
+  final double? nextReservationDeposit;
 
   DiningTable({
     required this.id,
@@ -23,6 +28,11 @@ class DiningTable {
     this.orderCreatedAt,
     this.runningTotal = 0.0,
     this.itemCount = 0,
+    this.nextReservationId,
+    this.nextReservationCustomer,
+    this.nextReservationTime,
+    this.nextReservationExpiresAt,
+    this.nextReservationDeposit,
   });
 
   bool get isAvailable => status == 0;
@@ -148,6 +158,15 @@ class DiningTable {
           : null,
       runningTotal: (map['runningTotal'] as num?)?.toDouble() ?? 0.0,
       itemCount: (map['itemCount'] as num?)?.toInt() ?? 0,
+      nextReservationId: (map['nextReservationId'] as num?)?.toInt(),
+      nextReservationCustomer: map['nextReservationCustomer']?.toString(),
+      nextReservationTime: map['nextReservationTime'] != null
+          ? DateTime.tryParse(map['nextReservationTime'].toString())
+          : null,
+      nextReservationExpiresAt: map['nextReservationExpiresAt'] != null
+          ? DateTime.tryParse(map['nextReservationExpiresAt'].toString())
+          : null,
+      nextReservationDeposit: (map['nextReservationDeposit'] as num?)?.toDouble(),
     );
   }
 
@@ -163,6 +182,11 @@ class DiningTable {
       'orderCreatedAt': orderCreatedAt?.toIso8601String(),
       'runningTotal': runningTotal,
       'itemCount': itemCount,
+      'nextReservationId': nextReservationId,
+      'nextReservationCustomer': nextReservationCustomer,
+      'nextReservationTime': nextReservationTime?.toIso8601String(),
+      'nextReservationExpiresAt': nextReservationExpiresAt?.toIso8601String(),
+      'nextReservationDeposit': nextReservationDeposit,
     };
   }
 

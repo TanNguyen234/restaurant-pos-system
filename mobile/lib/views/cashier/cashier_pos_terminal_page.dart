@@ -53,7 +53,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
     _rtSub = PosRealtimeService.instance.events.listen((ev) {
       if (mounted && (ev.target == 'OrderEvent' || ev.target == 'TableUpdated')) {
         if (_selectedTable != null) {
-          _fetchTableOrder(_selectedTable!.id);
+          _fetchTableOrder(_selectedTable!.id, preserveUnsent: true);
         }
       }
     });
@@ -80,7 +80,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
       if (widget.initialTableId != null && allTables.isNotEmpty) {
         targetTable = allTables.firstWhere((t) => t.id == widget.initialTableId, orElse: () => allTables.first);
       } else if (allTables.isNotEmpty) {
-        final occupied = allTables.where((t) => t.status == 1).toList();
+        final occupied = allTables.where((t) => t.isOccupied).toList();
         targetTable = occupied.isNotEmpty ? occupied.first : allTables.first;
       }
 
@@ -105,14 +105,20 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
     }
   }
 
-  Future<void> _fetchTableOrder(int tableId) async {
+  Future<void> _fetchTableOrder(int tableId, {bool preserveUnsent = false}) async {
     final order = await TableRepository.getActiveOrderByTable(tableId);
     if (!mounted) return;
+    final unsentDrafts = preserveUnsent
+        ? _billItems.where((i) => i['isExisting'] != true).map((i) => Map<String, dynamic>.from(i)).toList()
+        : <Map<String, dynamic>>[];
+    final prevCash = preserveUnsent ? _customerCashTendered : 0.0;
+    final prevNumpad = preserveUnsent ? _numpadBuffer : '';
+
     setState(() {
       _activeOrder = order;
       _billItems.clear();
-      _numpadBuffer = '';
-      _customerCashTendered = 0.0;
+      _numpadBuffer = prevNumpad;
+      _customerCashTendered = prevCash;
       _discountPercent = 0.0;
       _discountAmount = (order?['discountAmount'] as num?)?.toDouble() ?? 0.0;
       _alreadyPaidAmount = (order?['paidAmount'] as num?)?.toDouble() ?? 0.0;
@@ -121,15 +127,24 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
         for (final raw in (order['details'] as List)) {
           final d = Map<String, dynamic>.from(raw as Map);
           if ((d['cookingStatus'] as num?)?.toInt() == 4) continue; // Bỏ qua món đã hủy
+          final rawMods = (d['modifiers'] as List? ?? [])
+              .whereType<Map>()
+              .map((m) => (m['modifierName'] ?? '').toString())
+              .where((s) => s.isNotEmpty)
+              .toList();
           _billItems.add({
             'orderDetailId': d['orderDetailId'] ?? d['id'],
             'productId': d['productId'] ?? 0,
             'name': d['productName'] ?? 'Món ăn',
             'price': (d['unitPrice'] ?? d['price'] as num?)?.toDouble() ?? 0.0,
             'quantity': (d['quantity'] as num?)?.toInt() ?? 1,
+            'modifierLabel': rawMods.join(', '),
             'isExisting': true,
           });
         }
+      }
+      if (unsentDrafts.isNotEmpty) {
+        _billItems.addAll(unsentDrafts);
       }
     });
   }
@@ -151,7 +166,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
     return change < 0 ? 0.0 : change;
   }
 
-  void _addItemToBill(Product product) {
+  Future<void> _addItemToBill(Product product) async {
     if (!product.isAvailable) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Món "${product.productName}" đang tạm hết!'), backgroundColor: const Color(0xFFDC2626)),
@@ -159,21 +174,214 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
       return;
     }
 
+    List<ProductAttribute> attrs = product.attributes;
+    if (attrs.isEmpty) {
+      try {
+        final detail = await ProductRepository.getProductDetail(product.productId);
+        attrs = detail.attributes;
+      } catch (_) {}
+    }
+    if (!mounted) return;
+
+    List<Map<String, dynamic>> chosenModifiers = [];
+    double unitPrice = product.price;
+    String modifierLabel = '';
+
+    if (attrs.isNotEmpty) {
+      final selectedIds = <int>{};
+      final groups = <String, List<ProductAttribute>>{};
+      for (final a in attrs) {
+        groups.putIfAbsent(a.attributeGroup, () => []).add(a);
+      }
+      // Chọn mặc định phương án đầu tiên của nhóm bắt buộc / Size
+      for (final entry in groups.entries) {
+        if (entry.value.any((a) => a.isRequired) || entry.key.toLowerCase() == 'size') {
+          selectedIds.add(entry.value.first.attributeId);
+        }
+      }
+
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (dCtx, setD) => AlertDialog(
+            backgroundColor: const Color(0xFF1E293B),
+            title: Text('Tùy chọn: ${product.productName}', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: groups.entries.map((entry) {
+                  final isSingleGroup = entry.key.toLowerCase() == 'size' || entry.value.any((a) => a.isRequired);
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(entry.key, style: const TextStyle(color: Color(0xFFF59E0B), fontWeight: FontWeight.bold, fontSize: 13)),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: entry.value.map((a) {
+                            final isSel = selectedIds.contains(a.attributeId);
+                            return FilterChip(
+                              selected: isSel,
+                              label: Text(
+                                a.extraPrice > 0
+                                    ? '${a.attributeName} (+${_currencyFormat.format(a.extraPrice)})'
+                                    : a.attributeName,
+                                style: TextStyle(color: isSel ? const Color(0xFF0F172A) : Colors.white, fontSize: 12),
+                              ),
+                              selectedColor: const Color(0xFFF59E0B),
+                              backgroundColor: const Color(0xFF0F172A),
+                              onSelected: (v) => setD(() {
+                                if (isSingleGroup) {
+                                  for (final item in entry.value) {
+                                    selectedIds.remove(item.attributeId);
+                                  }
+                                  selectedIds.add(a.attributeId);
+                                } else {
+                                  if (v) {
+                                    selectedIds.add(a.attributeId);
+                                  } else {
+                                    selectedIds.remove(a.attributeId);
+                                  }
+                                }
+                              }),
+                            );
+                          }).toList(),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Hủy', style: TextStyle(color: Colors.white70))),
+              FilledButton(
+                style: FilledButton.styleFrom(backgroundColor: const Color(0xFFF59E0B), foregroundColor: const Color(0xFF0F172A)),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Thêm vào hóa đơn', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (confirmed != true || !mounted) return;
+
+      final selectedAttrs = attrs.where((a) => selectedIds.contains(a.attributeId)).toList();
+      for (final a in selectedAttrs) {
+        unitPrice += a.extraPrice;
+        chosenModifiers.add({
+          'attributeId': a.attributeId,
+          'modifierName': '${a.attributeGroup}: ${a.attributeName}',
+          'extraPrice': a.extraPrice,
+        });
+      }
+      modifierLabel = selectedAttrs.map((a) => a.attributeName).join(', ');
+    }
+
+    final modKey = chosenModifiers.map((m) => m['attributeId']).join(',');
     setState(() {
-      final existingIndex = _billItems.indexWhere((i) => i['productId'] == product.productId && i['isExisting'] != true);
+      final existingIndex = _billItems.indexWhere(
+        (i) => i['productId'] == product.productId && i['isExisting'] != true && (i['modKey'] ?? '') == modKey,
+      );
       if (existingIndex != -1) {
         _billItems[existingIndex]['quantity'] = (_billItems[existingIndex]['quantity'] as int) + 1;
       } else {
         _billItems.add({
           'productId': product.productId,
           'name': product.productName,
-          'price': product.price,
+          'price': unitPrice,
           'quantity': 1,
+          'modifiers': chosenModifiers,
+          'modKey': modKey,
+          'modifierLabel': modifierLabel,
           'isExisting': false,
         });
       }
       _customerCashTendered = _remainingAmount;
     });
+  }
+
+  Future<void> _voidExistingItem(Map<String, dynamic> item) async {
+    final orderId = _activeOrder?['orderId'] ?? _activeOrder?['id'];
+    final detailId = item['orderDetailId'];
+    if (orderId is! int || detailId is! int) return;
+
+    final reasonCtrl = TextEditingController(text: 'Khách đổi ý / Hủy tại quầy');
+    final qty = (item['quantity'] as int?) ?? 1;
+    int voidQty = qty > 1 ? 1 : qty;
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dCtx, setD) => AlertDialog(
+          backgroundColor: const Color(0xFF1E293B),
+          title: Text('Hủy món: ${item['name']}', style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (qty > 1)
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Số lượng hủy:', style: TextStyle(color: Colors.white70)),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle_outline, color: Colors.white70),
+                          onPressed: voidQty > 1 ? () => setD(() => voidQty--) : null,
+                        ),
+                        Text('$voidQty / $qty', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        IconButton(
+                          icon: const Icon(Icons.add_circle_outline, color: Colors.white70),
+                          onPressed: voidQty < qty ? () => setD(() => voidQty++) : null,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              TextField(
+                controller: reasonCtrl,
+                style: const TextStyle(color: Colors.white),
+                decoration: const InputDecoration(
+                  labelText: 'Lý do hủy món',
+                  labelStyle: TextStyle(color: Color(0xFF94A3B8)),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Đóng', style: TextStyle(color: Colors.white70))),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: const Color(0xFFDC2626)),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('Xác nhận hủy món'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final res = await _orderRepo.voidOrderItem(
+      orderId: orderId,
+      orderDetailId: detailId,
+      reason: reasonCtrl.text.trim().isEmpty ? 'Hủy tại quầy POS' : reasonCtrl.text.trim(),
+      voidQuantity: voidQty,
+    );
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(res['message']?.toString() ?? 'Đã hủy món'),
+        backgroundColor: res['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+      ),
+    );
+    if (_selectedTable != null) {
+      await _fetchTableOrder(_selectedTable!.id, preserveUnsent: true);
+    }
   }
 
   void _onNumpadPress(String key) {
@@ -380,6 +588,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                 'productId': i['productId'],
                 'quantity': i['quantity'],
                 'unitPrice': i['price'],
+                if (i['modifiers'] is List && (i['modifiers'] as List).isNotEmpty) 'modifiers': i['modifiers'],
               })
           .toList(),
     });
@@ -408,7 +617,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
   Future<void> _showMergeTableModal() async {
     final current = _selectedTable;
     if (current == null || _activeOrder == null) return;
-    final candidates = _tables.where((t) => t.id != current.id && t.status == 1).toList();
+    final candidates = _tables.where((t) => t.id != current.id && t.isOccupied).toList();
     if (candidates.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Không có bàn có khách khác để gộp vào bàn này')),
@@ -745,6 +954,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
               'productId': i['productId'],
               'quantity': i['quantity'],
               'unitPrice': i['price'],
+              if (i['modifiers'] is List && (i['modifiers'] as List).isNotEmpty) 'modifiers': i['modifiers'],
             })
         .toList();
 
@@ -794,7 +1004,8 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
 
   Future<void> _settleCashPayment() async {
     if (_billItems.isEmpty) return;
-    if (_customerCashTendered < _remainingAmount) {
+    final tendered = _customerCashTendered;
+    if (tendered < _remainingAmount) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Số tiền khách đưa chưa đủ để thanh toán hóa đơn!'), backgroundColor: Color(0xFFDC2626)),
       );
@@ -808,7 +1019,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
       orderId: orderId,
       paymentMethod: 'Cash',
       amount: _remainingAmount,
-      note: 'Thanh toán tiền mặt tại POS Thu Ngân (Khách đưa: ${_currencyFormat.format(_customerCashTendered)})',
+      note: 'Thanh toán tiền mặt tại POS Thu Ngân (Khách đưa: ${_currencyFormat.format(tendered)})',
     );
     if (!mounted) return;
 
@@ -1078,6 +1289,13 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(item['name'].toString(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13), maxLines: 1, overflow: TextOverflow.ellipsis),
+                                if ((item['modifierLabel'] ?? '').toString().isNotEmpty)
+                                  Text(
+                                    item['modifierLabel'].toString(),
+                                    style: const TextStyle(color: Color(0xFFF59E0B), fontSize: 10.5),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
                                 Text(
                                   '${_currencyFormat.format(item['price'])} ${isExisting ? "• [Đã gửi bếp]" : "• [Mới thêm]"}',
                                   style: TextStyle(color: isExisting ? const Color(0xFF38BDF8) : const Color(0xFF94A3B8), fontSize: 11),
@@ -1095,19 +1313,31 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                                   } else {
                                     _billItems.removeAt(index);
                                   }
+                                  _customerCashTendered = _remainingAmount;
                                 });
                               },
                             ),
                             Text('${item['quantity']}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                             IconButton(
                               icon: const Icon(Icons.add_circle_outline, size: 18, color: Colors.white60),
-                              onPressed: () => setState(() => item['quantity'] = (item['quantity'] as int) + 1),
+                              onPressed: () => setState(() {
+                                item['quantity'] = (item['quantity'] as int) + 1;
+                                _customerCashTendered = _remainingAmount;
+                              }),
                             ),
-                          ] else
+                          ] else ...[
+                            IconButton(
+                              icon: const Icon(Icons.cancel_outlined, size: 17, color: Color(0xFFF87171)),
+                              tooltip: 'Hủy món (Void)',
+                              padding: EdgeInsets.zero,
+                              constraints: const BoxConstraints(),
+                              onPressed: () => _voidExistingItem(item),
+                            ),
                             Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 10),
+                              padding: const EdgeInsets.symmetric(horizontal: 8),
                               child: Text('x${item['quantity']}', style: const TextStyle(color: Color(0xFFF59E0B), fontWeight: FontWeight.bold)),
                             ),
+                          ],
                           Text(_currencyFormat.format(sub), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
                         ],
                       );
@@ -1282,7 +1512,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: _selectedTable!.status == 1 ? const Color(0xFFDC2626) : const Color(0xFF059669),
+                        color: _selectedTable!.isOccupied ? const Color(0xFFDC2626) : const Color(0xFF059669),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
@@ -1425,7 +1655,7 @@ class _CashierPosTerminalPageState extends State<CashierPosTerminalPage> {
                 itemCount: _tables.length,
                 itemBuilder: (context, i) {
                   final t = _tables[i];
-                  final isOcc = t.status == 1;
+                  final isOcc = t.isOccupied;
                   return InkWell(
                     onTap: () {
                       Navigator.pop(ctx);

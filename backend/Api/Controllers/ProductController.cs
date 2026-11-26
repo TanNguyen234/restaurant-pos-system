@@ -17,6 +17,14 @@ public class ProductFormDto
     public bool IsFeatured { get; set; } = false;
 }
 
+public class ProductAttributeFormDto
+{
+    public string AttributeGroup { get; set; } = "Size";
+    public string AttributeName { get; set; } = string.Empty;
+    public decimal ExtraPrice { get; set; } = 0;
+    public bool IsRequired { get; set; } = false;
+}
+
 [ApiController]
 [Route("api/[controller]")]
 public class ProductController : BaseController
@@ -239,6 +247,7 @@ public class ProductController : BaseController
             existing.Unit = string.IsNullOrWhiteSpace(dto.Unit) ? existing.Unit : dto.Unit.Trim();
             existing.Description = dto.Description?.Trim();
             existing.IsAvailable = dto.IsAvailable;
+            existing.AutoDisabledByStock = false;
             existing.IsFeatured = dto.IsFeatured;
 
             await Provider.Product.UpdateAsync(existing);
@@ -403,6 +412,7 @@ public class ProductController : BaseController
         }
 
         product.IsAvailable = !product.IsAvailable;
+        product.AutoDisabledByStock = false;
         product.UpdatedAt = DateTime.Now;
         await Provider.Product.UpdateAsync(product);
 
@@ -417,6 +427,25 @@ public class ProductController : BaseController
             isAvailable = product.IsAvailable,
             data = product
         });
+    }
+
+    [HttpPost("{id:int}/attributes")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> AddAttribute(int id, [FromBody] ProductAttributeFormDto dto)
+    {
+        if (dto == null) return BadRequest(new { statusCode = 400, success = false, message = "Dữ liệu không hợp lệ" });
+        var res = await Provider.Product.AddAttributeAsync(id, dto.AttributeGroup, dto.AttributeName, dto.ExtraPrice, dto.IsRequired);
+        if (!res.Success) return BadRequest(new { statusCode = 400, success = false, message = res.Message });
+        return Ok(new { statusCode = 200, success = true, message = res.Message, data = res.Attribute });
+    }
+
+    [HttpDelete("attributes/{attrId:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> DeleteAttribute(int attrId)
+    {
+        var res = await Provider.Product.DeleteAttributeAsync(attrId);
+        if (!res.Success) return BadRequest(new { statusCode = 400, success = false, message = res.Message });
+        return Ok(new { statusCode = 200, success = true, message = res.Message });
     }
 
     private static void CollectLocalImages(string? imageUrl, List<string> target)

@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
@@ -8,16 +9,28 @@ namespace WebApi.Api.Controllers;
 [Route("api/[controller]")]
 public class DiscountController : BaseController
 {
+    private int? GetCallerAccountId()
+    {
+        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        return int.TryParse(claim, out int id) && id > 0 ? id : null;
+    }
+
     [HttpGet("active")]
     [AllowAnonymous]
     public async Task<IActionResult> GetActiveDiscounts()
     {
         var discounts = await Provider.Discount.GetActiveDiscountsAsync();
+        int? accountId = GetCallerAccountId();
+        var ownedCounts = accountId.HasValue
+            ? await Provider.Discount.GetOwnedVoucherCountsAsync(accountId.Value)
+            : new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
         return Ok(new
         {
             statusCode = 200,
             success = true,
             total = discounts.Count,
+            ownedCounts,
             data = discounts
         });
     }
@@ -31,7 +44,7 @@ public class DiscountController : BaseController
             return BadRequest(new { statusCode = 400, success = false, message = "Vui lòng nhập mã giảm giá" });
         }
 
-        var result = await Provider.Discount.ValidateDiscountAsync(request.Code, request.OrderAmount);
+        var result = await Provider.Discount.ValidateDiscountAsync(request.Code, request.OrderAmount, GetCallerAccountId());
         if (!result.IsValid)
         {
             return BadRequest(new

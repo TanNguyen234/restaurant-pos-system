@@ -273,4 +273,50 @@ class ProductRepository {
       return {'success': false, 'message': 'Không thể cập nhật trạng thái món: $e'};
     }
   }
+
+  /// Thêm thuộc tính Size / Topping cho món (POST /api/product/{id}/attributes)
+  static Future<Map<String, dynamic>> addAttribute({
+    required int productId,
+    required String attributeGroup,
+    required String attributeName,
+    double extraPrice = 0,
+    bool isRequired = false,
+  }) async {
+    try {
+      final res = await ApiConfig.post(
+        Uri.parse('$baseUrl/$productId/attributes'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'attributeGroup': attributeGroup,
+          'attributeName': attributeName,
+          'extraPrice': extraPrice,
+          'isRequired': isRequired,
+        }),
+      ).timeout(timeoutDuration);
+      final data = Map<String, dynamic>.from(jsonDecode(utf8.decode(res.bodyBytes)) as Map);
+      return {
+        'success': res.statusCode == 200 && data['success'] == true,
+        'message': data['message']?.toString() ?? (res.statusCode == 200 ? 'Đã thêm thuộc tính' : 'Thất bại'),
+        'data': data['data'],
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Lỗi thêm thuộc tính: $e'};
+    }
+  }
+
+  /// Xóa thuộc tính Size / Topping (DELETE /api/product/attributes/{attrId})
+  static Future<Map<String, dynamic>> deleteAttribute(int attrId) async {
+    try {
+      final res = await ApiConfig.delete(
+        Uri.parse('$baseUrl/attributes/$attrId'),
+      ).timeout(timeoutDuration);
+      final data = Map<String, dynamic>.from(jsonDecode(utf8.decode(res.bodyBytes)) as Map);
+      return {
+        'success': res.statusCode == 200 && data['success'] == true,
+        'message': data['message']?.toString() ?? (res.statusCode == 200 ? 'Đã xóa thuộc tính' : 'Thất bại'),
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Lỗi xóa thuộc tính: $e'};
+    }
+  }
 }

@@ -7,6 +7,7 @@ import '../../models/product.dart';
 import '../../repositories/order_repository.dart';
 import '../../repositories/product_repository.dart';
 import '../../services/realtime_service.dart';
+import '../../utils/category_helper.dart';
 
 class KitchenDisplayPage extends StatefulWidget {
   const KitchenDisplayPage({super.key});
@@ -60,7 +61,7 @@ class _KitchenDisplayPageState extends State<KitchenDisplayPage> {
 
   bool _isDrinkItem(KdsItemModel item) {
     if (item.categoryId > 0) {
-      return item.categoryId <= 4; // 1: Cà phê, 2: Trà sữa, 3: Trà trái cây, 4: Đá xay
+      return isDrinkCategory(item.categoryId);
     }
     final lower = item.productName.toLowerCase();
     return lower.contains('cà phê') ||

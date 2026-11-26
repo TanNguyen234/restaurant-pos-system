@@ -86,6 +86,15 @@ public class KdsController : BaseController
 
         await _realtime.NotifyKdsChangedAsync(new { orderDetailId, voided = true });
         await _realtime.NotifyOrderChangedAsync("OrderVoided", result.Order);
+        if (Provider.Order.LastAvailabilityChanges.Count > 0)
+        {
+            await _realtime.NotifyInventoryAlertAsync(new
+            {
+                action = "KdsVoidStockSync",
+                availabilityChanges = Provider.Order.LastAvailabilityChanges
+            });
+            await _realtime.NotifyKdsChangedAsync(new { availabilityChanges = Provider.Order.LastAvailabilityChanges });
+        }
 
         return Ok(new
         {

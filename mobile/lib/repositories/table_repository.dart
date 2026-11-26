@@ -189,6 +189,8 @@ class TableRepository {
     required String phoneNumber,
     int guestCount = 2,
     DateTime? arrivalTime,
+    int durationMinutes = 120,
+    int holdGraceMinutes = 30,
     double? depositAmount,
     String? note,
   }) async {
@@ -204,6 +206,8 @@ class TableRepository {
               'phoneNumber': phoneNumber,
               'guestCount': guestCount,
               'arrivalTime': (arrivalTime ?? DateTime.now().add(const Duration(hours: 2))).toIso8601String(),
+              'durationMinutes': durationMinutes,
+              'holdGraceMinutes': holdGraceMinutes,
               'depositAmount': depositAmount ?? 0,
               'note': note,
             }),

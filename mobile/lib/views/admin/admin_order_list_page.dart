@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../models/order.dart';
 import '../../repositories/order_repository.dart';
+import '../../services/csv_export_service.dart';
 import '../../services/realtime_service.dart';
 import '../../widgets/revenue_charts.dart';
 import '../../widgets/skeleton_loading.dart';
@@ -67,7 +68,11 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
       );
       Map<String, dynamic>? analyticsData;
       try {
-        analyticsData = await _orderRepo.getAnalytics(days: 7);
+        analyticsData = await _orderRepo.getAnalytics(
+          days: 7,
+          fromDate: _selectedDateRange?.start,
+          toDate: _selectedDateRange?.end,
+        );
       } catch (_) {}
 
       if (!mounted) return;
@@ -276,40 +281,56 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
     );
   }
 
-  Future<void> _exportCsvDialog() async {
+  Future<void> _exportCsvFile() async {
     try {
-      final csv = await _orderRepo.exportOrdersCsv(
+      final bundle = await _orderRepo.exportOrdersCsvBytes(
         fromDate: _selectedDateRange?.start,
         toDate: _selectedDateRange?.end,
         status: _selectedStatus,
+        search: _searchController.text.trim(),
+      );
+      final exportRes = await CsvExportService.saveOrShareCsv(
+        fileName: bundle.fileName,
+        bytes: bundle.bytes,
       );
       if (!mounted) return;
-      final lineCount = csv.trim().split('\n').length;
-      showDialog(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          title: Text('Xuất báo cáo CSV ($lineCount dòng)'),
-          content: SizedBox(
-            width: 520,
-            height: 260,
-            child: SingleChildScrollView(
-              child: SelectableText(csv, style: const TextStyle(fontFamily: 'Courier', fontSize: 11.5)),
-            ),
+      final lineCount = bundle.csvText.trim().split('\n').length;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('${exportRes.message} ($lineCount dòng)'),
+          backgroundColor: exportRes.savedAsFile ? const Color(0xFF059669) : const Color(0xFF0F172A),
+          duration: const Duration(seconds: 5),
+          action: SnackBarAction(
+            label: 'Xem / Copy',
+            textColor: const Color(0xFFFDE68A),
+            onPressed: () {
+              if (!mounted) return;
+              showDialog(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Text('${bundle.fileName} ($lineCount dòng)'),
+                  content: SizedBox(
+                    width: 560,
+                    height: 280,
+                    child: SingleChildScrollView(
+                      child: SelectableText(bundle.csvText, style: const TextStyle(fontFamily: 'Courier', fontSize: 11.5)),
+                    ),
+                  ),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Đóng')),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.copy, size: 16),
+                      label: const Text('Sao chép CSV'),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: bundle.csvText));
+                        Navigator.pop(ctx);
+                      },
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Đóng')),
-            FilledButton.icon(
-              icon: const Icon(Icons.copy, size: 16),
-              label: const Text('Sao chép CSV'),
-              onPressed: () {
-                Clipboard.setData(ClipboardData(text: csv));
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Đã sao chép dữ liệu CSV vào Clipboard!')),
-                );
-              },
-            ),
-          ],
         ),
       );
     } catch (e) {
@@ -471,7 +492,7 @@ class _AdminOrderListPageState extends State<AdminOrderListPage> {
           ],
         ),
         actions: [
-          IconButton(icon: const Icon(Icons.download_outlined), tooltip: 'Xuất CSV (Excel)', onPressed: _exportCsvDialog),
+          IconButton(icon: const Icon(Icons.download_outlined), tooltip: 'Tải file CSV (Excel)', onPressed: _exportCsvFile),
           IconButton(icon: const Icon(Icons.refresh_rounded), tooltip: 'Tải lại', onPressed: _loadOrders),
         ],
       ),

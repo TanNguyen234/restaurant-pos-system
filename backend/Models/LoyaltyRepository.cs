@@ -10,6 +10,7 @@ public class LoyaltyProfileDto
     public string Tier { get; set; } = "MEMBER";
     public List<Discount> AvailableVouchers { get; set; } = new();
     public List<string> RedeemedVoucherCodes { get; set; } = new();
+    public Dictionary<string, int> VoucherBalances { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public List<LoyaltyTransaction> History { get; set; } = new();
 }
 
@@ -45,13 +46,17 @@ public class LoyaltyRepository : BaseRepository
             .Take(20)
             .ToListAsync();
 
-        var redeemedCodes = await context.LoyaltyTransactions
-            .Where(t => t.AccountId == accountId && t.Type == "REDEEM" && t.VoucherCode != null)
-            .Select(t => t.VoucherCode!)
-            .Distinct()
+        var unusedVouchers = await context.AccountVouchers
+            .Where(av => av.AccountId == accountId && av.Status == 0)
             .ToListAsync();
 
-        // Free 0-point welcome vouchers are available to everyone automatically
+        var balances = unusedVouchers
+            .GroupBy(av => av.VoucherCode.ToUpperInvariant())
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+
+        var redeemedCodes = balances.Keys.ToList();
+
+        // Mã khuyến mãi công khai (PointsCost == 0) khả dụng cho mọi tài khoản
         foreach (var freeCode in vouchers.Where(v => v.PointsCost == 0).Select(v => v.Code))
         {
             if (!redeemedCodes.Contains(freeCode, StringComparer.OrdinalIgnoreCase))
@@ -68,6 +73,7 @@ public class LoyaltyRepository : BaseRepository
             Tier = ResolveTier(account.LoyaltyPoints, role?.RoleCode),
             AvailableVouchers = vouchers,
             RedeemedVoucherCodes = redeemedCodes,
+            VoucherBalances = balances,
             History = history
         };
     }
@@ -83,16 +89,17 @@ public class LoyaltyRepository : BaseRepository
             var account = await context.Accounts.FindAsync(accountId);
             if (account == null) return (false, "Không tìm thấy tài khoản hội viên", 0, null);
 
-            string norm = code.Trim().ToUpper();
+            string norm = code.Trim().ToUpperInvariant();
             var voucher = await context.Discounts
                 .FirstOrDefaultAsync(d => d.Code.ToUpper() == norm && d.IsActive && (d.ExpiryDate == null || d.ExpiryDate >= DateTime.Now));
             if (voucher == null) return (false, "Mã ưu đãi không tồn tại hoặc đã hết hạn", account.LoyaltyPoints, null);
 
-            bool alreadyRedeemed = voucher.PointsCost == 0 || await context.LoyaltyTransactions
-                .AnyAsync(t => t.AccountId == accountId && t.Type == "REDEEM" && t.VoucherCode == voucher.Code);
-            if (alreadyRedeemed)
+            if (voucher.MaxUsageCount.HasValue && voucher.UsedCount >= voucher.MaxUsageCount.Value)
+                return (false, $"Mã ưu đãi '{voucher.Code}' đã hết lượt phát hành", account.LoyaltyPoints, null);
+
+            if (voucher.PointsCost <= 0)
             {
-                return (true, $"Mã '{voucher.Code}' đã có sẵn trong ví ưu đãi của bạn!", account.LoyaltyPoints, voucher.Code);
+                return (true, $"Mã '{voucher.Code}' miễn phí điểm — bạn có thể dùng trực tiếp khi thanh toán!", account.LoyaltyPoints, voucher.Code);
             }
 
             if (account.LoyaltyPoints < voucher.PointsCost)
@@ -108,14 +115,23 @@ public class LoyaltyRepository : BaseRepository
                 PointsDelta = -voucher.PointsCost,
                 Type = "REDEEM",
                 VoucherCode = voucher.Code,
-                Description = $"Đổi {voucher.PointsCost} PTS lấy voucher {voucher.Code}",
+                Description = $"Đổi {voucher.PointsCost} PTS lấy 1 lượt voucher {voucher.Code}",
                 CreatedAt = DateTime.Now
+            });
+
+            context.AccountVouchers.Add(new AccountVoucher
+            {
+                AccountId = accountId,
+                DiscountId = voucher.DiscountId,
+                VoucherCode = voucher.Code,
+                Status = 0,
+                RedeemedAt = DateTime.Now
             });
 
             await context.SaveChangesAsync();
             await tx.CommitAsync();
 
-            return (true, $"Đổi thành công voucher '{voucher.Code}' (-{voucher.PointsCost} PTS)!", account.LoyaltyPoints, voucher.Code);
+            return (true, $"Đổi thành công 1 lượt voucher '{voucher.Code}' (-{voucher.PointsCost} PTS)!", account.LoyaltyPoints, voucher.Code);
         }
         catch (Exception)
         {

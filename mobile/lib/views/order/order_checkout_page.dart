@@ -53,6 +53,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
   double _discountAmount = 0.0;
   bool _isValidatingVoucher = false;
   List<Map<String, dynamic>> _availableDiscounts = [];
+  Map<String, int> _ownedVoucherCounts = {};
   bool _isLoadingDiscounts = false;
 
   @override
@@ -98,6 +99,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
 
       final cart = await _dbHelper.getCartItems();
       List<Map<String, dynamic>> discounts = [];
+      Map<String, int> ownedCounts = {};
       try {
         final res = await ApiConfig.get(Uri.parse('${ApiConfig.baseUrl}/api/discount/active'))
             .timeout(const Duration(seconds: 5));
@@ -106,6 +108,11 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
           final rawList = decoded is List
               ? decoded
               : (decoded is Map ? (decoded['data'] ?? decoded['items'] ?? []) : []);
+          if (decoded is Map && decoded['ownedCounts'] is Map) {
+            (decoded['ownedCounts'] as Map).forEach((k, v) {
+              ownedCounts[k.toString().toUpperCase()] = (v as num?)?.toInt() ?? 0;
+            });
+          }
           if (rawList is List) {
             discounts = rawList
                 .whereType<Map>()
@@ -122,6 +129,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
         _tables = tables;
         _cartItems = List<Map<String, dynamic>>.from(cart);
         _availableDiscounts = discounts;
+        _ownedVoucherCounts = ownedCounts;
         _isLoadingDiscounts = false;
         if (_selectedTableId == null && tables.isNotEmpty) {
           _selectedTableId = (emptyTable.isNotEmpty ? emptyTable.first : tables.first).id;
@@ -152,20 +160,24 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
   double get _discount => _discountAmount;
   double get _finalAmount => (_subtotal - _discount) < 0 ? 0.0 : (_subtotal - _discount);
 
-  ({bool eligible, double missingAmount, double estimatedSavings}) _computeVoucherPreview(
+  ({bool eligible, bool needsRedeem, int pointsCost, double missingAmount, double estimatedSavings}) _computeVoucherPreview(
     Map<String, dynamic> d,
   ) {
+    final code = (d['code'] ?? '').toString().trim().toUpperCase();
     final minOrder = (d['minOrderAmount'] as num?)?.toDouble() ?? 0.0;
     final pct = (d['discountPercent'] as num?)?.toDouble() ?? 0.0;
     final amt = (d['discountAmount'] as num?)?.toDouble() ?? 0.0;
     final maxDisc = (d['maxDiscountAmount'] as num?)?.toDouble() ?? 0.0;
+    final pointsCost = (d['pointsCost'] as num?)?.toInt() ?? 0;
 
-    final eligible = _subtotal >= minOrder;
+    final owned = _ownedVoucherCounts[code] ?? 0;
+    final needsRedeem = pointsCost > 0 && owned <= 0;
+    final eligible = !needsRedeem && _subtotal >= minOrder;
     final missing = minOrder > _subtotal ? (minOrder - _subtotal) : 0.0;
     double est = pct > 0 ? (_subtotal * pct / 100.0) : amt;
     if (maxDisc > 0 && est > maxDisc) est = maxDisc;
     if (est > _subtotal) est = _subtotal;
-    return (eligible: eligible, missingAmount: missing, estimatedSavings: est);
+    return (eligible: eligible, needsRedeem: needsRedeem, pointsCost: pointsCost, missingAmount: missing, estimatedSavings: est);
   }
 
   void _clearAppliedVoucher() {
@@ -230,6 +242,7 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
   }
 
   Future<void> _submitOrder() async {
+    if (_isSubmitting) return;
     if (_cartItems.isEmpty) {
       showAutoDismissSnackBar(
         context,
@@ -846,9 +859,11 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              preview.eligible
-                                  ? '$badgeText • Tiết kiệm ${currencyFormatter.format(preview.estimatedSavings)}'
-                                  : '$badgeText • Đơn tối thiểu ${currencyFormatter.format(minOrder)} (thiếu ${currencyFormatter.format(preview.missingAmount)})',
+                              preview.needsRedeem
+                                  ? '$badgeText • Cần đổi ${preview.pointsCost} PTS ở mục Hội viên'
+                                  : preview.eligible
+                                      ? '$badgeText • Tiết kiệm ${currencyFormatter.format(preview.estimatedSavings)}'
+                                      : '$badgeText • Đơn tối thiểu ${currencyFormatter.format(minOrder)} (thiếu ${currencyFormatter.format(preview.missingAmount)})',
                               style: TextStyle(
                                 fontSize: 11.5,
                                 color: preview.eligible ? const Color(0xFF059669) : const Color(0xFFD97706),
@@ -861,7 +876,9 @@ class _OrderCheckoutPageState extends State<OrderCheckoutPage> {
                       Text(
                         isApplied
                             ? 'Đang dùng'
-                            : (preview.eligible ? 'Dùng ngay' : 'Chưa đủ'),
+                            : (preview.needsRedeem
+                                ? '${preview.pointsCost} PTS'
+                                : (preview.eligible ? 'Dùng ngay' : 'Chưa đủ')),
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,

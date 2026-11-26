@@ -25,7 +25,10 @@ public class RestaurantPosContext : DbContext
     public DbSet<LoyaltyTransaction> LoyaltyTransactions { get; set; } = null!;
     public DbSet<Ingredient> Ingredients { get; set; } = null!;
     public DbSet<ProductRecipe> ProductRecipes { get; set; } = null!;
+    public DbSet<ProductAttributeRecipe> ProductAttributeRecipes { get; set; } = null!;
     public DbSet<StockTransaction> StockTransactions { get; set; } = null!;
+    public DbSet<AccountVoucher> AccountVouchers { get; set; } = null!;
+    public DbSet<OrderIdempotencyKey> OrderIdempotencyKeys { get; set; } = null!;
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -61,6 +64,7 @@ public class RestaurantPosContext : DbContext
         modelBuilder.Entity<Ingredient>().Property(p => p.MinThreshold).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<Ingredient>().Property(p => p.CostPerUnit).HasColumnType("decimal(18,0)");
         modelBuilder.Entity<ProductRecipe>().Property(p => p.QuantityRequired).HasColumnType("decimal(18,2)");
+        modelBuilder.Entity<ProductAttributeRecipe>().Property(p => p.QuantityRequired).HasColumnType("decimal(18,2)");
         modelBuilder.Entity<StockTransaction>().Property(p => p.ChangeAmount).HasColumnType("decimal(18,2)");
     }
 }
@@ -91,6 +95,7 @@ public class Account
     public bool IsActive { get; set; } = true;
     public bool IsEmailVerified { get; set; } = false;
     public string? EmailVerificationToken { get; set; }
+    public DateTime? EmailVerificationExpiry { get; set; }
     public string? ResetPasswordToken { get; set; }
     public DateTime? ResetPasswordExpiry { get; set; }
     public string? OAuthProvider { get; set; }
@@ -156,6 +161,7 @@ public class Product
     public string? Description { get; set; }
     public string ImageUrl { get; set; } = null!;
     public bool IsAvailable { get; set; } = true;
+    public bool AutoDisabledByStock { get; set; } = false;
     public bool IsFeatured { get; set; } = false;
     public DateTime CreatedAt { get; set; } = DateTime.Now;
     public DateTime? UpdatedAt { get; set; }
@@ -180,6 +186,7 @@ public class Order
     public int OrderId { get; set; }
     public string OrderCode { get; set; } = null!;
     public string? IdempotencyKey { get; set; }
+    public string? GuestAccessToken { get; set; }
     public int? TableId { get; set; }
     public int? AccountId { get; set; }
     public string? CustomerName { get; set; }
@@ -234,6 +241,7 @@ public class OrderDetailModifier
     [Key]
     public int Id { get; set; }
     public int OrderDetailId { get; set; }
+    public int? AttributeId { get; set; }
     public string ModifierName { get; set; } = null!;
     public decimal ExtraPrice { get; set; } = 0;
 }
@@ -262,13 +270,19 @@ public class Reservation
     [Key]
     public int ReservationId { get; set; }
     public int TableId { get; set; }
+    public int? AccountId { get; set; }
     public string CustomerName { get; set; } = null!;
     public string PhoneNumber { get; set; } = null!;
     public int GuestCount { get; set; } = 2;
     public DateTime ArrivalTime { get; set; }
+    public int DurationMinutes { get; set; } = 120;
+    public int HoldGraceMinutes { get; set; } = 30;
+    public DateTime? ExpiresAt { get; set; }
     public decimal DepositAmount { get; set; } = 0;
+    public bool DepositApplied { get; set; } = false;
+    public int? CheckedInOrderId { get; set; }
     public string? Note { get; set; }
-    public int Status { get; set; } = 0; // 0: Pending, 1: Confirmed, 2: CheckedIn, 3: Cancelled
+    public int Status { get; set; } = 0; // 0: Pending, 1: Confirmed, 2: CheckedIn, 3: Cancelled, 4: NoShow
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 }
 
@@ -339,5 +353,38 @@ public class StockTransaction
     public decimal ChangeAmount { get; set; }
     public string Type { get; set; } = "IMPORT"; // IMPORT | ADJUST | DEDUCT | REFUND
     public string? Note { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.Now;
+}
+
+[Table("ProductAttributeRecipes")]
+public class ProductAttributeRecipe
+{
+    [Key]
+    public int AttributeRecipeId { get; set; }
+    public int AttributeId { get; set; }
+    public int IngredientId { get; set; }
+    public decimal QuantityRequired { get; set; }
+}
+
+[Table("AccountVouchers")]
+public class AccountVoucher
+{
+    [Key]
+    public int AccountVoucherId { get; set; }
+    public int AccountId { get; set; }
+    public int DiscountId { get; set; }
+    public string VoucherCode { get; set; } = string.Empty;
+    public int Status { get; set; } = 0; // 0: Available, 1: Used, 2: Expired
+    public DateTime RedeemedAt { get; set; } = DateTime.Now;
+    public DateTime? UsedAt { get; set; }
+    public int? UsedOrderId { get; set; }
+}
+
+[Table("OrderIdempotencyKeys")]
+public class OrderIdempotencyKey
+{
+    [Key]
+    public string IdempotencyKey { get; set; } = string.Empty;
+    public int OrderId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.Now;
 }

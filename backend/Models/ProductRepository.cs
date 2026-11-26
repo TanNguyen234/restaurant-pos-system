@@ -14,7 +14,11 @@ public class ProductDto
     public string ImageUrl { get; set; } = string.Empty;
     public List<string> Images { get; set; } = new();
     public bool IsAvailable { get; set; } = true;
+    public bool AutoDisabledByStock { get; set; } = false;
     public bool IsFeatured { get; set; } = false;
+    public int RecipeCount { get; set; } = 0;
+    public decimal EstimatedCogs { get; set; } = 0;
+    public int? MaxServings { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime? UpdatedAt { get; set; }
     public List<ProductAttributeDto> Attributes { get; set; } = new();
@@ -74,10 +78,74 @@ public class ProductRepository : BaseRepository
                    Description = p.Description,
                    ImageUrl = p.ImageUrl,
                    IsAvailable = p.IsAvailable,
+                   AutoDisabledByStock = p.AutoDisabledByStock,
                    IsFeatured = p.IsFeatured,
                    CreatedAt = p.CreatedAt,
                    UpdatedAt = p.UpdatedAt
                };
+    }
+
+    private async Task EnrichBomStatsAsync(List<ProductDto> items)
+    {
+        if (items.Count == 0) return;
+        var pids = items.Select(i => i.ProductId).Distinct().ToList();
+        var recipeRows = await (
+            from r in context.ProductRecipes
+            join ing in context.Ingredients on r.IngredientId equals ing.IngredientId
+            where pids.Contains(r.ProductId)
+            select new
+            {
+                r.ProductId,
+                r.QuantityRequired,
+                ing.CostPerUnit,
+                ing.CurrentStock,
+                ing.IsActive
+            }
+        ).ToListAsync();
+
+        var grouped = recipeRows.GroupBy(x => x.ProductId).ToDictionary(g => g.Key, g => g.ToList());
+
+        var attrRows = await context.ProductAttributes
+            .Where(a => pids.Contains(a.ProductId))
+            .OrderBy(a => a.AttributeGroup)
+            .ThenBy(a => a.ExtraPrice)
+            .ThenBy(a => a.AttributeId)
+            .Select(a => new ProductAttributeDto
+            {
+                AttributeId = a.AttributeId,
+                ProductId = a.ProductId,
+                AttributeGroup = a.AttributeGroup,
+                AttributeName = a.AttributeName,
+                ExtraPrice = a.ExtraPrice,
+                IsRequired = a.IsRequired
+            })
+            .ToListAsync();
+        var attrGrouped = attrRows.GroupBy(a => a.ProductId).ToDictionary(g => g.Key, g => g.ToList());
+
+        foreach (var dto in items)
+        {
+            if (dto.Attributes.Count == 0 && attrGrouped.TryGetValue(dto.ProductId, out var attrs))
+            {
+                dto.Attributes = attrs;
+            }
+            if (grouped.TryGetValue(dto.ProductId, out var rows) && rows.Count > 0)
+            {
+                dto.RecipeCount = rows.Count;
+                dto.EstimatedCogs = Math.Round(rows.Sum(x => x.QuantityRequired * x.CostPerUnit), 0);
+                int minServings = int.MaxValue;
+                foreach (var r in rows)
+                {
+                    if (!r.IsActive || r.QuantityRequired <= 0)
+                    {
+                        minServings = 0;
+                        break;
+                    }
+                    int possible = (int)Math.Floor(r.CurrentStock / r.QuantityRequired);
+                    if (possible < minServings) minServings = possible;
+                }
+                dto.MaxServings = minServings == int.MaxValue ? null : minServings;
+            }
+        }
     }
 
     public async Task<PagedResult<ProductDto>> GetPagedProductsAsync(
@@ -120,6 +188,7 @@ public class ProductRepository : BaseRepository
                                .Take(pageSize)
                                .ToListAsync();
         items.ForEach(PopulateImages);
+        await EnrichBomStatsAsync(items);
 
         return new PagedResult<ProductDto>
         {
@@ -140,6 +209,7 @@ public class ProductRepository : BaseRepository
             .Take(limit)
             .ToListAsync();
         items.ForEach(PopulateImages);
+        await EnrichBomStatsAsync(items);
         return items;
     }
 
@@ -153,6 +223,7 @@ public class ProductRepository : BaseRepository
         int totalItems = await query.CountAsync();
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
         items.ForEach(PopulateImages);
+        await EnrichBomStatsAsync(items);
 
         return new PagedResult<ProductDto>
         {
@@ -192,6 +263,7 @@ public class ProductRepository : BaseRepository
         int totalItems = await query.CountAsync();
         var items = await query.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
         items.ForEach(PopulateImages);
+        await EnrichBomStatsAsync(items);
 
         return new PagedResult<ProductDto>
         {
@@ -227,7 +299,49 @@ public class ProductRepository : BaseRepository
 
         dto.Attributes = attrs;
         PopulateImages(dto);
+        await EnrichBomStatsAsync(new List<ProductDto> { dto });
         return dto;
+    }
+
+    public async Task<(bool Success, string Message, ProductAttributeDto? Attribute)> AddAttributeAsync(
+        int productId, string attributeGroup, string attributeName, decimal extraPrice, bool isRequired)
+    {
+        var prod = await context.Products.FindAsync(productId);
+        if (prod == null) return (false, "Không tìm thấy món ăn", null);
+        if (string.IsNullOrWhiteSpace(attributeGroup) || string.IsNullOrWhiteSpace(attributeName))
+            return (false, "Nhóm thuộc tính và tên tùy chọn không được để trống", null);
+        if (extraPrice < 0) return (false, "Phụ thu không được âm", null);
+
+        var entity = new ProductAttribute
+        {
+            ProductId = productId,
+            AttributeGroup = attributeGroup.Trim(),
+            AttributeName = attributeName.Trim(),
+            ExtraPrice = extraPrice,
+            IsRequired = isRequired
+        };
+        context.ProductAttributes.Add(entity);
+        await context.SaveChangesAsync();
+
+        return (true, "Đã thêm tùy chọn cho món ăn", new ProductAttributeDto
+        {
+            AttributeId = entity.AttributeId,
+            ProductId = entity.ProductId,
+            AttributeGroup = entity.AttributeGroup,
+            AttributeName = entity.AttributeName,
+            ExtraPrice = entity.ExtraPrice,
+            IsRequired = entity.IsRequired
+        });
+    }
+
+    public async Task<(bool Success, string Message)> DeleteAttributeAsync(int attributeId)
+    {
+        var attr = await context.ProductAttributes.FindAsync(attributeId);
+        if (attr == null) return (false, "Không tìm thấy tùy chọn cần xóa");
+
+        context.ProductAttributes.Remove(attr);
+        await context.SaveChangesAsync();
+        return (true, $"Đã xóa tùy chọn '{attr.AttributeName}'");
     }
 
     public async Task<bool> HasOrdersAsync(int productId)

@@ -60,7 +60,8 @@ public class AuthController : BaseController
                 "[Bistro POS] Mã OTP xác thực Email tài khoản",
                 result.Account.FullName,
                 result.EmailOtp,
-                "Xác thực địa chỉ Email");
+                "Xác thực địa chỉ Email",
+                expiryMinutes: 15);
             emailSent = sendResult.Sent;
             emailNotice = sendResult.Message;
         }
@@ -248,7 +249,8 @@ public class AuthController : BaseController
             "[Bistro POS] Mã OTP xác thực Email",
             issued.Account.FullName,
             issued.Otp,
-            "Xác thực địa chỉ Email");
+            "Xác thực địa chỉ Email",
+            expiryMinutes: 15);
 
         return Ok(new
         {
@@ -303,7 +305,8 @@ public class AuthController : BaseController
             "[Bistro POS] Mã OTP khôi phục mật khẩu",
             issued.Account.FullName,
             issued.Otp,
-            "Khôi phục mật khẩu");
+            "Khôi phục mật khẩu",
+            expiryMinutes: 5);
 
         return Ok(new
         {

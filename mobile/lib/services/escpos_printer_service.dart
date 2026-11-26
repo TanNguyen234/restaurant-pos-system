@@ -52,9 +52,34 @@ class EscPosPrinterService {
     return buf.toString();
   }
 
+  /// Chuyển ký tự đặc biệt/emoji thành ASCII an toàn để tránh ArgumentError trong `ascii.encode`.
+  static String sanitizeAscii(String input) {
+    final folded = foldVietnamese(input)
+        .replaceAll('•', '*')
+        .replaceAll('–', '-')
+        .replaceAll('—', '-')
+        .replaceAll('…', '...')
+        .replaceAll('“', '"')
+        .replaceAll('”', '"')
+        .replaceAll('‘', "'")
+        .replaceAll('’', "'")
+        .replaceAll('₫', 'd');
+    final buf = StringBuffer();
+    for (final code in folded.runes) {
+      if (code >= 0x20 && code <= 0x7E) {
+        buf.writeCharCode(code);
+      } else if (code == 0x09 || code == 0x0A || code == 0x0D) {
+        buf.writeCharCode(code);
+      } else {
+        buf.write(' ');
+      }
+    }
+    return buf.toString();
+  }
+
   static String _padColumns(String left, String right, int totalCols) {
-    final l = foldVietnamese(left);
-    final r = foldVietnamese(right);
+    final l = sanitizeAscii(left);
+    final r = sanitizeAscii(right);
     if (l.length + r.length + 1 >= totalCols) {
       final maxL = (totalCols - r.length - 1).clamp(4, totalCols);
       final trimmedL = l.length > maxL ? '${l.substring(0, maxL - 1)}.' : l;
@@ -79,7 +104,7 @@ class EscPosPrinterService {
 
     final bytes = <int>[];
     void cmd(List<int> c) => bytes.addAll(c);
-    void line([String text = '']) => bytes.addAll(ascii.encode('${foldVietnamese(text)}\n'));
+    void line([String text = '']) => bytes.addAll(ascii.encode('${sanitizeAscii(text)}\n'));
 
     // ESC @ (Initialize printer)
     cmd([0x1B, 0x40]);

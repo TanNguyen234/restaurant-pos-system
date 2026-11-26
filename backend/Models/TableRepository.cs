@@ -4,6 +4,10 @@ namespace WebApi.Models;
 
 public class TableRepository : BaseRepository
 {
+    public const int DefaultDurationMinutes = 120;
+    public const int DefaultHoldGraceMinutes = 30;
+    public const int PreArrivalLockMinutes = 60;
+
     public TableRepository(RestaurantPosContext context) : base(context) { }
 
     public List<Area> GetAreas()
@@ -30,11 +34,108 @@ public class TableRepository : BaseRepository
     public TableResponseDto? GetEnrichedById(int tableId) =>
         GetAllEnrichedTables().FirstOrDefault(t => t.TableId == tableId);
 
+    private static DateTime ResolveExpiresAt(Reservation r) =>
+        r.ExpiresAt ?? r.ArrivalTime.AddMinutes(r.HoldGraceMinutes > 0 ? r.HoldGraceMinutes : DefaultHoldGraceMinutes);
+
+    /// <summary>
+    /// Đồng bộ trạng thái đặt bàn:
+    /// 1) Quá hạn giữ chỗ (ExpiresAt &lt;= now) -> tự động chuyển Status = 4 (NoShow) và mở trống bàn nếu không có đơn.
+    /// 2) Còn trong cửa sổ khóa bàn (ArrivalTime &lt;= now + 60 phút) -> tự động khóa bàn trống sang Status = 3.
+    /// </summary>
+    public (int ExpiredCount, int LockedCount, List<int> ChangedTableIds) SyncReservationStates(DateTime? nowOverride = null)
+    {
+        var now = nowOverride ?? DateTime.Now;
+        var activeReservations = context.Reservations
+            .Where(r => r.Status == 0 || r.Status == 1)
+            .ToList();
+
+        if (activeReservations.Count == 0)
+        {
+            return (0, 0, new List<int>());
+        }
+
+        int expiredCount = 0;
+        int lockedCount = 0;
+        var touchedTableIds = new HashSet<int>();
+        var lockWindowTableIds = new HashSet<int>();
+        bool anyMutation = false;
+
+        foreach (var r in activeReservations)
+        {
+            var expiresAt = ResolveExpiresAt(r);
+            if (!r.ExpiresAt.HasValue)
+            {
+                r.ExpiresAt = expiresAt;
+                anyMutation = true;
+            }
+
+            if (expiresAt <= now)
+            {
+                r.Status = 4; // NoShow
+                r.Note = string.IsNullOrWhiteSpace(r.Note)
+                    ? "[Tự động hết hạn giữ bàn - No-Show]"
+                    : (r.Note.Contains("No-Show", StringComparison.OrdinalIgnoreCase) ? r.Note : $"{r.Note} | [Hết hạn giữ bàn]");
+                touchedTableIds.Add(r.TableId);
+                expiredCount++;
+                anyMutation = true;
+            }
+            else if (r.ArrivalTime <= now.AddMinutes(PreArrivalLockMinutes))
+            {
+                lockWindowTableIds.Add(r.TableId);
+                touchedTableIds.Add(r.TableId);
+            }
+        }
+
+        var changedTableIds = new HashSet<int>();
+        if (touchedTableIds.Count > 0)
+        {
+            var tables = context.DiningTables
+                .Where(t => touchedTableIds.Contains(t.TableId))
+                .ToList();
+
+            var unpaidOrderTableIds = context.Orders
+                .Where(o => o.TableId.HasValue && touchedTableIds.Contains(o.TableId.Value) && o.Status < 3 && o.PaymentStatus == 0)
+                .Select(o => o.TableId!.Value)
+                .ToHashSet();
+
+            foreach (var t in tables)
+            {
+                bool hasUnpaid = unpaidOrderTableIds.Contains(t.TableId) || t.CurrentOrderId.HasValue;
+                if (hasUnpaid) continue;
+
+                bool shouldBeReserved = lockWindowTableIds.Contains(t.TableId);
+                if (t.Status == 3 && !shouldBeReserved)
+                {
+                    t.Status = 0;
+                    t.UpdatedAt = now;
+                    changedTableIds.Add(t.TableId);
+                    anyMutation = true;
+                }
+                else if (t.Status == 0 && shouldBeReserved)
+                {
+                    t.Status = 3;
+                    t.UpdatedAt = now;
+                    changedTableIds.Add(t.TableId);
+                    lockedCount++;
+                    anyMutation = true;
+                }
+            }
+        }
+
+        if (anyMutation)
+        {
+            context.SaveChanges();
+        }
+
+        return (expiredCount, lockedCount, changedTableIds.ToList());
+    }
+
     public (bool Success, string Message, DiningTable? Table) UpdateStatusSafe(int tableId, int status)
     {
         if (status < 0 || status > 3)
             return (false, "Trạng thái bàn không hợp lệ (0..3)", null);
 
+        SyncReservationStates();
         var table = context.DiningTables.Find(tableId);
         if (table == null) return (false, $"Không tìm thấy bàn có ID = {tableId}", null);
 
@@ -46,6 +147,20 @@ public class TableRepository : BaseRepository
             {
                 return (false, $"Bàn '{table.TableName}' vẫn còn đơn hàng chưa thanh toán, không thể trả bàn trống trực tiếp!", null);
             }
+
+            var now = DateTime.Now;
+            var lockLimit = now.AddMinutes(PreArrivalLockMinutes);
+            bool hasLockedReservation = context.Reservations.Any(r =>
+                r.TableId == tableId &&
+                (r.Status == 0 || r.Status == 1) &&
+                r.ArrivalTime <= lockLimit &&
+                (r.ExpiresAt ?? r.ArrivalTime.AddMinutes(DefaultHoldGraceMinutes)) > now);
+
+            if (hasLockedReservation)
+            {
+                return (false, $"Bàn '{table.TableName}' đang có lịch đặt trước sắp tới, vui lòng Check-In hoặc Hủy lịch đặt trước khi mở trống!", null);
+            }
+
             table.CurrentOrderId = null;
         }
 
@@ -99,11 +214,41 @@ public class TableRepository : BaseRepository
             .Where(o => o.TableId == fromTableId && o.Status < 3 && o.PaymentStatus == 0)
             .ToList();
 
-        if (fromTable.Status == 0 && !fromTable.CurrentOrderId.HasValue && activeOrders.Count == 0)
+        var activeReservations = context.Reservations
+            .Where(r => r.TableId == fromTableId && (r.Status == 0 || r.Status == 1))
+            .ToList();
+
+        if (fromTable.Status == 0 && !fromTable.CurrentOrderId.HasValue && activeOrders.Count == 0 && activeReservations.Count == 0)
             return (false, $"Bàn nguồn '{fromTable.TableName}' hiện đang trống, không thể chuyển bàn", fromTableId, toTableId);
 
         if (toTable.Status != 0)
             return (false, $"Bàn đích '{toTable.TableName}' đang có khách hoặc đã đặt trước, không thể chuyển đến", fromTableId, toTableId);
+
+        // Nếu bàn nguồn đang giữ đặt trước, chuyển luôn lịch đặt sang bàn đích nếu đủ chỗ & không trùng giờ
+        if (fromTable.Status == 3 && activeReservations.Count > 0)
+        {
+            var targetReservations = context.Reservations
+                .Where(r => r.TableId == toTableId && (r.Status == 0 || r.Status == 1))
+                .ToList();
+
+            foreach (var r in activeReservations)
+            {
+                if (r.GuestCount > toTable.Capacity)
+                    return (false, $"Bàn đích '{toTable.TableName}' ({toTable.Capacity} chỗ) không đủ cho lịch đặt {r.GuestCount} khách", fromTableId, toTableId);
+
+                int dur = r.DurationMinutes > 0 ? r.DurationMinutes : DefaultDurationMinutes;
+                var rEnd = r.ArrivalTime.AddMinutes(dur);
+                bool overlap = targetReservations.Any(tr =>
+                {
+                    int trDur = tr.DurationMinutes > 0 ? tr.DurationMinutes : DefaultDurationMinutes;
+                    return r.ArrivalTime < tr.ArrivalTime.AddMinutes(trDur) && tr.ArrivalTime < rEnd;
+                });
+                if (overlap)
+                    return (false, $"Bàn đích '{toTable.TableName}' bị trùng khung giờ đặt bàn", fromTableId, toTableId);
+
+                r.TableId = toTableId;
+            }
+        }
 
         foreach (var order in activeOrders)
         {
@@ -154,6 +299,63 @@ public class TableRepository : BaseRepository
         return 0;
     }
 
+    private void ReleaseOrderDiscountState(Order order)
+    {
+        if (!string.IsNullOrWhiteSpace(order.DiscountCode))
+        {
+            string norm = order.DiscountCode.Trim().ToUpperInvariant();
+            var disc = context.Discounts.FirstOrDefault(d => d.Code.ToUpper() == norm);
+            if (disc != null && disc.UsedCount > 0)
+            {
+                disc.UsedCount -= 1;
+            }
+        }
+
+        var usedVouchers = context.AccountVouchers
+            .Where(av => av.UsedOrderId == order.OrderId && av.Status == 1)
+            .ToList();
+        foreach (var uv in usedVouchers)
+        {
+            uv.Status = 0;
+            uv.UsedAt = null;
+            uv.UsedOrderId = null;
+        }
+    }
+
+    private void RecalculateOrderDiscount(Order order)
+    {
+        order.TotalAmount = Math.Max(0, order.TotalAmount);
+        if (!string.IsNullOrWhiteSpace(order.DiscountCode))
+        {
+            string norm = order.DiscountCode.Trim().ToUpperInvariant();
+            var disc = context.Discounts.FirstOrDefault(d => d.Code.ToUpper() == norm);
+            if (disc != null)
+            {
+                if (order.TotalAmount < disc.MinOrderAmount)
+                {
+                    order.DiscountAmount = 0;
+                }
+                else
+                {
+                    decimal discAmt = 0;
+                    if (disc.DiscountAmount > 0) discAmt = disc.DiscountAmount;
+                    else if (disc.DiscountPercent > 0)
+                    {
+                        discAmt = Math.Round(order.TotalAmount * (disc.DiscountPercent / 100m), 0);
+                        if (disc.MaxDiscountAmount > 0 && discAmt > disc.MaxDiscountAmount)
+                            discAmt = disc.MaxDiscountAmount;
+                    }
+                    order.DiscountAmount = Math.Min(discAmt, order.TotalAmount);
+                }
+                order.FinalAmount = Math.Max(0, order.TotalAmount - order.DiscountAmount);
+                return;
+            }
+        }
+
+        order.DiscountAmount = Math.Min(Math.Max(0, order.DiscountAmount), order.TotalAmount);
+        order.FinalAmount = Math.Max(0, order.TotalAmount - order.DiscountAmount);
+    }
+
     public (bool Success, string Message, int FromTableId, int ToTableId) MergeTables(int fromTableId, int toTableId)
     {
         if (fromTableId == toTableId)
@@ -187,6 +389,14 @@ public class TableRepository : BaseRepository
                 return (false, $"Bàn nguồn '{fromTable.TableName}' không có đơn hàng chưa thanh toán để gộp", fromTableId, toTableId);
             }
 
+            var fromOrderIds = fromOrders.Select(o => o.OrderId).ToList();
+            bool hasPaidOnSource = context.Payments.Any(p => fromOrderIds.Contains(p.OrderId) && p.Status == 1);
+            if (hasPaidOnSource)
+            {
+                transaction.Rollback();
+                return (false, $"Đơn trên bàn nguồn '{fromTable.TableName}' đã phát sinh thanh toán/tiền cọc trước đó, không thể gộp trực tiếp!", fromTableId, toTableId);
+            }
+
             var toOrder = context.Orders
                 .Where(o => o.TableId == toTableId && o.Status < 3 && o.PaymentStatus == 0)
                 .OrderByDescending(o => o.OrderId)
@@ -194,7 +404,6 @@ public class TableRepository : BaseRepository
 
             if (toOrder == null)
             {
-                // Safe internal transfer inside the SAME transaction (no nested BeginTransaction!)
                 var transferResult = TransferTableInternal(fromTableId, toTableId);
                 if (!transferResult.Success)
                 {
@@ -206,6 +415,7 @@ public class TableRepository : BaseRepository
             }
 
             decimal movedAmount = 0;
+            decimal carriedManualDiscount = 0;
             foreach (var fo in fromOrders)
             {
                 var activeDetails = context.OrderDetails
@@ -221,7 +431,27 @@ public class TableRepository : BaseRepository
                     movedAmount += d.SubTotal;
                 }
 
+                // Nếu bàn nguồn dùng voucher mà bàn đích chưa có voucher -> chuyển quyền voucher sang bàn đích; ngược lại hoàn trả voucher bàn nguồn
+                if (!string.IsNullOrWhiteSpace(fo.DiscountCode) && string.IsNullOrWhiteSpace(toOrder.DiscountCode))
+                {
+                    toOrder.DiscountCode = fo.DiscountCode;
+                    var movedVouchers = context.AccountVouchers.Where(av => av.UsedOrderId == fo.OrderId && av.Status == 1).ToList();
+                    foreach (var v in movedVouchers) v.UsedOrderId = toOrder.OrderId;
+                }
+                else
+                {
+                    if (!string.IsNullOrWhiteSpace(fo.DiscountCode))
+                    {
+                        ReleaseOrderDiscountState(fo);
+                    }
+                    else if (fo.DiscountAmount > 0 && string.IsNullOrWhiteSpace(toOrder.DiscountCode))
+                    {
+                        carriedManualDiscount += fo.DiscountAmount;
+                    }
+                }
+
                 fo.Status = 4; // Merged/Cancelled
+                fo.DiscountCode = null;
                 fo.TotalAmount = 0;
                 fo.DiscountAmount = 0;
                 fo.FinalAmount = 0;
@@ -231,7 +461,11 @@ public class TableRepository : BaseRepository
             }
 
             toOrder.TotalAmount += movedAmount;
-            toOrder.FinalAmount = Math.Max(0, toOrder.TotalAmount - toOrder.DiscountAmount);
+            if (carriedManualDiscount > 0 && string.IsNullOrWhiteSpace(toOrder.DiscountCode))
+            {
+                toOrder.DiscountAmount += carriedManualDiscount;
+            }
+            RecalculateOrderDiscount(toOrder);
 
             fromTable.Status = 0;
             fromTable.CurrentOrderId = null;
@@ -286,6 +520,13 @@ public class TableRepository : BaseRepository
                 return (false, $"Bàn '{fromTable.TableName}' không có hóa đơn chưa thanh toán", null);
             }
 
+            bool hasPaidOnSource = context.Payments.Any(p => p.OrderId == fromOrder.OrderId && p.Status == 1);
+            if (hasPaidOnSource)
+            {
+                tx.Rollback();
+                return (false, $"Đơn #{fromOrder.OrderCode} đã thanh toán một phần hoặc gắn tiền cọc, không thể tách bàn!", null);
+            }
+
             var allActiveDetails = context.OrderDetails
                 .Where(d => d.OrderId == fromOrder.OrderId && d.CookingStatus != 4)
                 .ToList();
@@ -333,6 +574,16 @@ public class TableRepository : BaseRepository
             int remainingCount = allActiveDetails.Count - detailsToMove.Count;
             if (remainingCount == 0)
             {
+                if (!string.IsNullOrWhiteSpace(fromOrder.DiscountCode))
+                {
+                    newOrder.DiscountCode = fromOrder.DiscountCode;
+                    var usedVouchers = context.AccountVouchers.Where(av => av.UsedOrderId == fromOrder.OrderId && av.Status == 1).ToList();
+                    foreach (var v in usedVouchers) v.UsedOrderId = newOrder.OrderId;
+                    newOrder.DiscountAmount = fromOrder.DiscountAmount;
+                    RecalculateOrderDiscount(newOrder);
+                }
+
+                fromOrder.DiscountCode = null;
                 fromOrder.TotalAmount = 0;
                 fromOrder.DiscountAmount = 0;
                 fromOrder.FinalAmount = 0;
@@ -344,8 +595,7 @@ public class TableRepository : BaseRepository
             else
             {
                 fromOrder.TotalAmount = Math.Max(0, fromOrder.TotalAmount - splitTotal);
-                fromOrder.DiscountAmount = Math.Min(fromOrder.DiscountAmount, fromOrder.TotalAmount);
-                fromOrder.FinalAmount = Math.Max(0, fromOrder.TotalAmount - fromOrder.DiscountAmount);
+                RecalculateOrderDiscount(fromOrder);
             }
 
             toTable.Status = 1;
@@ -365,92 +615,236 @@ public class TableRepository : BaseRepository
     }
 
     public (bool Success, string Message, Reservation? Reservation) ReserveTable(
-        int tableId, string customerName, string phoneNumber, int guestCount, DateTime arrivalTime, decimal depositAmount, string? note)
+        int tableId,
+        string customerName,
+        string phoneNumber,
+        int guestCount,
+        DateTime arrivalTime,
+        decimal depositAmount,
+        string? note,
+        int durationMinutes = DefaultDurationMinutes,
+        int holdGraceMinutes = DefaultHoldGraceMinutes,
+        int? accountId = null)
     {
         if (guestCount <= 0) return (false, "Số lượng khách phải lớn hơn 0", null);
         if (depositAmount < 0) return (false, "Tiền đặt cọc không được âm", null);
 
+        var now = DateTime.Now;
+        if (arrivalTime < now.AddMinutes(-5))
+            return (false, "Thời gian đặt bàn không được ở quá khứ", null);
+
+        SyncReservationStates(now);
+
         var table = context.DiningTables.Find(tableId);
         if (table == null) return (false, "Không tìm thấy bàn được chọn", null);
-        if (table.Status != 0)
-            return (false, $"Bàn '{table.TableName}' hiện không trống (đang có khách hoặc đã đặt trước)", null);
+        if (guestCount > table.Capacity)
+            return (false, $"Số lượng khách ({guestCount}) vượt quá sức chứa của bàn '{table.TableName}' ({table.Capacity} chỗ)", null);
+
+        int dur = Math.Clamp(durationMinutes <= 0 ? DefaultDurationMinutes : durationMinutes, 30, 480);
+        int grace = Math.Clamp(holdGraceMinutes <= 0 ? DefaultHoldGraceMinutes : holdGraceMinutes, 5, 120);
+        var expiresAt = arrivalTime.AddMinutes(grace);
+        var windowEnd = arrivalTime.AddMinutes(dur);
+
+        // Kiểm tra trùng khung giờ với các lịch đặt đang hoạt động của bàn
+        var existingBookings = context.Reservations
+            .Where(r => r.TableId == tableId && (r.Status == 0 || r.Status == 1))
+            .ToList();
+
+        foreach (var ex in existingBookings)
+        {
+            int exDur = ex.DurationMinutes > 0 ? ex.DurationMinutes : DefaultDurationMinutes;
+            var exEnd = ex.ArrivalTime.AddMinutes(exDur);
+            if (arrivalTime < exEnd && ex.ArrivalTime < windowEnd)
+            {
+                return (false, $"Bàn '{table.TableName}' đã có khách '{ex.CustomerName}' đặt từ {ex.ArrivalTime:HH:mm dd/MM} đến {exEnd:HH:mm}", null);
+            }
+        }
+
+        bool isImmediateWindow = arrivalTime <= now.AddMinutes(PreArrivalLockMinutes);
+        if (isImmediateWindow)
+        {
+            bool hasUnpaidOrder = context.Orders.Any(o => o.TableId == tableId && o.Status < 3 && o.PaymentStatus == 0);
+            if (table.Status != 0 || hasUnpaidOrder)
+                return (false, $"Bàn '{table.TableName}' hiện không trống trong khung giờ giữ bàn (trong vòng 60 phút tới)", null);
+        }
 
         var reservation = new Reservation
         {
             TableId = tableId,
+            AccountId = accountId,
             CustomerName = customerName.Trim(),
             PhoneNumber = phoneNumber.Trim(),
             GuestCount = guestCount,
             ArrivalTime = arrivalTime,
+            DurationMinutes = dur,
+            HoldGraceMinutes = grace,
+            ExpiresAt = expiresAt,
             DepositAmount = depositAmount,
+            DepositApplied = false,
             Note = note?.Trim(),
-            Status = 1 // Confirmed
+            Status = 1, // Confirmed
+            CreatedAt = now
         };
 
-        table.Status = 3; // Canonical: 3 = Reserved
-        table.UpdatedAt = DateTime.Now;
-
         context.Reservations.Add(reservation);
-        context.DiningTables.Update(table);
-        context.SaveChanges();
-
-        return (true, $"Đặt bàn '{table.TableName}' cho khách '{customerName}' thành công", reservation);
-    }
-
-    public List<Reservation> GetReservations(DateTime? fromDate = null)
-    {
-        var query = context.Reservations.Where(r => r.Status != 3); // Exclude cancelled by default
-        if (fromDate.HasValue)
+        if (isImmediateWindow)
         {
-            query = query.Where(r => r.ArrivalTime >= fromDate.Value);
-        }
-        return query.OrderBy(r => r.ArrivalTime).ToList();
-    }
-
-    public (bool Success, string Message) CheckInReservation(int reservationId)
-    {
-        var res = context.Reservations.Find(reservationId);
-        if (res == null) return (false, "Không tìm thấy thông tin đặt bàn");
-        if (res.Status == 3) return (false, "Lịch đặt bàn này đã bị hủy trước đó");
-        if (res.Status == 2) return (false, "Khách đã nhận bàn trước đó rồi");
-
-        res.Status = 2; // CheckedIn
-        var table = context.DiningTables.Find(res.TableId);
-        if (table != null)
-        {
-            table.Status = 1; // Occupied
-            table.UpdatedAt = DateTime.Now;
+            table.Status = 3; // Canonical: 3 = Reserved
+            table.UpdatedAt = now;
             context.DiningTables.Update(table);
         }
-
-        context.Reservations.Update(res);
         context.SaveChanges();
-        return (true, $"Đã nhận bàn cho khách '{res.CustomerName}'");
+
+        string windowMsg = isImmediateWindow
+            ? $"Giữ bàn đến {expiresAt:HH:mm dd/MM} (tối đa trễ {grace} phút)"
+            : $"Sẽ tự động khóa bàn trước giờ hẹn {PreArrivalLockMinutes} phút (hết hạn giữ lúc {expiresAt:HH:mm dd/MM})";
+        return (true, $"Đặt bàn '{table.TableName}' cho '{customerName.Trim()}' thành công. {windowMsg}.", reservation);
     }
 
-    public (bool Success, string Message) CancelReservation(int reservationId)
+    public List<ReservationDto> GetReservations(
+        DateTime? fromDate = null,
+        int? onlyAccountId = null,
+        string? onlyPhone = null,
+        bool includeInactive = false)
     {
+        SyncReservationStates();
+
+        var query = from r in context.Reservations
+                    join t in context.DiningTables on r.TableId equals t.TableId
+                    join a in context.Areas on t.AreaId equals a.AreaId into aGroup
+                    from a in aGroup.DefaultIfEmpty()
+                    select new { r, TableName = t.TableName, AreaName = a != null ? a.AreaName : "" };
+
+        if (onlyAccountId.HasValue)
+        {
+            string? cleanPhone = string.IsNullOrWhiteSpace(onlyPhone) ? null : onlyPhone.Trim();
+            query = query.Where(x =>
+                x.r.AccountId == onlyAccountId.Value ||
+                (cleanPhone != null && x.r.PhoneNumber == cleanPhone));
+        }
+
+        if (!includeInactive)
+        {
+            query = query.Where(x => x.r.Status != 3 && x.r.Status != 4);
+        }
+
+        if (fromDate.HasValue)
+        {
+            query = query.Where(x => x.r.ArrivalTime >= fromDate.Value);
+        }
+
+        return query
+            .OrderBy(x => x.r.Status <= 1 ? 0 : 1)
+            .ThenBy(x => x.r.ArrivalTime)
+            .Select(x => new ReservationDto
+            {
+                ReservationId = x.r.ReservationId,
+                TableId = x.r.TableId,
+                TableName = x.TableName,
+                AreaName = x.AreaName,
+                AccountId = x.r.AccountId,
+                CustomerName = x.r.CustomerName,
+                PhoneNumber = x.r.PhoneNumber,
+                GuestCount = x.r.GuestCount,
+                ArrivalTime = x.r.ArrivalTime,
+                DurationMinutes = x.r.DurationMinutes,
+                HoldGraceMinutes = x.r.HoldGraceMinutes,
+                ExpiresAt = x.r.ExpiresAt ?? x.r.ArrivalTime.AddMinutes(x.r.HoldGraceMinutes),
+                DepositAmount = x.r.DepositAmount,
+                DepositApplied = x.r.DepositApplied,
+                CheckedInOrderId = x.r.CheckedInOrderId,
+                Note = x.r.Note,
+                Status = x.r.Status,
+                CreatedAt = x.r.CreatedAt
+            })
+            .ToList();
+    }
+
+    public (bool Success, string Message, int? TableId, decimal DepositAmount) CheckInReservation(int reservationId)
+    {
+        SyncReservationStates();
+
         var res = context.Reservations.Find(reservationId);
-        if (res == null) return (false, "Không tìm thấy thông tin đặt bàn");
-        if (res.Status == 2) return (false, "Khách đã check-in vào bàn, không thể hủy lịch đặt");
-        if (res.Status == 3) return (false, "Lịch đặt bàn này đã được hủy trước đó");
+        if (res == null) return (false, "Không tìm thấy thông tin đặt bàn", null, 0);
+        if (res.Status == 3) return (false, "Lịch đặt bàn này đã bị hủy trước đó", res.TableId, 0);
+        if (res.Status == 4) return (false, "Lịch đặt bàn đã quá thời hạn giữ chỗ (No-Show) và bị hủy tự động", res.TableId, 0);
+        if (res.Status == 2) return (false, "Khách đã nhận bàn trước đó rồi", res.TableId, 0);
+
+        var table = context.DiningTables.Find(res.TableId);
+        if (table == null) return (false, "Không tìm thấy bàn của lịch đặt này", null, 0);
+
+        bool hasUnpaidOrder = context.Orders.Any(o => o.TableId == table.TableId && o.Status < 3 && o.PaymentStatus == 0);
+        if (hasUnpaidOrder || table.Status == 1 || table.Status == 2)
+        {
+            return (false, $"Bàn '{table.TableName}' hiện đang phục vụ khách khác, vui lòng thanh toán hoặc chuyển bàn trước khi Check-In", table.TableId, 0);
+        }
+
+        res.Status = 2; // CheckedIn
+        table.Status = 1; // Occupied
+        table.UpdatedAt = DateTime.Now;
+        context.DiningTables.Update(table);
+        context.Reservations.Update(res);
+        context.SaveChanges();
+
+        string depText = res.DepositAmount > 0
+            ? $" (tiền cọc {res.DepositAmount:N0}đ sẽ tự cấn trừ khi tạo hóa đơn đầu tiên)"
+            : "";
+        return (true, $"Đã nhận bàn '{table.TableName}' cho khách '{res.CustomerName}'{depText}", table.TableId, res.DepositAmount);
+    }
+
+    public (bool Success, bool Forbidden, string Message, int? TableId) CancelReservation(
+        int reservationId,
+        int? callerAccountId = null,
+        bool isStaff = true)
+    {
+        SyncReservationStates();
+
+        var res = context.Reservations.Find(reservationId);
+        if (res == null) return (false, false, "Không tìm thấy thông tin đặt bàn", null);
+
+        if (!isStaff)
+        {
+            if (!callerAccountId.HasValue || !res.AccountId.HasValue || res.AccountId.Value != callerAccountId.Value)
+                return (false, true, "Bạn chỉ có thể hủy lịch đặt bàn của chính mình", res.TableId);
+        }
+
+        if (res.Status == 2) return (false, false, "Khách đã check-in vào bàn, không thể hủy lịch đặt", res.TableId);
+        if (res.Status == 3) return (false, false, "Lịch đặt bàn này đã được hủy trước đó", res.TableId);
+        if (res.Status == 4) return (false, false, "Lịch đặt bàn này đã hết hạn (No-Show)", res.TableId);
 
         res.Status = 3; // Cancelled
+        context.Reservations.Update(res);
+        context.SaveChanges();
+
+        var now = DateTime.Now;
+        var lockLimit = now.AddMinutes(PreArrivalLockMinutes);
         var table = context.DiningTables.Find(res.TableId);
         if (table != null && table.Status == 3 && !table.CurrentOrderId.HasValue)
         {
-            table.Status = 0; // Empty
-            table.UpdatedAt = DateTime.Now;
-            context.DiningTables.Update(table);
+            bool hasOtherLock = context.Reservations.Any(r =>
+                r.ReservationId != res.ReservationId &&
+                r.TableId == table.TableId &&
+                (r.Status == 0 || r.Status == 1) &&
+                r.ArrivalTime <= lockLimit &&
+                (r.ExpiresAt ?? r.ArrivalTime.AddMinutes(DefaultHoldGraceMinutes)) > now);
+
+            bool hasUnpaidOrder = context.Orders.Any(o => o.TableId == table.TableId && o.Status < 3 && o.PaymentStatus == 0);
+            if (!hasOtherLock && !hasUnpaidOrder)
+            {
+                table.Status = 0; // Empty
+                table.UpdatedAt = now;
+                context.DiningTables.Update(table);
+                context.SaveChanges();
+            }
         }
 
-        context.Reservations.Update(res);
-        context.SaveChanges();
-        return (true, $"Đã hủy đặt bàn cho khách '{res.CustomerName}'");
+        return (true, false, $"Đã hủy đặt bàn cho khách '{res.CustomerName}'", res.TableId);
     }
 
     public List<TableResponseDto> GetAllEnrichedTables(int? areaId = null)
     {
+        SyncReservationStates();
+
         var tablesQuery = context.DiningTables.AsQueryable();
         if (areaId.HasValue && areaId.Value > 0)
         {
@@ -464,7 +858,6 @@ public class TableRepository : BaseRepository
 
         var tableIds = tables.Select(t => t.TableId).ToList();
 
-        // Load ALL active unpaid orders for these tables (resilient even when CurrentOrderId is null!)
         var activeOrders = context.Orders
             .Where(o => o.TableId.HasValue && tableIds.Contains(o.TableId.Value) && o.Status < 3 && o.PaymentStatus == 0)
             .OrderByDescending(o => o.OrderId)
@@ -491,10 +884,19 @@ public class TableRepository : BaseRepository
             .ToDictionary(g => g.Key, g => g.OrderByDescending(o => o.OrderId).First());
 
         var orderIds = orderById.Keys.ToList();
-        var detailsCount = context.OrderDetails
-            .Where(d => orderIds.Contains(d.OrderId) && d.CookingStatus != 4)
-            .GroupBy(d => d.OrderId)
-            .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+        var detailsCount = orderIds.Count == 0
+            ? new Dictionary<int, int>()
+            : context.OrderDetails
+                .Where(d => orderIds.Contains(d.OrderId) && d.CookingStatus != 4)
+                .GroupBy(d => d.OrderId)
+                .ToDictionary(g => g.Key, g => g.Sum(x => x.Quantity));
+
+        var upcomingReservations = context.Reservations
+            .Where(r => tableIds.Contains(r.TableId) && (r.Status == 0 || r.Status == 1))
+            .OrderBy(r => r.ArrivalTime)
+            .ToList()
+            .GroupBy(r => r.TableId)
+            .ToDictionary(g => g.Key, g => g.First());
 
         return tables.Select(t =>
         {
@@ -514,6 +916,8 @@ public class TableRepository : BaseRepository
                 detailsCount.TryGetValue(ord.OrderId, out count);
             }
 
+            upcomingReservations.TryGetValue(t.TableId, out var nextRes);
+
             return new TableResponseDto
             {
                 TableId = t.TableId,
@@ -525,7 +929,12 @@ public class TableRepository : BaseRepository
                 UpdatedAt = t.UpdatedAt,
                 OrderCreatedAt = ord?.CreatedAt,
                 RunningTotal = ord?.FinalAmount ?? (ord?.TotalAmount ?? 0),
-                ItemCount = count
+                ItemCount = count,
+                NextReservationId = nextRes?.ReservationId,
+                NextReservationCustomer = nextRes?.CustomerName,
+                NextReservationTime = nextRes?.ArrivalTime,
+                NextReservationExpiresAt = nextRes != null ? ResolveExpiresAt(nextRes) : null,
+                NextReservationDeposit = nextRes?.DepositAmount
             };
         }).ToList();
     }

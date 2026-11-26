@@ -21,7 +21,7 @@ function Show-Usage {
     Write-Host "  start_project.bat chrome       -> Khoi dong Backend API + Flutter Web (Chrome :8088)"
     Write-Host "  start_project.bat windows      -> Khoi dong Backend API + Flutter Windows Desktop"
     Write-Host "  start_project.bat backend      -> Khoi dong Backend API (.NET :5138) + mo Swagger"
-    Write-Host "  start_project.bat reset-db     -> Khoi phuc du lieu mau SQL Server (18 bang)"
+    Write-Host "  start_project.bat reset-db     -> Khoi phuc du lieu mau SQL Server (21 bang)"
     Write-Host "  start_project.bat stop         -> Dung tien trinh dang chay o cong 5138 & 8088"
     Write-Host "  start_project.bat help         -> Hien thi huong dan nay"
     Write-Host ""

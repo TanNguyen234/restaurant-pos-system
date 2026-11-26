@@ -28,7 +28,19 @@ public class DiscountRepository : BaseRepository
             .ToListAsync();
     }
 
-    public async Task<DiscountValidationResultDto> ValidateDiscountAsync(string code, decimal orderAmount)
+    public async Task<Dictionary<string, int>> GetOwnedVoucherCountsAsync(int accountId)
+    {
+        var list = await context.AccountVouchers
+            .Where(av => av.AccountId == accountId && av.Status == 0)
+            .Select(av => av.VoucherCode)
+            .ToListAsync();
+
+        return list
+            .GroupBy(c => c.ToUpperInvariant())
+            .ToDictionary(g => g.Key, g => g.Count(), StringComparer.OrdinalIgnoreCase);
+    }
+
+    public async Task<DiscountValidationResultDto> ValidateDiscountAsync(string code, decimal orderAmount, int? accountId = null)
     {
         if (orderAmount < 0)
         {
@@ -50,7 +62,7 @@ public class DiscountRepository : BaseRepository
             };
         }
 
-        string normalized = code.Trim().ToUpper();
+        string normalized = code.Trim().ToUpperInvariant();
         var discount = await context.Discounts
             .FirstOrDefaultAsync(d => d.Code.ToUpper() == normalized);
 
@@ -92,6 +104,31 @@ public class DiscountRepository : BaseRepository
                 Message = $"Mã giảm giá '{code}' đã đạt giới hạn lượt sử dụng",
                 FinalAmount = orderAmount
             };
+        }
+
+        if (discount.PointsCost > 0)
+        {
+            if (!accountId.HasValue || accountId.Value <= 0)
+            {
+                return new DiscountValidationResultDto
+                {
+                    IsValid = false,
+                    Message = $"Mã '{discount.Code}' dành cho hội viên (cần đổi {discount.PointsCost} PTS). Vui lòng đăng nhập và đổi điểm trước.",
+                    FinalAmount = orderAmount
+                };
+            }
+
+            bool hasUnusedVoucher = await context.AccountVouchers
+                .AnyAsync(av => av.AccountId == accountId.Value && av.DiscountId == discount.DiscountId && av.Status == 0);
+            if (!hasUnusedVoucher)
+            {
+                return new DiscountValidationResultDto
+                {
+                    IsValid = false,
+                    Message = $"Bạn chưa có lượt voucher '{discount.Code}' khả dụng. Vui lòng vào mục Hội viên để đổi {discount.PointsCost} PTS.",
+                    FinalAmount = orderAmount
+                };
+            }
         }
 
         if (orderAmount < discount.MinOrderAmount)

@@ -33,7 +33,9 @@ class _MemberHomePageState extends State<MemberHomePage> {
   String _tierLabel = 'THÀNH VIÊN';
   List<Map<String, dynamic>> _vouchers = [];
   Set<String> _redeemedVoucherCodes = {};
+  Map<String, int> _voucherBalances = {};
   List<Map<String, dynamic>> _history = [];
+  List<Map<String, dynamic>> _myReservations = [];
 
   List<OrderModel> _foundOrders = [];
   bool _isLoadingOrders = false;
@@ -61,6 +63,7 @@ class _MemberHomePageState extends State<MemberHomePage> {
     if (user == null) {
       setState(() {
         _foundOrders = [];
+        _myReservations = [];
         _hasLoadedOrders = false;
         _isLoadingOrders = false;
       });
@@ -86,6 +89,7 @@ class _MemberHomePageState extends State<MemberHomePage> {
     }
 
     unawaited(_loadMyOrders(query: _searchQueryController.text.trim()));
+    unawaited(_loadMyReservations());
 
     try {
       final res = await ApiConfig.get(Uri.parse('${ApiConfig.baseUrl}/api/loyalty/me')).timeout(const Duration(seconds: 6));
@@ -93,11 +97,20 @@ class _MemberHomePageState extends State<MemberHomePage> {
       if (res.statusCode == 200) {
         final body = jsonDecode(utf8.decode(res.bodyBytes)) as Map<String, dynamic>;
         final data = Map<String, dynamic>.from(body['data'] as Map);
+        final balances = <String, int>{};
+        if (data['voucherBalances'] is Map) {
+          (data['voucherBalances'] as Map).forEach((k, v) {
+            balances[k.toString().toUpperCase()] = (v as num?)?.toInt() ?? 0;
+          });
+        }
+        final pts = (data['loyaltyPoints'] as num? ?? 0).toInt();
+        unawaited(SessionManager.instance.updateLoyaltyPoints(pts));
         setState(() {
-          _userPoints = (data['loyaltyPoints'] as num? ?? 0).toInt();
+          _userPoints = pts;
           _tierLabel = (data['tier'] ?? 'THÀNH VIÊN').toString();
           _vouchers = (data['availableVouchers'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
           _redeemedVoucherCodes = (data['redeemedVoucherCodes'] as List? ?? []).map((e) => e.toString().toUpperCase()).toSet();
+          _voucherBalances = balances;
           _history = (data['history'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
           _isLoadingLoyalty = false;
         });
@@ -187,6 +200,128 @@ class _MemberHomePageState extends State<MemberHomePage> {
         );
       }
     }
+  }
+
+  Future<void> _loadMyReservations() async {
+    if (SessionManager.instance.currentUser == null) return;
+    try {
+      final list = await TableRepository.getReservations();
+      if (!mounted) return;
+      setState(() => _myReservations = list);
+    } catch (_) {}
+  }
+
+  Future<void> _showMemberReserveDialog() async {
+    final user = SessionManager.instance.currentUser;
+    if (user == null) {
+      showAutoDismissSnackBar(context, message: 'Vui lòng đăng nhập để đặt bàn trước!');
+      return;
+    }
+
+    List<DiningTable> tables = [];
+    try {
+      tables = await TableRepository.getAllTables();
+    } catch (_) {}
+    if (!mounted) return;
+    if (tables.isEmpty) {
+      showAutoDismissSnackBar(context, message: 'Không tải được danh sách bàn', backgroundColor: const Color(0xFFDC2626));
+      return;
+    }
+
+    DiningTable chosen = tables.firstWhere((t) => t.status == 0, orElse: () => tables.first);
+    final nameCtrl = TextEditingController(text: user.fullName);
+    final phoneCtrl = TextEditingController(text: user.phoneNumber ?? '');
+    final guestCtrl = TextEditingController(text: '2');
+    final noteCtrl = TextEditingController();
+    final now = DateTime.now();
+    DateTime arrivalTime = DateTime(now.year, now.month, now.day, now.hour, now.minute).add(const Duration(hours: 2));
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dCtx, setD) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Đặt bàn trước (Hội viên)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 17)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                DropdownButtonFormField<int>(
+                  initialValue: chosen.id,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Chọn bàn', border: OutlineInputBorder(), isDense: true),
+                  items: tables.map((t) => DropdownMenuItem(value: t.id, child: Text('${t.name} (${t.capacity} chỗ)'))).toList(),
+                  onChanged: (v) {
+                    if (v != null) setD(() => chosen = tables.firstWhere((t) => t.id == v));
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextField(controller: nameCtrl, decoration: const InputDecoration(labelText: 'Họ tên *', isDense: true)),
+                const SizedBox(height: 8),
+                TextField(controller: phoneCtrl, keyboardType: TextInputType.phone, decoration: const InputDecoration(labelText: 'SĐT *', isDense: true)),
+                const SizedBox(height: 8),
+                TextField(controller: guestCtrl, keyboardType: TextInputType.number, decoration: InputDecoration(labelText: 'Số khách (≤${chosen.capacity})', isDense: true)),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.calendar_today, size: 14),
+                        label: Text(DateFormat('dd/MM').format(arrivalTime)),
+                        onPressed: () async {
+                          final d = await showDatePicker(context: dCtx, initialDate: arrivalTime, firstDate: DateTime(now.year, now.month, now.day), lastDate: now.add(const Duration(days: 60)));
+                          if (d != null) setD(() => arrivalTime = DateTime(d.year, d.month, d.day, arrivalTime.hour, arrivalTime.minute));
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.access_time, size: 14),
+                        label: Text(DateFormat('HH:mm').format(arrivalTime)),
+                        onPressed: () async {
+                          final t = await showTimePicker(context: dCtx, initialTime: TimeOfDay.fromDateTime(arrivalTime));
+                          if (t != null) setD(() => arrivalTime = DateTime(arrivalTime.year, arrivalTime.month, arrivalTime.day, t.hour, t.minute));
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                TextField(controller: noteCtrl, decoration: const InputDecoration(labelText: 'Ghi chú', isDense: true)),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Hủy')),
+            FilledButton(
+              onPressed: () {
+                if (nameCtrl.text.trim().isEmpty || phoneCtrl.text.trim().isEmpty) return;
+                Navigator.pop(ctx, true);
+              },
+              child: const Text('Đặt bàn'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (ok != true || !mounted) return;
+
+    final res = await TableRepository.reserveTable(
+      tableId: chosen.id,
+      customerName: nameCtrl.text.trim(),
+      phoneNumber: phoneCtrl.text.trim(),
+      guestCount: int.tryParse(guestCtrl.text.trim()) ?? 2,
+      arrivalTime: arrivalTime,
+      note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
+    );
+    if (!mounted) return;
+    showAutoDismissSnackBar(
+      context,
+      message: res['message']?.toString() ?? 'Đã đặt bàn',
+      backgroundColor: res['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+    );
+    if (res['success'] == true) await _loadMyReservations();
   }
 
   Future<void> _loadMyOrders({String query = '', bool showError = false}) async {
@@ -506,6 +641,75 @@ class _MemberHomePageState extends State<MemberHomePage> {
                       ),
                     ],
                   ),
+                  const SizedBox(height: 12),
+                  InkWell(
+                    onTap: _showMemberReserveDialog,
+                    borderRadius: BorderRadius.circular(14),
+                    child: Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.event_available_rounded, color: Color(0xFFD97706)),
+                          SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text('Đặt Bàn Trước (Theo Khung Giờ)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Color(0xFF92400E))),
+                                Text('Chọn bàn, giờ đến & giữ chỗ tối đa 30 phút sau giờ hẹn', style: TextStyle(fontSize: 11.5, color: Color(0xFFB45309))),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.chevron_right_rounded, color: Color(0xFFD97706)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  if (_myReservations.isNotEmpty) ...[
+                    const SizedBox(height: 18),
+                    const Text('Lịch Đặt Bàn Của Tôi', style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                    const SizedBox(height: 8),
+                    ..._myReservations.map((r) {
+                      final resId = (r['reservationId'] as num?)?.toInt() ?? 0;
+                      final st = (r['status'] as num?)?.toInt() ?? 1;
+                      final canCancel = st == 0 || st == 1;
+                      final arr = r['arrivalTime'] != null ? DateTime.tryParse(r['arrivalTime'].toString()) : null;
+                      final exp = r['expiresAt'] != null ? DateTime.tryParse(r['expiresAt'].toString()) : null;
+                      return Card(
+                        margin: const EdgeInsets.only(bottom: 8),
+                        child: ListTile(
+                          leading: Icon(Icons.table_bar_rounded, color: canCancel ? const Color(0xFFD97706) : const Color(0xFF64748B)),
+                          title: Text('${r['tableName'] ?? 'Bàn #${r['tableId']}'} • ${r['statusText'] ?? ''}',
+                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5)),
+                          subtitle: Text(
+                            '${r['guestCount'] ?? 2} khách${arr != null ? ' • Đến ${DateFormat('HH:mm dd/MM').format(arr)}' : ''}${exp != null && canCancel ? ' (giữ tới ${DateFormat('HH:mm').format(exp)})' : ''}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                          trailing: canCancel && resId > 0
+                              ? TextButton(
+                                  onPressed: () async {
+                                    final res = await TableRepository.cancelReservation(resId);
+                                    if (!mounted) return;
+                                    showAutoDismissSnackBar(
+                                      this.context,
+                                      message: res['message']?.toString() ?? 'Đã hủy lịch',
+                                      backgroundColor: res['success'] == true ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                    );
+                                    await _loadMyReservations();
+                                  },
+                                  child: const Text('Hủy', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold)),
+                                )
+                              : null,
+                        ),
+                      );
+                    }),
+                  ],
                   const SizedBox(height: 24),
                   const Text('Kho Voucher Ưu Đãi Hội Viên', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
                   const SizedBox(height: 10),
@@ -519,6 +723,7 @@ class _MemberHomePageState extends State<MemberHomePage> {
                       final discountAmt = (v['discountAmount'] as num? ?? 0).toDouble();
                       final badgeText = discountPercent > 0 ? '-${discountPercent.toInt()}%' : '-${_currencyFormat.format(discountAmt)}';
                       final isRedeemed = _redeemedVoucherCodes.contains(code);
+                      final balance = _voucherBalances[code] ?? 0;
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 10),
@@ -569,7 +774,7 @@ class _MemberHomePageState extends State<MemberHomePage> {
                                 ),
                               ),
                               const SizedBox(width: 8),
-                              if (isRedeemed)
+                              if (isRedeemed && cost == 0)
                                 ElevatedButton.icon(
                                   style: ElevatedButton.styleFrom(
                                     backgroundColor: const Color(0xFFECFDF5),
@@ -588,6 +793,40 @@ class _MemberHomePageState extends State<MemberHomePage> {
                                       MaterialPageRoute(builder: (_) => OrderCheckoutPage(initialDiscountCode: code)),
                                     );
                                   },
+                                )
+                              else if (cost > 0 && balance > 0)
+                                Wrap(
+                                  spacing: 6,
+                                  children: [
+                                    ElevatedButton.icon(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: const Color(0xFFECFDF5),
+                                        foregroundColor: const Color(0xFF059669),
+                                        elevation: 0,
+                                        side: const BorderSide(color: Color(0xFF059669)),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      ),
+                                      icon: const Icon(Icons.check_circle_rounded, size: 14),
+                                      label: Text('DÙNG ($balance)', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                                      onPressed: () {
+                                        Clipboard.setData(ClipboardData(text: code));
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(builder: (_) => OrderCheckoutPage(initialDiscountCode: code)),
+                                        );
+                                      },
+                                    ),
+                                    if (_userPoints >= cost)
+                                      OutlinedButton(
+                                        style: OutlinedButton.styleFrom(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                        onPressed: () => _redeemVoucher(v),
+                                        child: const Text('+1', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11.5)),
+                                      ),
+                                  ],
                                 )
                               else
                                 ElevatedButton(

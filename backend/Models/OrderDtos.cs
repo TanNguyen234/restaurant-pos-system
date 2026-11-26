@@ -87,6 +87,9 @@ public class OrderDto
     public decimal FinalAmount { get; set; }
     public decimal PaidAmount { get; set; }
     public decimal RemainingAmount => Math.Max(0, FinalAmount - PaidAmount);
+    public string PaymentMethods { get; set; } = string.Empty;
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? GuestAccessToken { get; set; }
     public int Status { get; set; } // 0: New, 1: Cooking, 2: Served, 3: Completed, 4: Cancelled
     public string StatusText => Status switch
     {
@@ -135,4 +138,16 @@ public class VoidItemDto
     public int OrderDetailId { get; set; }
     public string Reason { get; set; } = "Khách đổi ý / Không dùng nữa";
     public int VoidQuantity { get; set; } = 1;
+}
+
+public class CancelUnpaidRequestDto
+{
+    public string? GuestToken { get; set; }
+}
+
+public class AddOrderItemsRequestDto
+{
+    public string? IdempotencyKey { get; set; }
+    public string? DiscountCode { get; set; }
+    public List<CreateOrderItemDto> Items { get; set; } = new();
 }

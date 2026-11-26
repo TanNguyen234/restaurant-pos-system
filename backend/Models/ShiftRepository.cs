@@ -65,8 +65,7 @@ public class ShiftRepository : BaseRepository
         return await context.Payments
             .Where(p => p.Status == 1 &&
                         (p.ShiftId == shift.ShiftId ||
-                         (p.ShiftId == null && p.PaymentTime >= shift.StartTime && p.PaymentTime <= endTime &&
-                          (p.ProcessedByAccountId == null || p.ProcessedByAccountId == shift.AccountId))))
+                         (p.ShiftId == null && p.ProcessedByAccountId == shift.AccountId && p.PaymentTime >= shift.StartTime && p.PaymentTime <= endTime)))
             .ToListAsync();
     }
 
@@ -77,7 +76,9 @@ public class ShiftRepository : BaseRepository
         {
             string m = p.PaymentMethod.Trim();
             if (m.Equals("Cash", StringComparison.OrdinalIgnoreCase)) cash += p.Amount;
-            else if (m.Equals("VietQR", StringComparison.OrdinalIgnoreCase) || m.Equals("Transfer", StringComparison.OrdinalIgnoreCase)) transfer += p.Amount;
+            else if (m.Equals("VietQR", StringComparison.OrdinalIgnoreCase) ||
+                     m.Equals("Transfer", StringComparison.OrdinalIgnoreCase) ||
+                     m.Equals("Deposit", StringComparison.OrdinalIgnoreCase)) transfer += p.Amount;
             else card += p.Amount; // VNPay / Card / E-Wallet
         }
         return (cash, transfer, card);
