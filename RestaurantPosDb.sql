@@ -1,7 +1,7 @@
--- ======================================================================================
+﻿-- ======================================================================================
 -- DỰ ÁN: HỆ THỐNG QUẢN LÝ NHÀ HÀNG & QUÁN CÀ PHÊ (RESTAURANT & CAFE POS SYSTEM)
 -- CÔNG NGHỆ: C# ASP.NET Core 10 Web API + Microsoft SQL Server + Flutter Mobile (SQLite)
--- MỤC ĐÍCH: Khởi tạo CSDL 15 bảng chuẩn hóa 3NF, Index tối ưu, Ràng buộc toàn vẹn & Dữ liệu mẫu đồng bộ.
+-- MỤC ĐÍCH: Khởi tạo CSDL 21 bảng chuẩn hóa 3NF, Index tối ưu, Ràng buộc toàn vẹn & Dữ liệu mẫu đồng bộ.
 -- ======================================================================================
 
 USE master;
@@ -17,6 +17,9 @@ USE RestaurantPosDb;
 GO
 
 -- XÓA BẢNG CŨ THEO THỨ TỰ PHỤ THUỘC KHÓA NGOẠI (ĐẢM BẢO CHẠY LẠI AN TOÀN 100%)
+IF OBJECT_ID('OrderIdempotencyKeys', 'U') IS NOT NULL DROP TABLE OrderIdempotencyKeys;
+IF OBJECT_ID('AccountVouchers', 'U') IS NOT NULL DROP TABLE AccountVouchers;
+IF OBJECT_ID('ProductAttributeRecipes', 'U') IS NOT NULL DROP TABLE ProductAttributeRecipes;
 IF OBJECT_ID('StockTransactions', 'U') IS NOT NULL DROP TABLE StockTransactions;
 IF OBJECT_ID('ProductRecipes', 'U') IS NOT NULL DROP TABLE ProductRecipes;
 IF OBJECT_ID('Ingredients', 'U') IS NOT NULL DROP TABLE Ingredients;
@@ -38,7 +41,7 @@ IF OBJECT_ID('Roles', 'U') IS NOT NULL DROP TABLE Roles;
 GO
 
 -- ======================================================================================
--- II. DDL: KHỞI TẠO CẤU TRÚC 15 BẢNG QUAN HỆ
+-- II. DDL: KHỞI TẠO CẤU TRÚC 21 BẢNG QUAN HỆ
 -- ======================================================================================
 
 -- 1. VAI TRÒ NGƯỜI DÙNG (ROLES)
@@ -64,6 +67,7 @@ CREATE TABLE Accounts (
     IsActive BIT NOT NULL DEFAULT 1,
     IsEmailVerified BIT NOT NULL DEFAULT 0,
     EmailVerificationToken VARCHAR(128) NULL,
+    EmailVerificationExpiry DATETIME NULL,
     ResetPasswordToken VARCHAR(128) NULL,
     ResetPasswordExpiry DATETIME NULL,
     OAuthProvider VARCHAR(32) NULL,
@@ -121,6 +125,7 @@ CREATE TABLE Products (
     Description NVARCHAR(1024) NULL,
     ImageUrl NVARCHAR(1500) NOT NULL,
     IsAvailable BIT NOT NULL DEFAULT 1,
+    AutoDisabledByStock BIT NOT NULL DEFAULT 0,
     IsFeatured BIT NOT NULL DEFAULT 0,
     CreatedAt DATETIME NOT NULL DEFAULT GETDATE(),
     UpdatedAt DATETIME NULL
@@ -143,6 +148,7 @@ CREATE TABLE Orders (
     OrderId INT IDENTITY(1,1) PRIMARY KEY,
     OrderCode VARCHAR(32) NOT NULL UNIQUE,
     IdempotencyKey NVARCHAR(128) NULL,
+    GuestAccessToken NVARCHAR(64) NULL,
     TableId INT NULL CONSTRAINT FK_Orders_Tables REFERENCES DiningTables(TableId),
     AccountId INT NULL CONSTRAINT FK_Orders_Accounts REFERENCES Accounts(AccountId),
     CustomerName NVARCHAR(128) NULL,
@@ -179,6 +185,7 @@ GO
 CREATE TABLE OrderDetailModifiers (
     Id INT IDENTITY(1,1) PRIMARY KEY,
     OrderDetailId INT NOT NULL CONSTRAINT FK_OrderDetailModifiers_OrderDetails REFERENCES OrderDetails(OrderDetailId) ON DELETE CASCADE,
+    AttributeId INT NULL,
     ModifierName NVARCHAR(100) NOT NULL,
     ExtraPrice DECIMAL(18,0) NOT NULL DEFAULT 0
 );
@@ -220,13 +227,19 @@ GO
 CREATE TABLE Reservations (
     ReservationId INT IDENTITY(1,1) PRIMARY KEY,
     TableId INT NOT NULL CONSTRAINT FK_Reservations_DiningTables REFERENCES DiningTables(TableId),
+    AccountId INT NULL CONSTRAINT FK_Reservations_Accounts REFERENCES Accounts(AccountId),
     CustomerName NVARCHAR(100) NOT NULL,
     PhoneNumber VARCHAR(20) NOT NULL,
     GuestCount INT NOT NULL DEFAULT 2,
     ArrivalTime DATETIME NOT NULL,
+    DurationMinutes INT NOT NULL DEFAULT 120,
+    HoldGraceMinutes INT NOT NULL DEFAULT 30,
+    ExpiresAt DATETIME NULL,
     DepositAmount DECIMAL(18,0) NOT NULL DEFAULT 0,
+    DepositApplied BIT NOT NULL DEFAULT 0,
+    CheckedInOrderId INT NULL,
     Note NVARCHAR(255) NULL,
-    Status INT NOT NULL DEFAULT 0, -- 0: Pending, 1: Confirmed, 2: CheckedIn, 3: Cancelled
+    Status INT NOT NULL DEFAULT 0, -- 0: Pending, 1: Confirmed, 2: CheckedIn, 3: Cancelled, 4: NoShow
     CreatedAt DATETIME NOT NULL DEFAULT GETDATE()
 );
 GO
@@ -297,6 +310,37 @@ CREATE TABLE StockTransactions (
 );
 GO
 
+-- 19. ĐỊNH LƯỢNG NGUYÊN LIỆU CHO SIZE / TOPPING (PRODUCT_ATTRIBUTE_RECIPES)
+CREATE TABLE ProductAttributeRecipes (
+    AttributeRecipeId INT IDENTITY(1,1) PRIMARY KEY,
+    AttributeId INT NOT NULL CONSTRAINT FK_ProductAttributeRecipes_Attributes REFERENCES ProductAttributes(AttributeId) ON DELETE CASCADE,
+    IngredientId INT NOT NULL CONSTRAINT FK_ProductAttributeRecipes_Ingredients REFERENCES Ingredients(IngredientId),
+    QuantityRequired DECIMAL(18,2) NOT NULL,
+    CONSTRAINT UQ_ProductAttributeRecipes_Attr_Ingredient UNIQUE (AttributeId, IngredientId)
+);
+GO
+
+-- 20. VÍ VOUCHER ĐÃ ĐỔI ĐIỂM CỦA HỘI VIÊN (ACCOUNT_VOUCHERS)
+CREATE TABLE AccountVouchers (
+    AccountVoucherId INT IDENTITY(1,1) PRIMARY KEY,
+    AccountId INT NOT NULL CONSTRAINT FK_AccountVouchers_Accounts REFERENCES Accounts(AccountId),
+    DiscountId INT NOT NULL CONSTRAINT FK_AccountVouchers_Discounts REFERENCES Discounts(DiscountId),
+    VoucherCode NVARCHAR(50) NOT NULL,
+    Status INT NOT NULL DEFAULT 0, -- 0: Available, 1: Used, 2: Expired
+    RedeemedAt DATETIME NOT NULL DEFAULT GETDATE(),
+    UsedAt DATETIME NULL,
+    UsedOrderId INT NULL CONSTRAINT FK_AccountVouchers_Orders REFERENCES Orders(OrderId)
+);
+GO
+
+-- 21. KHÓA CHỐNG TRÙNG LẶP ĐƠN / GỌI THÊM MÓN (ORDER_IDEMPOTENCY_KEYS)
+CREATE TABLE OrderIdempotencyKeys (
+    IdempotencyKey NVARCHAR(100) PRIMARY KEY,
+    OrderId INT NOT NULL CONSTRAINT FK_OrderIdempotencyKeys_Orders REFERENCES Orders(OrderId) ON DELETE CASCADE,
+    CreatedAt DATETIME NOT NULL DEFAULT GETDATE()
+);
+GO
+
 -- INDEXES HIỆU NĂNG
 CREATE NONCLUSTERED INDEX IX_Products_CategoryId ON Products(CategoryId);
 CREATE NONCLUSTERED INDEX IX_Products_ProductName ON Products(ProductName);
@@ -315,6 +359,8 @@ CREATE NONCLUSTERED INDEX IX_Discounts_Code ON Discounts(Code);
 CREATE NONCLUSTERED INDEX IX_LoyaltyTransactions_AccountId ON LoyaltyTransactions(AccountId);
 CREATE NONCLUSTERED INDEX IX_ProductRecipes_ProductId ON ProductRecipes(ProductId);
 CREATE NONCLUSTERED INDEX IX_StockTransactions_IngredientId_CreatedAt ON StockTransactions(IngredientId, CreatedAt DESC);
+CREATE NONCLUSTERED INDEX IX_ProductAttributeRecipes_AttributeId ON ProductAttributeRecipes(AttributeId);
+CREATE NONCLUSTERED INDEX IX_AccountVouchers_Account_Code ON AccountVouchers(AccountId, VoucherCode, Status);
 GO
 
 -- ======================================================================================
@@ -469,8 +515,8 @@ SET IDENTITY_INSERT Orders ON;
 INSERT INTO Orders (OrderId, OrderCode, TableId, AccountId, CustomerName, PhoneNumber, OrderType, Note, DiscountCode, TotalAmount, DiscountAmount, FinalAmount, Status, PaymentStatus, CreatedAt, CompletedAt) VALUES
 (1, 'ORD-20261004-001', 1, 4, N'Anh Tuấn', '0912345678', 1, N'Khách ngồi tầng trệt, không dùng đường', NULL, 64000, 0, 64000, 3, 1, DATEADD(MINUTE, -120, GETDATE()), DATEADD(MINUTE, -105, GETDATE())),
 (2, 'ORD-20261004-002', 4, 4, N'Chị Mai', '0923456789', 1, N'Uống tại chỗ ngắm ban công', NULL, 90000, 0, 90000, 3, 1, DATEADD(MINUTE, -90, GETDATE()), DATEADD(MINUTE, -75, GETDATE())),
-(3, 'ORD-20261004-003', 5, 5, N'Hội bạn thân', '0934567890', 1, N'Bàn ban công gọi thêm bánh ngọt', 'BANMOI10', 135000, 10000, 125000, 2, 0, DATEADD(MINUTE, -45, GETDATE()), NULL),
-(4, 'ORD-20261004-004', 8, 4, N'Đoàn công tác TechCorp', '0945678901', 1, N'Phòng VIP 1 dùng bữa trưa và cà phê', 'VIPMEMBER', 431000, 43100, 387900, 1, 0, DATEADD(MINUTE, -30, GETDATE()), NULL),
+(3, 'ORD-20261004-003', 5, 5, N'Hội bạn thân', '0934567890', 1, N'Bàn ban công gọi thêm bánh ngọt', 'BANMOI10', 135000, 13500, 121500, 2, 0, DATEADD(MINUTE, -45, GETDATE()), NULL),
+(4, 'ORD-20261004-004', 8, 4, N'Đoàn công tác TechCorp', '0945678901', 1, N'Phòng VIP 1 dùng bữa trưa và cà phê', 'VIPMEMBER', 431000, 64650, 366350, 1, 0, DATEADD(MINUTE, -30, GETDATE()), NULL),
 (5, 'ORD-20261004-005', NULL, 3, N'Khách vãng lai A', '0956789012', 2, N'Mua mang về gấp, cho đá riêng', NULL, 58000, 0, 58000, 3, 1, DATEADD(MINUTE, -25, GETDATE()), DATEADD(MINUTE, -20, GETDATE())),
 (6, 'ORD-20261004-006', 1, 5, N'Anh Khang', '0908901234', 1, N'Gọi 1 bạc xỉu và 1 tiramisu', NULL, 80000, 0, 80000, 1, 0, DATEADD(MINUTE, -15, GETDATE()), NULL),
 (7, 'ORD-20261004-007', NULL, 8, N'Bùi Vĩnh Khang', '0908901234', 2, N'Mang về 2 ly trà đào cam sả', NULL, 84000, 0, 84000, 0, 0, DATEADD(MINUTE, -10, GETDATE()), NULL),
@@ -515,8 +561,8 @@ GO
 
 -- 12. ĐẶT BÀN TRƯỚC MẪU (KHỚP PHÒNG VIP-02 STATUS = 3)
 SET IDENTITY_INSERT Reservations ON;
-INSERT INTO Reservations (ReservationId, TableId, CustomerName, PhoneNumber, GuestCount, ArrivalTime, DepositAmount, Note, Status) VALUES
-(1, 9, N'Đoàn đối tác VIB', '0909012345', 8, DATEADD(HOUR, 2, GETDATE()), 500000, N'Chuẩn bị máy chiếu phòng VIP 02', 1);
+INSERT INTO Reservations (ReservationId, TableId, AccountId, CustomerName, PhoneNumber, GuestCount, ArrivalTime, DurationMinutes, HoldGraceMinutes, ExpiresAt, DepositAmount, DepositApplied, Note, Status) VALUES
+(1, 9, 9, N'Đoàn đối tác VIB', '0909012345', 8, DATEADD(HOUR, 2, GETDATE()), 120, 30, DATEADD(MINUTE, 150, GETDATE()), 500000, 0, N'Chuẩn bị máy chiếu phòng VIP 02', 1);
 SET IDENTITY_INSERT Reservations OFF;
 GO
 
@@ -529,7 +575,7 @@ INSERT INTO LoyaltyTransactions (TransactionId, AccountId, OrderId, PointsDelta,
 SET IDENTITY_INSERT LoyaltyTransactions OFF;
 GO
 
--- 14. NGUYÊN LIỆU KHO & ĐỊNH LƯỢNG BOM MẪU (12 NGUYÊN LIỆU + CÔNG THỨC)
+-- 14. NGUYÊN LIỆU KHO & ĐỊNH LƯỢNG BOM ĐẦY ĐỦ 34 MÓN + MODIFIERS
 SET IDENTITY_INSERT Ingredients ON;
 INSERT INTO Ingredients (IngredientId, IngredientName, Unit, CurrentStock, MinThreshold, CostPerUnit, IsActive) VALUES
 (1, N'Cà phê hạt Robusta Đắk Lắk', N'gram', 5000, 1000, 320, 1),
@@ -543,7 +589,21 @@ INSERT INTO Ingredients (IngredientId, IngredientName, Unit, CurrentStock, MinTh
 (9, N'Chanh tươi & Lá bạc hà', N'gram', 450, 500, 120, 1),
 (10, N'Cam sành tươi Tiền Giang', N'gram', 4200, 1000, 42, 1),
 (11, N'Thịt bò Wagyu thái lát', N'gram', 2500, 600, 850, 1),
-(12, N'Kem phô mai Tiramisu', N'gram', 320, 400, 290, 1);
+(12, N'Kem phô mai Tiramisu', N'gram', 320, 400, 290, 1),
+(13, N'Trứng gà tươi', N'quả', 120, 24, 3500, 1),
+(14, N'Nước cốt dừa Bến Tre', N'ml', 3000, 600, 65, 1),
+(15, N'Sốt Caramel & Vani', N'ml', 2000, 400, 95, 1),
+(16, N'Vải thiều & Hoa hồng', N'gram', 2500, 500, 110, 1),
+(17, N'Dâu tằm Đà Lạt & Tuyết nhĩ', N'gram', 2000, 400, 125, 1),
+(18, N'Trà xanh Thái & Bột Matcha Uji', N'gram', 1500, 300, 420, 1),
+(19, N'Bột Cacao & Bánh Oreo', N'gram', 2000, 400, 180, 1),
+(20, N'Bơ sáp Đắk Lắk & Sầu riêng', N'gram', 3000, 600, 160, 1),
+(21, N'Bánh nướng & Cốt bông lan', N'phần', 80, 15, 14000, 1),
+(22, N'Pate gan & Xúc xích tiêu', N'gram', 3500, 700, 190, 1),
+(23, N'Thịt heo, Tôm mực & Giò chả', N'gram', 5000, 1000, 240, 1),
+(24, N'Khoai tây, Gà tươi & Nem chua', N'gram', 6000, 1200, 150, 1),
+(25, N'Dưa hấu, Táo xanh & Cần tây', N'gram', 5000, 1000, 55, 1),
+(26, N'Kem Cheese Macchiato & Thạch dừa', N'gram', 2500, 500, 130, 1);
 SET IDENTITY_INSERT Ingredients OFF;
 GO
 
@@ -551,16 +611,48 @@ INSERT INTO ProductRecipes (ProductId, IngredientId, QuantityRequired) VALUES
 (1, 1, 25),
 (2, 1, 25), (2, 3, 35),
 (3, 1, 15), (3, 3, 30), (3, 4, 80),
+(4, 1, 20), (4, 13, 2), (4, 3, 25),
+(5, 1, 20), (5, 14, 80), (5, 3, 30),
 (6, 1, 25), (6, 4, 40),
+(7, 2, 22),
 (8, 2, 18), (8, 4, 180),
 (9, 2, 18), (9, 4, 150),
+(10, 2, 18), (10, 4, 150), (10, 15, 25),
 (11, 5, 12), (11, 6, 45),
+(12, 5, 12), (12, 16, 60),
+(13, 5, 12), (13, 17, 60),
 (14, 5, 15), (14, 4, 120), (14, 7, 50),
+(15, 4, 150), (15, 7, 60), (15, 26, 40),
+(16, 18, 15), (16, 4, 120), (16, 26, 35),
+(17, 18, 18), (17, 4, 120),
+(18, 19, 45), (18, 4, 120),
+(19, 20, 150), (19, 3, 35),
 (20, 12, 65),
+(21, 21, 1), (21, 13, 1),
+(22, 21, 1), (22, 13, 1),
+(23, 22, 120), (23, 13, 2), (23, 11, 60),
 (24, 11, 140),
+(25, 23, 150),
+(26, 23, 140), (26, 13, 1),
+(27, 24, 180),
+(28, 24, 220),
+(29, 24, 160),
 (30, 10, 250),
+(31, 25, 280),
+(32, 25, 260),
 (33, 8, 60), (33, 9, 25),
 (34, 8, 150), (34, 9, 15);
+GO
+
+INSERT INTO ProductAttributeRecipes (AttributeId, IngredientId, QuantityRequired) VALUES
+(2, 1, 10), (2, 3, 15),
+(3, 6, 30),
+(7, 5, 8), (7, 4, 60),
+(8, 7, 40),
+(9, 26, 35),
+(10, 26, 35),
+(11, 22, 60),
+(12, 22, 50);
 GO
 
 SET IDENTITY_INSERT StockTransactions ON;
@@ -571,5 +663,6 @@ INSERT INTO StockTransactions (StockTxId, IngredientId, OrderId, AccountId, Chan
 SET IDENTITY_INSERT StockTransactions OFF;
 GO
 
-PRINT N'KHỞI TẠO CSDL RESTAURANTPOSDB (18 BẢNG) THÀNH CÔNG!'
+PRINT N'KHỞI TẠO CSDL RESTAURANTPOSDB (21 BẢNG) THÀNH CÔNG!'
 GO
+
