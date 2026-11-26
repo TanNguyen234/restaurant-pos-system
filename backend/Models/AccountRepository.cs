@@ -13,6 +13,8 @@ public class AccountRepository : BaseRepository
 
     public AccountRepository(RestaurantPosContext context) : base(context) { }
 
+    public Account? GetById(int accountId) => context.Accounts.Find(accountId);
+
     public async Task<(bool Success, string Message, Account? Account, string? EmailOtp)> RegisterAsync(RegisterDto dto)
     {
         string username = dto.Username.Trim();
@@ -58,7 +60,7 @@ public class AccountRepository : BaseRepository
             IsActive = true,
             IsEmailVerified = false,
             EmailVerificationToken = hashedOtp,
-            ResetPasswordExpiry = expiry,
+            EmailVerificationExpiry = expiry,
             OAuthProvider = "Local",
             LoyaltyPoints = 0,
             CreatedAt = DateTime.Now
@@ -278,7 +280,7 @@ public class AccountRepository : BaseRepository
 
         string otp = RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
         account.EmailVerificationToken = PasswordHasher.ComputeSha256($"verify:{account.Email.ToLowerInvariant()}:{otp}");
-        account.ResetPasswordExpiry = DateTime.Now.AddMinutes(15);
+        account.EmailVerificationExpiry = DateTime.Now.AddMinutes(15);
         account.UpdatedAt = DateTime.Now;
         await context.SaveChangesAsync();
 
@@ -299,8 +301,8 @@ public class AccountRepository : BaseRepository
         }
 
         if (string.IsNullOrWhiteSpace(account.EmailVerificationToken) ||
-            !account.ResetPasswordExpiry.HasValue ||
-            account.ResetPasswordExpiry.Value < DateTime.Now)
+            !account.EmailVerificationExpiry.HasValue ||
+            account.EmailVerificationExpiry.Value < DateTime.Now)
         {
             return (false, "Mã xác thực email đã hết hạn hoặc chưa được yêu cầu");
         }
@@ -313,7 +315,7 @@ public class AccountRepository : BaseRepository
 
         account.IsEmailVerified = true;
         account.EmailVerificationToken = null;
-        account.ResetPasswordExpiry = null;
+        account.EmailVerificationExpiry = null;
         account.UpdatedAt = DateTime.Now;
         await context.SaveChangesAsync();
 

@@ -55,8 +55,27 @@ public class InventoryController : BaseController
     {
         var res = await Provider.Inventory.UpdateIngredientAsync(id, dto);
         if (!res.Success) return BadRequest(new { statusCode = 400, success = false, message = res.Message });
-        await _realtime.NotifyInventoryAlertAsync(new { action = "Updated", ingredient = res.Data });
+        await _realtime.NotifyInventoryAlertAsync(new
+        {
+            action = "Updated",
+            ingredient = res.Data,
+            availabilityChanges = res.AvailabilityChanges
+        });
+        if (res.AvailabilityChanges.Count > 0)
+        {
+            await _realtime.NotifyKdsChangedAsync(new { availabilityChanges = res.AvailabilityChanges });
+        }
         return Ok(new { statusCode = 200, success = true, message = res.Message, data = res.Data });
+    }
+
+    [HttpDelete("ingredients/{id:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> DeleteIngredient(int id)
+    {
+        var res = await Provider.Inventory.DeleteIngredientAsync(id);
+        if (!res.Success) return BadRequest(new { statusCode = 400, success = false, message = res.Message });
+        await _realtime.NotifyInventoryAlertAsync(new { action = "Deleted", ingredientId = id });
+        return Ok(new { statusCode = 200, success = true, message = res.Message });
     }
 
     [HttpPost("ingredients/{id:int}/adjust")]
@@ -65,8 +84,25 @@ public class InventoryController : BaseController
     {
         var res = await Provider.Inventory.AdjustStockAsync(id, dto, GetCallerAccountId());
         if (!res.Success) return BadRequest(new { statusCode = 400, success = false, message = res.Message });
-        await _realtime.NotifyInventoryAlertAsync(new { action = "Adjusted", ingredient = res.Data });
-        return Ok(new { statusCode = 200, success = true, message = res.Message, data = res.Data });
+        await _realtime.NotifyInventoryAlertAsync(new
+        {
+            action = "Adjusted",
+            ingredient = res.Data,
+            lowStockAlerts = res.LowStockAlerts,
+            availabilityChanges = res.AvailabilityChanges
+        });
+        if (res.AvailabilityChanges.Count > 0)
+        {
+            await _realtime.NotifyKdsChangedAsync(new { availabilityChanges = res.AvailabilityChanges });
+        }
+        return Ok(new
+        {
+            statusCode = 200,
+            success = true,
+            message = res.Message,
+            data = res.Data,
+            availabilityChanges = res.AvailabilityChanges
+        });
     }
 
     [HttpGet("recipes/{productId:int}")]
@@ -74,7 +110,8 @@ public class InventoryController : BaseController
     public async Task<IActionResult> GetRecipes(int productId)
     {
         var data = await Provider.Inventory.GetRecipesByProductAsync(productId);
-        return Ok(new { statusCode = 200, success = true, data });
+        var attributeRecipes = await Provider.Inventory.GetAttributeRecipesByProductAsync(productId);
+        return Ok(new { statusCode = 200, success = true, data, attributeRecipes });
     }
 
     [HttpPut("recipes/{productId:int}")]
@@ -82,6 +119,28 @@ public class InventoryController : BaseController
     public async Task<IActionResult> SaveRecipes(int productId, [FromBody] List<RecipeItemInputDto> items)
     {
         var res = await Provider.Inventory.SaveRecipesForProductAsync(productId, items ?? new());
+        if (!res.Success) return BadRequest(new { statusCode = 400, success = false, message = res.Message });
+        if (res.AvailabilityChanges.Count > 0)
+        {
+            await _realtime.NotifyInventoryAlertAsync(new { action = "RecipeUpdated", productId, availabilityChanges = res.AvailabilityChanges });
+            await _realtime.NotifyKdsChangedAsync(new { availabilityChanges = res.AvailabilityChanges });
+        }
+        return Ok(new { statusCode = 200, success = true, message = res.Message, data = res.Data, availabilityChanges = res.AvailabilityChanges });
+    }
+
+    [HttpGet("attribute-recipes/{attributeId:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER,HEAD_CHEF,BARISTA_LEAD,KITCHEN")]
+    public async Task<IActionResult> GetAttributeRecipes(int attributeId)
+    {
+        var data = await Provider.Inventory.GetAttributeRecipesAsync(attributeId);
+        return Ok(new { statusCode = 200, success = true, data });
+    }
+
+    [HttpPut("attribute-recipes/{attributeId:int}")]
+    [Authorize(Roles = "ADMIN,MANAGER")]
+    public async Task<IActionResult> SaveAttributeRecipes(int attributeId, [FromBody] List<RecipeItemInputDto> items)
+    {
+        var res = await Provider.Inventory.SaveRecipesForAttributeAsync(attributeId, items ?? new());
         if (!res.Success) return BadRequest(new { statusCode = 400, success = false, message = res.Message });
         return Ok(new { statusCode = 200, success = true, message = res.Message, data = res.Data });
     }

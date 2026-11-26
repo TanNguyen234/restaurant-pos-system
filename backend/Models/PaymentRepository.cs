@@ -46,6 +46,29 @@ public class PaymentRepository : BaseRepository
 {
     public PaymentRepository(RestaurantPosContext context) : base(context) { }
 
+    private async Task ReleaseTableOrPreserveReservationAsync(DiningTable table, int excludedOrderId)
+    {
+        bool hasOtherActive = await context.Orders.AnyAsync(o =>
+            o.TableId == table.TableId &&
+            o.OrderId != excludedOrderId &&
+            o.Status < 3 &&
+            o.PaymentStatus == 0);
+        if (hasOtherActive) return;
+
+        var now = DateTime.Now;
+        var lockLimit = now.AddMinutes(TableRepository.PreArrivalLockMinutes);
+        bool hasLockedReservation = await context.Reservations.AnyAsync(r =>
+            r.TableId == table.TableId &&
+            (r.Status == 0 || r.Status == 1) &&
+            r.ArrivalTime <= lockLimit &&
+            (r.ExpiresAt ?? r.ArrivalTime.AddMinutes(TableRepository.DefaultHoldGraceMinutes)) > now);
+
+        table.Status = hasLockedReservation ? 3 : 0;
+        table.CurrentOrderId = null;
+        table.UpdatedAt = now;
+        context.DiningTables.Update(table);
+    }
+
     public async Task<(bool Success, string Message, PaymentDto? Payment)> ProcessCashPaymentAsync(
         int orderId,
         string? note = null,
@@ -77,8 +100,9 @@ public class PaymentRepository : BaseRepository
             decimal remaining = Math.Max(0, order.FinalAmount - alreadyPaid);
             decimal payAmount = amount.HasValue ? amount.Value : remaining;
 
-            if (order.FinalAmount == 0 && remaining == 0)
+            if (remaining == 0)
             {
+                // Đã đủ tiền (ví dụ: tiền cọc hoặc giảm 100%) -> chốt hoàn tất đơn không cần thu thêm
                 payAmount = 0;
             }
             else
@@ -105,20 +129,24 @@ public class PaymentRepository : BaseRepository
                 activeShiftId = openShift?.ShiftId;
             }
 
-            var payment = new Payment
+            Payment? createdPayment = null;
+            if (payAmount > 0 || (order.FinalAmount == 0 && alreadyPaid == 0))
             {
-                OrderId = orderId,
-                ShiftId = activeShiftId,
-                ProcessedByAccountId = processedByAccountId,
-                PaymentMethod = method,
-                Amount = payAmount,
-                TransactionRef = txnRef,
-                Status = 1,
-                Note = string.IsNullOrWhiteSpace(note) ? $"Thanh toán đơn hàng {order.OrderCode}" : note.Trim(),
-                PaymentTime = DateTime.Now
-            };
+                createdPayment = new Payment
+                {
+                    OrderId = orderId,
+                    ShiftId = activeShiftId,
+                    ProcessedByAccountId = processedByAccountId,
+                    PaymentMethod = method,
+                    Amount = payAmount,
+                    TransactionRef = txnRef,
+                    Status = 1,
+                    Note = string.IsNullOrWhiteSpace(note) ? $"Thanh toán đơn hàng {order.OrderCode}" : note.Trim(),
+                    PaymentTime = DateTime.Now
+                };
+                context.Payments.Add(createdPayment);
+            }
 
-            context.Payments.Add(payment);
             decimal newTotalPaid = alreadyPaid + payAmount;
             decimal newRemaining = Math.Max(0, order.FinalAmount - newTotalPaid);
             bool isFullyPaid = newTotalPaid >= order.FinalAmount;
@@ -133,13 +161,9 @@ public class PaymentRepository : BaseRepository
                 if (order.TableId.HasValue)
                 {
                     var table = await context.DiningTables.FindAsync(order.TableId.Value);
-                    if (table != null && (table.CurrentOrderId == order.OrderId ||
-                        !await context.Orders.AnyAsync(o => o.TableId == table.TableId && o.OrderId != order.OrderId && o.Status < 3 && o.PaymentStatus == 0)))
+                    if (table != null)
                     {
-                        table.Status = 0;
-                        table.CurrentOrderId = null;
-                        table.UpdatedAt = DateTime.Now;
-                        context.DiningTables.Update(table);
+                        await ReleaseTableOrPreserveReservationAsync(table, order.OrderId);
                     }
                 }
 
@@ -155,18 +179,18 @@ public class PaymentRepository : BaseRepository
                     : $"Đã ghi nhận thanh toán phần {payAmount:N0}đ. Còn lại: {newRemaining:N0}đ",
                 new PaymentDto
                 {
-                    PaymentId = payment.PaymentId,
-                    OrderId = payment.OrderId,
+                    PaymentId = createdPayment?.PaymentId ?? 0,
+                    OrderId = orderId,
                     OrderCode = order.OrderCode,
-                    PaymentMethod = payment.PaymentMethod,
-                    Amount = payment.Amount,
+                    PaymentMethod = createdPayment?.PaymentMethod ?? method,
+                    Amount = payAmount,
                     TotalPaid = newTotalPaid,
                     RemainingAmount = newRemaining,
                     IsFullyPaid = isFullyPaid,
-                    TransactionRef = payment.TransactionRef,
-                    Status = payment.Status,
-                    Note = payment.Note,
-                    PaymentTime = payment.PaymentTime
+                    TransactionRef = createdPayment?.TransactionRef ?? txnRef,
+                    Status = 1,
+                    Note = createdPayment?.Note ?? note,
+                    PaymentTime = createdPayment?.PaymentTime ?? DateTime.Now
                 });
         }
         catch (Exception)
@@ -178,22 +202,49 @@ public class PaymentRepository : BaseRepository
 
     private async Task AwardLoyaltyPointsIfMemberAsync(Order order)
     {
-        if (!order.AccountId.HasValue || order.FinalAmount < 1000) return;
+        if (order.FinalAmount < 1000) return;
 
-        var account = await context.Accounts.FindAsync(order.AccountId.Value);
-        if (account == null) return;
+        // Tránh cộng điểm trùng nếu đã tích điểm cho đơn hàng này
+        bool alreadyAwarded = await context.LoyaltyTransactions
+            .AnyAsync(t => t.OrderId == order.OrderId && t.Type == "EARN");
+        if (alreadyAwarded) return;
 
-        var role = await context.Roles.FindAsync(account.RoleId);
-        if (role == null || (role.RoleCode != "MEMBER" && role.RoleCode != "VIP_MEMBER")) return;
+        Account? targetMember = null;
+        if (order.AccountId.HasValue)
+        {
+            var acc = await context.Accounts.FindAsync(order.AccountId.Value);
+            if (acc != null && acc.IsActive)
+            {
+                var role = await context.Roles.FindAsync(acc.RoleId);
+                if (role != null && (role.RoleCode == "MEMBER" || role.RoleCode == "VIP_MEMBER"))
+                {
+                    targetMember = acc;
+                }
+            }
+        }
+
+        // Nếu đơn do Nhân viên/Thu ngân tạo tại quầy nhưng có SĐT của Hội viên -> tìm hội viên để cộng điểm
+        if (targetMember == null && !string.IsNullOrWhiteSpace(order.PhoneNumber))
+        {
+            string phone = order.PhoneNumber.Trim();
+            targetMember = await (
+                from a in context.Accounts
+                join r in context.Roles on a.RoleId equals r.RoleId
+                where a.IsActive && a.PhoneNumber == phone && (r.RoleCode == "MEMBER" || r.RoleCode == "VIP_MEMBER")
+                select a
+            ).FirstOrDefaultAsync();
+        }
+
+        if (targetMember == null) return;
 
         int earnedPoints = (int)Math.Floor(order.FinalAmount / 1000m);
         if (earnedPoints <= 0) return;
 
-        account.LoyaltyPoints += earnedPoints;
-        account.UpdatedAt = DateTime.Now;
+        targetMember.LoyaltyPoints += earnedPoints;
+        targetMember.UpdatedAt = DateTime.Now;
         context.LoyaltyTransactions.Add(new LoyaltyTransaction
         {
-            AccountId = account.AccountId,
+            AccountId = targetMember.AccountId,
             OrderId = order.OrderId,
             PointsDelta = earnedPoints,
             Type = "EARN",
@@ -256,18 +307,29 @@ public class PaymentRepository : BaseRepository
         string vnpUrl,
         string returnUrl,
         string clientIp,
-        string? orderInfo = null)
+        string? orderInfo = null,
+        decimal? customAmount = null)
     {
         var order = await context.Orders.FindAsync(orderId);
         if (order == null) return (false, "Không tìm thấy đơn hàng", null);
         if (order.Status == 4) return (false, "Đơn hàng đã bị hủy", null);
         if (order.PaymentStatus == 1) return (false, "Đơn hàng này đã được thanh toán trước đó", null);
-        if (order.FinalAmount <= 0) return (false, "Giá trị đơn hàng phải lớn hơn 0đ để thanh toán qua VNPay", null);
+
+        decimal alreadyPaid = await context.Payments
+            .Where(p => p.OrderId == orderId && p.Status == 1)
+            .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+        decimal remaining = Math.Max(0, order.FinalAmount - alreadyPaid);
+        decimal payAmount = customAmount.HasValue ? customAmount.Value : remaining;
+        if (payAmount <= 0 || payAmount > remaining)
+        {
+            return (false, $"Số tiền thanh toán VNPay không hợp lệ (còn phải thu: {remaining:N0}đ)", null);
+        }
 
         string normalizedIp = string.IsNullOrWhiteSpace(clientIp) || clientIp == "::1" ? "127.0.0.1" : clientIp;
 
         string vnp_TxnRef = $"{order.OrderId}_{DateTime.Now.Ticks}";
-        long vnp_Amount = (long)(order.FinalAmount * 100);
+        long vnp_Amount = (long)Math.Round(payAmount * 100m, 0);
         string vnp_OrderInfo = string.IsNullOrWhiteSpace(orderInfo)
             ? $"Thanh toan don hang {order.OrderCode}"
             : orderInfo.Trim();
@@ -380,7 +442,15 @@ public class PaymentRepository : BaseRepository
         var order = await context.Orders.FindAsync(orderId);
         if (order == null) return (false, "Không tìm thấy đơn hàng", null);
         if (order.Status == 4) return (false, "Đơn hàng đã bị hủy, không thể ghi nhận thanh toán", orderId);
-        if (order.PaymentStatus == 1) return (true, "Đơn hàng đã được thanh toán trước đó (Idempotent)", orderId);
+
+        string resolvedTxnRef = queryParams.TryGetValue("vnp_TransactionNo", out var vnpTxn) && !string.IsNullOrWhiteSpace(vnpTxn)
+            ? vnpTxn.Trim()
+            : txnRef!;
+
+        bool duplicateCallback = await context.Payments.AnyAsync(p =>
+            p.OrderId == orderId && p.Status == 1 && p.TransactionRef == resolvedTxnRef);
+        if (duplicateCallback || order.PaymentStatus == 1)
+            return (true, "Đơn hàng đã được thanh toán trước đó (Idempotent)", orderId);
 
         if (!queryParams.TryGetValue("vnp_Amount", out var amtStr) || !long.TryParse(amtStr, out var rawAmt))
         {
@@ -388,20 +458,55 @@ public class PaymentRepository : BaseRepository
         }
 
         decimal paidAmount = rawAmt / 100m;
-        if (paidAmount != order.FinalAmount)
+        decimal alreadyPaid = await context.Payments
+            .Where(p => p.OrderId == orderId && p.Status == 1)
+            .SumAsync(p => (decimal?)p.Amount) ?? 0;
+        decimal remaining = Math.Max(0, order.FinalAmount - alreadyPaid);
+
+        if (paidAmount <= 0 || paidAmount > remaining)
         {
-            return (false, $"Số tiền VNPay ({paidAmount:N0}đ) không khớp với giá trị đơn hàng ({order.FinalAmount:N0}đ)", orderId);
+            return (false, $"Số tiền VNPay ({paidAmount:N0}đ) không khớp với số tiền còn phải thu ({remaining:N0}đ)", orderId);
         }
 
         using var tx = await context.Database.BeginTransactionAsync();
         try
         {
+            // Gắn thanh toán VNPay cho tối đa 1 ca duy nhất đang mở để Z-Report không đếm trùng
+            int? targetShiftId = null;
+            int? targetShiftAccountId = null;
+            if (order.AccountId.HasValue)
+            {
+                var orderShift = await context.Shifts
+                    .Where(s => s.AccountId == order.AccountId.Value && s.Status == 1)
+                    .OrderByDescending(s => s.StartTime)
+                    .FirstOrDefaultAsync();
+                if (orderShift != null)
+                {
+                    targetShiftId = orderShift.ShiftId;
+                    targetShiftAccountId = orderShift.AccountId;
+                }
+            }
+            if (!targetShiftId.HasValue)
+            {
+                var singleOpenShift = await context.Shifts
+                    .Where(s => s.Status == 1)
+                    .OrderBy(s => s.StartTime)
+                    .FirstOrDefaultAsync();
+                if (singleOpenShift != null)
+                {
+                    targetShiftId = singleOpenShift.ShiftId;
+                    targetShiftAccountId = singleOpenShift.AccountId;
+                }
+            }
+
             var payment = new Payment
             {
                 OrderId = orderId,
+                ShiftId = targetShiftId,
+                ProcessedByAccountId = targetShiftAccountId,
                 PaymentMethod = "VNPay",
                 Amount = paidAmount,
-                TransactionRef = queryParams.TryGetValue("vnp_TransactionNo", out var vnpTxn) && !string.IsNullOrWhiteSpace(vnpTxn) ? vnpTxn : txnRef,
+                TransactionRef = resolvedTxnRef,
                 Status = 1,
                 Note = "Thanh toán qua cổng VNPay Sandbox",
                 PaymentTime = DateTime.Now
@@ -409,24 +514,26 @@ public class PaymentRepository : BaseRepository
 
             context.Payments.Add(payment);
 
-            order.PaymentStatus = 1;
-            order.Status = 3;
-            order.CompletedAt = DateTime.Now;
-            context.Orders.Update(order);
-
-            if (order.TableId.HasValue)
+            decimal totalPaid = alreadyPaid + paidAmount;
+            if (totalPaid >= order.FinalAmount)
             {
-                var table = await context.DiningTables.FindAsync(order.TableId.Value);
-                if (table != null && table.CurrentOrderId == order.OrderId)
+                order.PaymentStatus = 1;
+                order.Status = 3;
+                order.CompletedAt = DateTime.Now;
+                context.Orders.Update(order);
+
+                if (order.TableId.HasValue)
                 {
-                    table.Status = 0;
-                    table.CurrentOrderId = null;
-                    table.UpdatedAt = DateTime.Now;
-                    context.DiningTables.Update(table);
+                    var table = await context.DiningTables.FindAsync(order.TableId.Value);
+                    if (table != null)
+                    {
+                        await ReleaseTableOrPreserveReservationAsync(table, order.OrderId);
+                    }
                 }
+
+                await AwardLoyaltyPointsIfMemberAsync(order);
             }
 
-            await AwardLoyaltyPointsIfMemberAsync(order);
             await context.SaveChangesAsync();
             await tx.CommitAsync();
 

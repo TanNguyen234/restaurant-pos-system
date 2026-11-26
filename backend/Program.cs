@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
@@ -65,6 +66,7 @@ builder.Services.AddCors(options =>
         })
         .AllowAnyMethod()
         .AllowAnyHeader()
+        .WithExposedHeaders("Content-Disposition")
         .AllowCredentials();
     });
 });
@@ -82,6 +84,7 @@ builder.Services.AddSingleton<OAuthProviderService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddSignalR();
 builder.Services.AddSingleton<PosRealtimeNotifier>();
+builder.Services.AddHostedService<ReservationExpirationService>();
 
 // 4. Cấu hình JWT Bearer Authentication & Authorization (Fail-fast nếu thiếu Jwt:Key)
 var jwtSettings = builder.Configuration.GetSection("Jwt");
@@ -108,6 +111,30 @@ builder.Services.AddAuthentication(options =>
         ValidateLifetime = true,
         ClockSkew = TimeSpan.Zero
     };
+    options.Events = new JwtBearerEvents
+    {
+        OnTokenValidated = async context =>
+        {
+            var idClaim = context.Principal?.FindFirst(ClaimTypes.NameIdentifier)?.Value
+                ?? context.Principal?.FindFirst("accountId")?.Value;
+            if (!int.TryParse(idClaim, out int accountId) || accountId <= 0)
+            {
+                context.Fail("Phiên đăng nhập không hợp lệ");
+                return;
+            }
+
+            var db = context.HttpContext.RequestServices.GetRequiredService<RestaurantPosContext>();
+            var isActive = await db.Accounts.AsNoTracking()
+                .Where(a => a.AccountId == accountId)
+                .Select(a => (bool?)a.IsActive)
+                .FirstOrDefaultAsync();
+
+            if (isActive != true)
+            {
+                context.Fail("Tài khoản đã bị khóa hoặc không tồn tại");
+            }
+        }
+    };
 });
 
 builder.Services.AddAuthorization();
@@ -120,6 +147,12 @@ builder.Services.AddControllers()
     });
 
 var app = builder.Build();
+
+using (var scope = app.Services.CreateScope())
+{
+    var db = scope.ServiceProvider.GetRequiredService<RestaurantPosContext>();
+    await DatabaseSchemaEnsurer.EnsureAsync(db, app.Logger);
+}
 
 Helper.ConfigureWebRoot(app.Environment.WebRootPath ?? Path.Combine(app.Environment.ContentRootPath, "wwwroot"));
 

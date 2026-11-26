@@ -23,7 +23,7 @@ public class EmailService
         }
     }
 
-    public async Task<(bool Sent, string Message)> SendOtpEmailAsync(string toEmail, string subject, string fullName, string otp, string purpose)
+    public async Task<(bool Sent, string Message)> SendOtpEmailAsync(string toEmail, string subject, string fullName, string otp, string purpose, int expiryMinutes = 5)
     {
         if (string.IsNullOrWhiteSpace(toEmail))
         {
@@ -66,7 +66,7 @@ public class EmailService
                   <div style="font-size:28px;font-weight:700;letter-spacing:6px;background:#f1f5f9;color:#0f172a;padding:14px 20px;border-radius:8px;text-align:center;margin:16px 0;">
                     {WebUtility.HtmlEncode(otp)}
                   </div>
-                  <p style="color:#475569;font-size:13px;">Mã có hiệu lực trong vòng 5 phút. Tuyệt đối không chia sẻ mã này cho người khác.</p>
+                  <p style="color:#475569;font-size:13px;">Mã có hiệu lực trong vòng {expiryMinutes} phút. Tuyệt đối không chia sẻ mã này cho người khác.</p>
                 </div>
                 """;
 

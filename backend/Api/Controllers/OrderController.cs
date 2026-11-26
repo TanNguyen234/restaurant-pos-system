@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Security.Claims;
 using System.Text;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
@@ -19,6 +20,7 @@ public class OrderController : BaseController
     {
         _realtime = realtime;
     }
+
     private int? GetCallerAccountId()
     {
         var claim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
@@ -28,8 +30,31 @@ public class OrderController : BaseController
     private bool IsStaffUser() =>
         User.IsInRole("ADMIN") || User.IsInRole("MANAGER") || User.IsInRole("CASHIER") || User.IsInRole("WAITER") || User.IsInRole("KITCHEN");
 
+    private string? ReadGuestToken(string? bodyToken = null)
+    {
+        var hdr = Request.Headers["X-Guest-Token"].FirstOrDefault();
+        return !string.IsNullOrWhiteSpace(hdr) ? hdr.Trim() : (string.IsNullOrWhiteSpace(bodyToken) ? null : bodyToken.Trim());
+    }
+
+    private async Task BroadcastInventorySideEffectsAsync(OrderRepository repo)
+    {
+        if (repo.LastLowStockAlerts.Count > 0 || repo.LastAvailabilityChanges.Count > 0)
+        {
+            await _realtime.NotifyInventoryAlertAsync(new
+            {
+                action = "OrderStockSync",
+                lowStockAlerts = repo.LastLowStockAlerts,
+                availabilityChanges = repo.LastAvailabilityChanges
+            });
+        }
+        if (repo.LastAvailabilityChanges.Count > 0)
+        {
+            await _realtime.NotifyKdsChangedAsync(new { availabilityChanges = repo.LastAvailabilityChanges });
+        }
+    }
+
     [HttpPost]
-    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER,VIP_MEMBER")]
     public async Task<IActionResult> CreateOrder([FromBody] CreateOrderDto dto)
     {
         if (dto == null)
@@ -49,6 +74,7 @@ public class OrderController : BaseController
         {
             await _realtime.NotifyTableChangedAsync(new { tableId = result.Order.TableId });
         }
+        await BroadcastInventorySideEffectsAsync(Provider.Order);
 
         return Ok(new
         {
@@ -61,6 +87,7 @@ public class OrderController : BaseController
             discountAmount = result.Order?.DiscountAmount,
             finalAmount = result.Order?.FinalAmount,
             tableId = result.Order?.TableId,
+            guestToken = result.Order?.GuestAccessToken,
             data = result.Order
         });
     }
@@ -116,7 +143,7 @@ public class OrderController : BaseController
     }
 
     [HttpGet("{id:int}")]
-    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
+    [AllowAnonymous]
     public async Task<IActionResult> GetOrderById(int id)
     {
         var order = await Provider.Order.GetOrderByIdAsync(id);
@@ -128,9 +155,20 @@ public class OrderController : BaseController
         if (!IsStaffUser())
         {
             int? callerId = GetCallerAccountId();
-            if (order.AccountId.HasValue && callerId.HasValue && order.AccountId.Value != callerId.Value)
+            if (order.AccountId.HasValue)
             {
-                return Forbid();
+                if (!callerId.HasValue) return Unauthorized(new { statusCode = 401, success = false, message = "Vui lòng đăng nhập để xem đơn hàng" });
+                if (order.AccountId.Value != callerId.Value) return Forbid();
+            }
+            else
+            {
+                bool validGuest = await Provider.Order.VerifyGuestTokenAsync(id, ReadGuestToken());
+                if (!validGuest)
+                {
+                    if (!callerId.HasValue)
+                        return Unauthorized(new { statusCode = 401, success = false, message = "Thiếu mã xác thực đơn khách vãng lai" });
+                    return Forbid();
+                }
             }
         }
 
@@ -147,6 +185,18 @@ public class OrderController : BaseController
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
+
+        await _realtime.NotifyOrderChangedAsync("OrderStatusUpdated", new { orderId = id, status = dto.Status, tableId = result.TableId });
+        if (dto.Status == 4)
+        {
+            await _realtime.NotifyKdsChangedAsync(new { orderId = id, cancelled = true });
+        }
+        if (result.TableId.HasValue && (dto.Status == 3 || dto.Status == 4))
+        {
+            await _realtime.NotifyTableChangedAsync(new { tableId = result.TableId.Value });
+        }
+        await BroadcastInventorySideEffectsAsync(Provider.Order);
+
         return Ok(new { statusCode = 200, success = true, message = result.Message, status = dto.Status });
     }
 
@@ -165,11 +215,12 @@ public class OrderController : BaseController
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
         }
 
+        await _realtime.NotifyOrderChangedAsync("OrderUpdated", result.Order);
         return Ok(new { statusCode = 200, success = true, message = result.Message, data = result.Order });
     }
 
     [HttpGet("by-table/{tableId:int}")]
-    [Authorize]
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,KITCHEN")]
     public async Task<IActionResult> GetByTable(int tableId)
     {
         var table = Provider.Table.GetById(tableId);
@@ -189,14 +240,35 @@ public class OrderController : BaseController
 
     [HttpPost("{id:int}/add-items")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
-    public async Task<IActionResult> AddItems(int id, [FromBody] List<CreateOrderItemDto> items)
+    public async Task<IActionResult> AddItems(int id, [FromBody] JsonElement body)
     {
-        if (items == null || items.Count == 0)
+        var jsonOpts = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+        List<CreateOrderItemDto> items;
+        string? idempotencyKey = Request.Headers["X-Idempotency-Key"].FirstOrDefault();
+        string? discountCode = null;
+
+        if (body.ValueKind == JsonValueKind.Array)
+        {
+            items = JsonSerializer.Deserialize<List<CreateOrderItemDto>>(body.GetRawText(), jsonOpts) ?? new();
+        }
+        else if (body.ValueKind == JsonValueKind.Object)
+        {
+            var req = JsonSerializer.Deserialize<AddOrderItemsRequestDto>(body.GetRawText(), jsonOpts);
+            items = req?.Items ?? new();
+            idempotencyKey ??= req?.IdempotencyKey;
+            discountCode = req?.DiscountCode;
+        }
+        else
+        {
+            return BadRequest(new { statusCode = 400, success = false, message = "Định dạng danh sách món không hợp lệ" });
+        }
+
+        if (items.Count == 0)
         {
             return BadRequest(new { statusCode = 400, success = false, message = "Vui lòng chọn ít nhất 1 món để thêm vào đơn" });
         }
 
-        var result = await Provider.Order.AddItemsToOrderAsync(id, items);
+        var result = await Provider.Order.AddItemsToOrderAsync(id, items, idempotencyKey, discountCode, GetCallerAccountId());
         if (!result.Success)
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
@@ -204,6 +276,7 @@ public class OrderController : BaseController
 
         await _realtime.NotifyOrderChangedAsync("OrderUpdated", result.Order);
         await _realtime.NotifyKdsChangedAsync(new { orderId = id });
+        await BroadcastInventorySideEffectsAsync(Provider.Order);
 
         return Ok(new
         {
@@ -232,6 +305,7 @@ public class OrderController : BaseController
 
         await _realtime.NotifyOrderChangedAsync("OrderVoided", result.Order);
         await _realtime.NotifyKdsChangedAsync(new { orderId = id });
+        await BroadcastInventorySideEffectsAsync(Provider.Order);
 
         return Ok(new
         {
@@ -258,9 +332,10 @@ public class OrderController : BaseController
     public async Task<IActionResult> ExportCsv(
         [FromQuery] DateTime? fromDate = null,
         [FromQuery] DateTime? toDate = null,
-        [FromQuery] int? status = null)
+        [FromQuery] int? status = null,
+        [FromQuery] string? search = null)
     {
-        var csv = await Provider.Order.ExportOrdersCsvAsync(fromDate, toDate, status);
+        var csv = await Provider.Order.ExportOrdersCsvAsync(fromDate, toDate, status, search);
         var bom = new byte[] { 0xEF, 0xBB, 0xBF };
         var body = Encoding.UTF8.GetBytes(csv);
         var bytes = new byte[bom.Length + body.Length];
@@ -302,11 +377,17 @@ public class OrderController : BaseController
             return NotFound(new { statusCode = 404, success = false, message = $"Không tìm thấy bàn #{dto.TableId.Value}" });
         }
 
+        int? callerId = GetCallerAccountId();
         var activeOrder = await Provider.Order.GetActiveOrderByTableIdAsync(table.TableId);
         (bool Success, string Message, OrderDto? Order) result;
         if (activeOrder != null)
         {
-            result = await Provider.Order.AddItemsToOrderAsync(activeOrder.OrderId, dto.Items);
+            result = await Provider.Order.AddItemsToOrderAsync(
+                activeOrder.OrderId,
+                dto.Items,
+                dto.IdempotencyKey,
+                dto.DiscountCode,
+                callerId);
         }
         else
         {
@@ -317,7 +398,7 @@ public class OrderController : BaseController
             dto.Note = string.IsNullOrWhiteSpace(dto.Note)
                 ? "[QR Self-Order]"
                 : $"[QR Self-Order] {dto.Note.Trim()}";
-            result = await Provider.Order.CreateOrderAsync(dto, GetCallerAccountId());
+            result = await Provider.Order.CreateOrderAsync(dto, callerId);
         }
 
         if (!result.Success)
@@ -328,6 +409,7 @@ public class OrderController : BaseController
         await _realtime.NotifyOrderChangedAsync("QrSelfOrder", result.Order);
         await _realtime.NotifyKdsChangedAsync(new { orderId = result.Order?.OrderId, tableId = table.TableId });
         await _realtime.NotifyTableChangedAsync(new { tableId = table.TableId });
+        await BroadcastInventorySideEffectsAsync(Provider.Order);
 
         return Ok(new
         {
@@ -340,13 +422,14 @@ public class OrderController : BaseController
             discountAmount = result.Order?.DiscountAmount,
             finalAmount = result.Order?.FinalAmount,
             tableId = table.TableId,
+            guestToken = result.Order?.GuestAccessToken,
             data = result.Order
         });
     }
 
     [HttpPost("{id:int}/cancel-unpaid")]
     [AllowAnonymous]
-    public async Task<IActionResult> CancelUnpaidOrder(int id)
+    public async Task<IActionResult> CancelUnpaidOrder(int id, [FromBody] CancelUnpaidRequestDto? body = null)
     {
         var existing = await Provider.Order.GetOrderByIdAsync(id);
         if (existing == null)
@@ -356,14 +439,21 @@ public class OrderController : BaseController
 
         int? callerId = GetCallerAccountId();
         bool isStaff = IsStaffUser();
+        string? guestToken = ReadGuestToken(body?.GuestToken);
+
         if (existing.AccountId.HasValue && !isStaff)
         {
             if (!callerId.HasValue) return Unauthorized(new { statusCode = 401, success = false, message = "Vui lòng đăng nhập để hủy đơn của bạn" });
             if (callerId.Value != existing.AccountId.Value) return Forbid();
         }
 
-        var result = await Provider.Order.CancelUnpaidOrderAsync(id, callerId, isStaff);
-        if (result.Forbidden) return Forbid();
+        var result = await Provider.Order.CancelUnpaidOrderAsync(id, callerId, isStaff, guestToken);
+        if (result.Forbidden)
+        {
+            if (!callerId.HasValue)
+                return Unauthorized(new { statusCode = 401, success = false, message = result.Message });
+            return Forbid();
+        }
         if (!result.Success)
         {
             return BadRequest(new { statusCode = 400, success = false, message = result.Message });
@@ -374,6 +464,7 @@ public class OrderController : BaseController
         {
             await _realtime.NotifyTableChangedAsync(new { tableId = result.TableId.Value });
         }
+        await BroadcastInventorySideEffectsAsync(Provider.Order);
 
         return Ok(new { statusCode = 200, success = true, message = result.Message, orderId = id, tableId = result.TableId });
     }

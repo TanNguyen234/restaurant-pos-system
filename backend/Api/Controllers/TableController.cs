@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using WebApi.Models;
@@ -15,6 +16,16 @@ public class TableController : BaseController
     {
         _realtime = realtime;
     }
+
+    private int? GetCallerAccountId()
+    {
+        var claim = User.FindFirstValue(ClaimTypes.NameIdentifier) ?? User.FindFirstValue("accountId");
+        return int.TryParse(claim, out int id) && id > 0 ? id : null;
+    }
+
+    private bool IsStaffUser() =>
+        User.IsInRole("ADMIN") || User.IsInRole("MANAGER") || User.IsInRole("CASHIER") || User.IsInRole("WAITER") || User.IsInRole("KITCHEN");
+
     [HttpGet("areas")]
     [AllowAnonymous]
     public IActionResult GetAreas()
@@ -53,7 +64,7 @@ public class TableController : BaseController
 
     [HttpPut("{id:int}/status")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
-    public IActionResult UpdateStatus(int id, [FromBody] UpdateTableStatusRequest? body = null, [FromQuery] int? status = null)
+    public async Task<IActionResult> UpdateStatus(int id, [FromBody] UpdateTableStatusRequest? body = null, [FromQuery] int? status = null)
     {
         int? resolvedStatus = body?.Status ?? status;
         if (!resolvedStatus.HasValue)
@@ -73,6 +84,8 @@ public class TableController : BaseController
                 return NotFound(new { success = false, message = result.Message });
             return BadRequest(new { success = false, message = result.Message });
         }
+
+        await _realtime.NotifyTableChangedAsync(new { action = "StatusUpdated", tableId = id, status = resolvedStatus.Value });
 
         return Ok(new
         {
@@ -153,43 +166,72 @@ public class TableController : BaseController
     }
 
     [HttpPost("reserve")]
-    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER")]
-    public IActionResult Reserve([FromBody] ReserveTableRequest request)
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER,VIP_MEMBER")]
+    public async Task<IActionResult> Reserve([FromBody] ReserveTableRequest request)
     {
         if (request == null || request.TableId <= 0) return BadRequest(new { success = false, message = "Vui lòng chọn bàn cần đặt" });
         if (string.IsNullOrWhiteSpace(request.CustomerName) || string.IsNullOrWhiteSpace(request.PhoneNumber))
             return BadRequest(new { success = false, message = "Vui lòng cung cấp họ tên và số điện thoại khách hàng" });
 
         var arrivalTime = request.ArrivalTime ?? DateTime.Now.AddHours(2);
-        var result = Provider.Table.ReserveTable(request.TableId, request.CustomerName, request.PhoneNumber, request.GuestCount, arrivalTime, request.DepositAmount, request.Note);
+        var result = Provider.Table.ReserveTable(
+            request.TableId,
+            request.CustomerName,
+            request.PhoneNumber,
+            request.GuestCount,
+            arrivalTime,
+            request.DepositAmount,
+            request.Note,
+            request.DurationMinutes,
+            request.HoldGraceMinutes,
+            GetCallerAccountId());
+
         if (!result.Success) return BadRequest(new { success = false, message = result.Message });
 
+        await _realtime.NotifyTableChangedAsync(new { action = "Reserved", tableId = request.TableId, reservationId = result.Reservation?.ReservationId });
         return Ok(new { success = true, message = result.Message, data = result.Reservation });
     }
 
     [HttpGet("reservations")]
-    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
-    public IActionResult GetReservations([FromQuery] DateTime? fromDate)
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER,VIP_MEMBER")]
+    public IActionResult GetReservations([FromQuery] DateTime? fromDate = null, [FromQuery] bool includeInactive = false)
     {
-        var list = Provider.Table.GetReservations(fromDate);
+        bool isStaff = IsStaffUser();
+        int? callerId = GetCallerAccountId();
+        string? callerPhone = null;
+        if (!isStaff && callerId.HasValue)
+        {
+            callerPhone = Provider.Account.GetById(callerId.Value)?.PhoneNumber;
+        }
+
+        var list = Provider.Table.GetReservations(
+            fromDate,
+            onlyAccountId: isStaff ? null : (callerId ?? -1),
+            onlyPhone: callerPhone,
+            includeInactive: includeInactive || !isStaff);
         return Ok(new { success = true, total = list.Count, data = list });
     }
 
     [HttpPut("reservation/{id:int}/check-in")]
     [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
-    public IActionResult CheckInReservation(int id)
+    public async Task<IActionResult> CheckInReservation(int id)
     {
         var result = Provider.Table.CheckInReservation(id);
         if (!result.Success) return BadRequest(new { success = false, message = result.Message });
-        return Ok(new { success = true, message = result.Message });
+
+        await _realtime.NotifyTableChangedAsync(new { action = "CheckedIn", tableId = result.TableId, reservationId = id });
+        return Ok(new { success = true, message = result.Message, tableId = result.TableId, depositAmount = result.DepositAmount });
     }
 
     [HttpDelete("reservation/{id:int}")]
-    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER")]
-    public IActionResult CancelReservation(int id)
+    [Authorize(Roles = "ADMIN,MANAGER,CASHIER,WAITER,MEMBER,VIP_MEMBER")]
+    public async Task<IActionResult> CancelReservation(int id)
     {
-        var result = Provider.Table.CancelReservation(id);
+        var result = Provider.Table.CancelReservation(id, GetCallerAccountId(), IsStaffUser());
+        if (result.Forbidden) return Forbid();
         if (!result.Success) return BadRequest(new { success = false, message = result.Message });
+
+        await _realtime.NotifyTableChangedAsync(new { action = "ReservationCancelled", tableId = result.TableId, reservationId = id });
         return Ok(new { success = true, message = result.Message });
     }
 
@@ -272,6 +314,8 @@ public class ReserveTableRequest
     public string PhoneNumber { get; set; } = string.Empty;
     public int GuestCount { get; set; } = 2;
     public DateTime? ArrivalTime { get; set; }
+    public int DurationMinutes { get; set; } = TableRepository.DefaultDurationMinutes;
+    public int HoldGraceMinutes { get; set; } = TableRepository.DefaultHoldGraceMinutes;
     public decimal DepositAmount { get; set; } = 0;
     public string? Note { get; set; }
 }
