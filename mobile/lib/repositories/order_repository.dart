@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:uuid/uuid.dart';
 import '../config/api_config.dart';
 import '../models/order.dart';
 import '../models/payment.dart';
 import '../services/offline_sync_service.dart';
+import '../services/qr_table_session.dart';
 import '../utils/database_helper.dart';
 
 class OrderRepository {
@@ -51,6 +53,12 @@ class OrderRepository {
         };
       }
 
+      final oid = d['orderId'] as int?;
+      final guestToken = d['guestToken']?.toString();
+      if (oid != null && guestToken != null && guestToken.isNotEmpty) {
+        await QrTableSession.instance.saveGuestToken(oid, guestToken);
+      }
+
       return {
         'success': true,
         'isOffline': false,
@@ -59,6 +67,7 @@ class OrderRepository {
         'totalAmount': d['totalAmount'],
         'discountAmount': d['discountAmount'],
         'finalAmount': d['finalAmount'],
+        'guestToken': guestToken,
         'message': d['message']?.toString() ?? 'Tạo đơn thành công',
         'data': d['data'],
       };
@@ -70,9 +79,27 @@ class OrderRepository {
       };
     } on http.ClientException {
       return _queuePendingOrder(payload);
-    } catch (_) {
-      return _queuePendingOrder(payload);
+    } catch (e) {
+      if (_isNetworkTransportError(e)) {
+        return _queuePendingOrder(payload);
+      }
+      return {
+        'success': false,
+        'isOffline': false,
+        'message': 'Lỗi xử lý đơn hàng: $e',
+      };
     }
+  }
+
+  bool _isNetworkTransportError(Object error) {
+    if (error is http.ClientException) return true;
+    final msg = error.toString();
+    return msg.contains('SocketException') ||
+        msg.contains('Connection refused') ||
+        msg.contains('Failed host lookup') ||
+        msg.contains('HandshakeException') ||
+        msg.contains('Network is unreachable') ||
+        msg.contains('Connection closed');
   }
 
   Future<Map<String, dynamic>> _queuePendingOrder(Map<String, dynamic> d) async {
@@ -224,7 +251,13 @@ class OrderRepository {
 
   /// Lấy chi tiết đơn hàng theo ID
   Future<OrderModel?> getOrderById(int orderId) async {
-    final res = await ApiConfig.get(Uri.parse('$baseUrl/$orderId')).timeout(timeoutDuration);
+    final guestToken = await QrTableSession.instance.getGuestToken(orderId);
+    final res = await ApiConfig.get(
+      Uri.parse('$baseUrl/$orderId'),
+      headers: {
+        if (guestToken != null && guestToken.isNotEmpty) 'X-Guest-Token': guestToken,
+      },
+    ).timeout(timeoutDuration);
     if (res.statusCode == 404) return null;
     if (res.statusCode != 200) throw StateError('Không tải được đơn hàng (HTTP ${res.statusCode})');
     return OrderModel.fromMap(_decodeMap(res.bodyBytes));
@@ -331,7 +364,13 @@ class OrderRepository {
     final uri = (amount != null && amount > 0)
         ? Uri.parse('$paymentBaseUrl/vietqr/$orderId').replace(queryParameters: {'amount': amount.toStringAsFixed(0)})
         : Uri.parse('$paymentBaseUrl/vietqr/$orderId');
-    final res = await ApiConfig.get(uri).timeout(timeoutDuration);
+    final guestToken = await QrTableSession.instance.getGuestToken(orderId);
+    final res = await ApiConfig.get(
+      uri,
+      headers: {
+        if (guestToken != null && guestToken.isNotEmpty) 'X-Guest-Token': guestToken,
+      },
+    ).timeout(timeoutDuration);
     if (res.statusCode == 404) return null;
     if (res.statusCode != 200) throw StateError('VietQR không khả dụng (HTTP ${res.statusCode})');
     final d = _decodeMap(res.bodyBytes);
@@ -340,11 +379,34 @@ class OrderRepository {
         : null;
   }
 
+  /// Tải ảnh VietQR PNG qua proxy Backend (tránh lỗi CORS trên Flutter Web CanvasKit)
+  Future<Uint8List?> getVietQrImageBytes(int orderId, {double? amount}) async {
+    final uri = (amount != null && amount > 0)
+        ? Uri.parse('$paymentBaseUrl/vietqr/$orderId/image').replace(queryParameters: {'amount': amount.toStringAsFixed(0)})
+        : Uri.parse('$paymentBaseUrl/vietqr/$orderId/image');
+    final guestToken = await QrTableSession.instance.getGuestToken(orderId);
+    final res = await ApiConfig.get(
+      uri,
+      headers: {
+        if (guestToken != null && guestToken.isNotEmpty) 'X-Guest-Token': guestToken,
+      },
+    ).timeout(timeoutDuration);
+    final ct = (res.headers['content-type'] ?? '').toLowerCase();
+    if (res.statusCode == 200 && res.bodyBytes.isNotEmpty && ct.startsWith('image/')) {
+      return res.bodyBytes;
+    }
+    return null;
+  }
+
   /// Tạo URL thanh toán VNPay Sandbox
   Future<String?> createVnpayUrl(int orderId, double amount, String orderInfo) async {
+    final guestToken = await QrTableSession.instance.getGuestToken(orderId);
     final res = await ApiConfig.post(
       Uri.parse('$paymentBaseUrl/create-vnpay-url'),
-      headers: {'Content-Type': 'application/json'},
+      headers: {
+        'Content-Type': 'application/json',
+        if (guestToken != null && guestToken.isNotEmpty) 'X-Guest-Token': guestToken,
+      },
       body: jsonEncode({'orderId': orderId, 'amount': amount, 'orderInfo': orderInfo}),
     ).timeout(timeoutDuration);
     final d = _decodeMap(res.bodyBytes);
@@ -386,10 +448,16 @@ class OrderRepository {
   /// Hủy đơn chưa thanh toán để khôi phục giỏ hàng / đổi luồng đặt (POST /api/order/{id}/cancel-unpaid)
   Future<Map<String, dynamic>> cancelUnpaidOrder(int orderId) async {
     try {
+      final guestToken = await QrTableSession.instance.getGuestToken(orderId);
       final res = await ApiConfig.post(
         Uri.parse('$baseUrl/$orderId/cancel-unpaid'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({}),
+        headers: {
+          'Content-Type': 'application/json',
+          if (guestToken != null && guestToken.isNotEmpty) 'X-Guest-Token': guestToken,
+        },
+        body: jsonEncode({
+          if (guestToken != null && guestToken.isNotEmpty) 'guestToken': guestToken,
+        }),
       ).timeout(timeoutDuration);
       final d = _decodeMap(res.bodyBytes);
       return {
@@ -414,6 +482,11 @@ class OrderRepository {
         body: jsonEncode(payload),
       ).timeout(timeoutDuration);
       final d = _decodeMap(res.bodyBytes);
+      final oid = d['orderId'] as int?;
+      final guestToken = d['guestToken']?.toString();
+      if (oid != null && guestToken != null && guestToken.isNotEmpty) {
+        await QrTableSession.instance.saveGuestToken(oid, guestToken);
+      }
       return {
         'success': res.statusCode == 200 && d['success'] == true,
         'isOffline': false,
@@ -422,6 +495,7 @@ class OrderRepository {
         'totalAmount': d['totalAmount'],
         'discountAmount': d['discountAmount'],
         'finalAmount': d['finalAmount'],
+        'guestToken': guestToken,
         'message': d['message']?.toString() ?? 'Gửi đơn QR thất bại (HTTP ${res.statusCode})',
         'data': d['data'],
       };
@@ -431,8 +505,18 @@ class OrderRepository {
   }
 
   /// Lấy dữ liệu biểu đồ phân tích doanh thu theo ngày/giờ/kênh thanh toán
-  Future<Map<String, dynamic>> getAnalytics({int days = 7}) async {
-    final res = await ApiConfig.get(Uri.parse('$baseUrl/analytics?days=$days')).timeout(timeoutDuration);
+  Future<Map<String, dynamic>> getAnalytics({
+    int days = 7,
+    DateTime? fromDate,
+    DateTime? toDate,
+  }) async {
+    final queryParams = <String, String>{
+      'days': '$days',
+      if (fromDate != null) 'fromDate': fromDate.toIso8601String(),
+      if (toDate != null) 'toDate': toDate.toIso8601String(),
+    };
+    final uri = Uri.parse('$baseUrl/analytics').replace(queryParameters: queryParams);
+    final res = await ApiConfig.get(uri).timeout(timeoutDuration);
     final d = _decodeMap(res.bodyBytes);
     if (res.statusCode != 200) {
       throw StateError(d['message']?.toString() ?? 'Không tải được dữ liệu phân tích');
@@ -440,17 +524,46 @@ class OrderRepository {
     return d;
   }
 
-  /// Xuất báo cáo CSV đơn hàng
-  Future<String> exportOrdersCsv({DateTime? fromDate, DateTime? toDate, int? status}) async {
+  /// Xuất báo cáo CSV đơn hàng (bytes gốc kèm UTF-8 BOM + tên file gợi ý)
+  Future<({Uint8List bytes, String fileName, String csvText})> exportOrdersCsvBytes({
+    DateTime? fromDate,
+    DateTime? toDate,
+    int? status,
+    String? search,
+  }) async {
     final q = <String, String>{};
     if (fromDate != null) q['fromDate'] = fromDate.toIso8601String();
     if (toDate != null) q['toDate'] = toDate.toIso8601String();
     if (status != null) q['status'] = '$status';
+    if (search != null && search.trim().isNotEmpty) q['search'] = search.trim();
     final uri = Uri.parse('$baseUrl/export-csv').replace(queryParameters: q.isEmpty ? null : q);
     final res = await ApiConfig.get(uri).timeout(timeoutDuration);
     if (res.statusCode != 200) {
       throw StateError('Không xuất được file CSV (HTTP ${res.statusCode})');
     }
-    return utf8.decode(res.bodyBytes);
+    String fileName = 'orders_report_${DateTime.now().millisecondsSinceEpoch}.csv';
+    final cd = res.headers['content-disposition'];
+    if (cd != null && cd.isNotEmpty) {
+      final m = RegExp(r'filename="?([^";]+)"?', caseSensitive: false).firstMatch(cd);
+      if (m != null && m.group(1) != null && m.group(1)!.trim().isNotEmpty) {
+        fileName = m.group(1)!.trim();
+      }
+    }
+    return (
+      bytes: res.bodyBytes,
+      fileName: fileName,
+      csvText: utf8.decode(res.bodyBytes, allowMalformed: true),
+    );
+  }
+
+  /// Xuất báo cáo CSV đơn hàng dạng chuỗi
+  Future<String> exportOrdersCsv({DateTime? fromDate, DateTime? toDate, int? status, String? search}) async {
+    final bundle = await exportOrdersCsvBytes(
+      fromDate: fromDate,
+      toDate: toDate,
+      status: status,
+      search: search,
+    );
+    return bundle.csvText;
   }
 }

@@ -36,11 +36,21 @@ class _ProfilePageState extends State<ProfilePage> {
   @override
   void initState() {
     super.initState();
+    SessionManager.instance.currentUserNotifier.addListener(_onSessionUserChanged);
     _loadProfile();
+  }
+
+  void _onSessionUserChanged() {
+    if (!mounted) return;
+    final nextUser = SessionManager.instance.currentUser;
+    if (nextUser != null && _user?.accountId == nextUser.accountId) {
+      setState(() => _user = nextUser);
+    }
   }
 
   @override
   void dispose() {
+    SessionManager.instance.currentUserNotifier.removeListener(_onSessionUserChanged);
     _fullNameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();

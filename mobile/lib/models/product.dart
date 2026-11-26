@@ -69,7 +69,11 @@ class Product {
   final String imageUrl;
   final List<String> images;
   final bool isAvailable;
+  final bool autoDisabledByStock;
   final bool isFeatured;
+  final int recipeCount;
+  final double estimatedCogs;
+  final int? maxServings;
   final DateTime? createdAt;
   final DateTime? updatedAt;
   final List<ProductAttribute> attributes;
@@ -85,7 +89,11 @@ class Product {
     required this.imageUrl,
     this.images = const [],
     this.isAvailable = true,
+    this.autoDisabledByStock = false,
     this.isFeatured = false,
+    this.recipeCount = 0,
+    this.estimatedCogs = 0.0,
+    this.maxServings,
     this.createdAt,
     this.updatedAt,
     this.attributes = const [],
@@ -165,7 +173,11 @@ class Product {
       imageUrl: rawImageUrl,
       images: parsedImages,
       isAvailable: _parseBool(map['isAvailable'] ?? map['is_available'], fallback: true),
+      autoDisabledByStock: _parseBool(map['autoDisabledByStock'], fallback: false),
       isFeatured: _parseBool(map['isFeatured'] ?? map['is_featured'], fallback: false),
+      recipeCount: (map['recipeCount'] as num?)?.toInt() ?? 0,
+      estimatedCogs: (map['estimatedCogs'] as num?)?.toDouble() ?? 0.0,
+      maxServings: (map['maxServings'] as num?)?.toInt(),
       createdAt: map['createdAt'] != null ? DateTime.tryParse(map['createdAt'].toString()) : null,
       updatedAt: map['updatedAt'] != null ? DateTime.tryParse(map['updatedAt'].toString()) : null,
       attributes: attrs,
@@ -184,7 +196,11 @@ class Product {
       'imageUrl': imageUrl,
       'images': images,
       'isAvailable': isAvailable,
+      'autoDisabledByStock': autoDisabledByStock,
       'isFeatured': isFeatured,
+      'recipeCount': recipeCount,
+      'estimatedCogs': estimatedCogs,
+      'maxServings': maxServings,
       'createdAt': createdAt?.toIso8601String(),
       'updatedAt': updatedAt?.toIso8601String(),
       'attributes': attributes.map((a) => a.toMap()).toList(),

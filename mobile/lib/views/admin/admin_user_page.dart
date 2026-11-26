@@ -6,6 +6,9 @@ import '../../services/session_manager.dart';
 class AdminUserPage extends StatefulWidget {
   const AdminUserPage({super.key});
 
+  @visibleForTesting
+  static List<Map<String, dynamic>> get debugFallbackRoles => _AdminUserPageState._fallbackRoles;
+
   @override
   State<AdminUserPage> createState() => _AdminUserPageState();
 }
@@ -20,14 +23,16 @@ class _AdminUserPageState extends State<AdminUserPage> {
 
   static const _fallbackRoles = [
     {'roleId': 1, 'roleCode': 'ADMIN', 'roleName': 'Quản trị viên hệ thống'},
-    {'roleId': 2, 'roleCode': 'MANAGER', 'roleName': 'Quản lý cửa hàng'},
+    {'roleId': 2, 'roleCode': 'MANAGER', 'roleName': 'Quản lý chi nhánh'},
     {'roleId': 3, 'roleCode': 'CASHIER', 'roleName': 'Thu ngân'},
     {'roleId': 4, 'roleCode': 'WAITER', 'roleName': 'Nhân viên phục vụ'},
-    {'roleId': 6, 'roleCode': 'HEAD_CHEF', 'roleName': 'Bếp trưởng KDS'},
-    {'roleId': 7, 'roleCode': 'BARISTA_LEAD', 'roleName': 'Trưởng quầy pha chế'},
-    {'roleId': 8, 'roleCode': 'MEMBER', 'roleName': 'Khách hàng thành viên'},
-    {'roleId': 9, 'roleCode': 'VIP_MEMBER', 'roleName': 'Hội viên VIP'},
-    {'roleId': 11, 'roleCode': 'KITCHEN', 'roleName': 'Nhân viên Bếp KDS'},
+    {'roleId': 5, 'roleCode': 'BARISTA_LEAD', 'roleName': 'Trưởng quầy pha chế'},
+    {'roleId': 6, 'roleCode': 'HEAD_CHEF', 'roleName': 'Đầu bếp chính'},
+    {'roleId': 7, 'roleCode': 'COOK_ASSISTANT', 'roleName': 'Phụ bếp'},
+    {'roleId': 8, 'roleCode': 'MEMBER', 'roleName': 'Khách hàng thân thiết'},
+    {'roleId': 9, 'roleCode': 'VIP_MEMBER', 'roleName': 'Khách hàng VIP'},
+    {'roleId': 10, 'roleCode': 'DELIVERY_PARTNER', 'roleName': 'Tài khoản đối tác / Giao hàng'},
+    {'roleId': 11, 'roleCode': 'KITCHEN', 'roleName': 'Bộ phận bếp & pha chế (KDS)'},
   ];
 
   @override

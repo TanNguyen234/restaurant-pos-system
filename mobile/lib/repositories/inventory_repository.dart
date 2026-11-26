@@ -50,6 +50,14 @@ class InventoryRepository {
     return {'success': res.statusCode == 200 && d['success'] == true, ...d};
   }
 
+  static Future<Map<String, dynamic>> deleteIngredient(int id) async {
+    final res = await ApiConfig.delete(
+      Uri.parse('$baseUrl/ingredients/$id'),
+    ).timeout(timeoutDuration);
+    final d = _decodeMap(res.bodyBytes);
+    return {'success': res.statusCode == 200 && d['success'] == true, ...d};
+  }
+
   static Future<Map<String, dynamic>> adjustStock({
     required int ingredientId,
     required double changeAmount,
@@ -79,9 +87,40 @@ class InventoryRepository {
     return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
   }
 
+  static Future<Map<String, dynamic>> getRecipeBundle(int productId) async {
+    final res = await ApiConfig.get(Uri.parse('$baseUrl/recipes/$productId')).timeout(timeoutDuration);
+    final d = _decodeMap(res.bodyBytes);
+    if (res.statusCode != 200) {
+      throw StateError(d['message']?.toString() ?? 'Không tải được định lượng (HTTP ${res.statusCode})');
+    }
+    final recipes = ((d['data'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    final attrRecipes = ((d['attributeRecipes'] as List?) ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+    return {'recipes': recipes, 'attributeRecipes': attrRecipes};
+  }
+
   static Future<Map<String, dynamic>> saveRecipes(int productId, List<Map<String, dynamic>> items) async {
     final res = await ApiConfig.put(
       Uri.parse('$baseUrl/recipes/$productId'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(items),
+    ).timeout(timeoutDuration);
+    final d = _decodeMap(res.bodyBytes);
+    return {'success': res.statusCode == 200 && d['success'] == true, ...d};
+  }
+
+  static Future<List<Map<String, dynamic>>> getAttributeRecipes(int attributeId) async {
+    final res = await ApiConfig.get(Uri.parse('$baseUrl/attribute-recipes/$attributeId')).timeout(timeoutDuration);
+    final d = _decodeMap(res.bodyBytes);
+    if (res.statusCode != 200) {
+      throw StateError(d['message']?.toString() ?? 'Không tải được định lượng tùy chọn');
+    }
+    final raw = (d['data'] as List?) ?? [];
+    return raw.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList();
+  }
+
+  static Future<Map<String, dynamic>> saveAttributeRecipes(int attributeId, List<Map<String, dynamic>> items) async {
+    final res = await ApiConfig.put(
+      Uri.parse('$baseUrl/attribute-recipes/$attributeId'),
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode(items),
     ).timeout(timeoutDuration);

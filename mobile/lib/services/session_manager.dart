@@ -41,6 +41,14 @@ class SessionManager {
     currentUserNotifier.value = user;
   }
 
+  Future<void> updateLoyaltyPoints(int points) async {
+    final current = currentUserNotifier.value;
+    if (current == null || current.loyaltyPoints == points) return;
+    final updated = current.copyWith(loyaltyPoints: points);
+    currentUserNotifier.value = updated;
+    await _dbHelper.saveUserSession(updated.toMap());
+  }
+
   Future<void> logout() async {
     await AuthRepository().logout();
     currentUserNotifier.value = null;

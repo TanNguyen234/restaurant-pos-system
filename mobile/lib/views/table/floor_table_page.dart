@@ -86,7 +86,9 @@ class _FloorTablePageState extends State<FloorTablePage>
           ? 'Trống'
           : newStatus == 1
               ? 'Có khách'
-              : 'Đã đặt trước';
+              : newStatus == 2
+                  ? 'Chờ phục vụ'
+                  : 'Đã đặt trước';
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Đã cập nhật trạng thái ${table.name} thành "$statusName".'),
@@ -605,7 +607,13 @@ class _FloorTablePageState extends State<FloorTablePage>
     final nameCtrl = TextEditingController();
     final phoneCtrl = TextEditingController();
     final guestCtrl = TextEditingController(text: table.capacity.toString());
+    final depositCtrl = TextEditingController(text: '0');
     final noteCtrl = TextEditingController();
+
+    final now = DateTime.now();
+    DateTime arrivalTime = DateTime(now.year, now.month, now.day, now.hour, now.minute).add(const Duration(hours: 2));
+    int durationMinutes = 120;
+    int holdGraceMinutes = 30;
 
     final confirmed = await showDialog<bool>(
       context: context,
@@ -630,12 +638,18 @@ class _FloorTablePageState extends State<FloorTablePage>
                     child: const Icon(Icons.bookmark_add_outlined, color: Color(0xFFD97706), size: 22),
                   ),
                   const SizedBox(width: 12),
-                  Text('Đặt trước ${table.name}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  Expanded(
+                    child: Text(
+                      'Đặt trước ${table.name} (${table.capacity} chỗ)',
+                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    ),
+                  ),
                 ],
               ),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     TextField(
                       controller: nameCtrl,
@@ -648,10 +662,115 @@ class _FloorTablePageState extends State<FloorTablePage>
                       decoration: const InputDecoration(labelText: 'Số điện thoại *', hintText: 'VD: 0987654321'),
                     ),
                     const SizedBox(height: 8),
-                    TextField(
-                      controller: guestCtrl,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(labelText: 'Số lượng khách', hintText: '2'),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: guestCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: InputDecoration(labelText: 'Số khách (≤${table.capacity})'),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextField(
+                            controller: depositCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Tiền đặt cọc (đ)'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('Ngày & Giờ khách đến:', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.calendar_today, size: 15),
+                            label: Text(DateFormat('dd/MM/yyyy').format(arrivalTime)),
+                            onPressed: () async {
+                              final pickedDate = await showDatePicker(
+                                context: dialogCtx,
+                                initialDate: arrivalTime,
+                                firstDate: DateTime(now.year, now.month, now.day),
+                                lastDate: now.add(const Duration(days: 90)),
+                              );
+                              if (pickedDate != null) {
+                                setDialogState(() {
+                                  arrivalTime = DateTime(
+                                    pickedDate.year,
+                                    pickedDate.month,
+                                    pickedDate.day,
+                                    arrivalTime.hour,
+                                    arrivalTime.minute,
+                                  );
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: OutlinedButton.icon(
+                            icon: const Icon(Icons.access_time, size: 15),
+                            label: Text(DateFormat('HH:mm').format(arrivalTime)),
+                            onPressed: () async {
+                              final pickedTime = await showTimePicker(
+                                context: dialogCtx,
+                                initialTime: TimeOfDay.fromDateTime(arrivalTime),
+                              );
+                              if (pickedTime != null) {
+                                setDialogState(() {
+                                  arrivalTime = DateTime(
+                                    arrivalTime.year,
+                                    arrivalTime.month,
+                                    arrivalTime.day,
+                                    pickedTime.hour,
+                                    pickedTime.minute,
+                                  );
+                                });
+                              }
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: DropdownButtonFormField<int>(
+                            initialValue: durationMinutes,
+                            decoration: const InputDecoration(labelText: 'Thời lượng ăn', isDense: true),
+                            items: const [60, 90, 120, 180]
+                                .map((m) => DropdownMenuItem(value: m, child: Text('$m phút')))
+                                .toList(),
+                            onChanged: (v) {
+                              if (v != null) setDialogState(() => durationMinutes = v);
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: DropdownButtonFormField<int>(
+                            initialValue: holdGraceMinutes,
+                            decoration: const InputDecoration(labelText: 'Hạn giữ chỗ trễ', isDense: true),
+                            items: const [15, 30, 45, 60]
+                                .map((m) => DropdownMenuItem(value: m, child: Text('+$m phút')))
+                                .toList(),
+                            onChanged: (v) {
+                              if (v != null) setDialogState(() => holdGraceMinutes = v);
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Hết hạn giữ bàn lúc: ${DateFormat('HH:mm dd/MM').format(arrivalTime.add(Duration(minutes: holdGraceMinutes)))} (sau mốc này tự hủy No-Show)',
+                      style: const TextStyle(fontSize: 11.5, color: Color(0xFFB45309)),
                     ),
                     const SizedBox(height: 8),
                     TextField(
@@ -673,9 +792,16 @@ class _FloorTablePageState extends State<FloorTablePage>
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () {
+                    final gCount = int.tryParse(guestCtrl.text) ?? 0;
                     if (nameCtrl.text.trim().isEmpty || phoneCtrl.text.trim().isEmpty) {
                       ScaffoldMessenger.of(ctx).showSnackBar(
                         const SnackBar(content: Text('Vui lòng nhập họ tên và số điện thoại!')),
+                      );
+                      return;
+                    }
+                    if (gCount <= 0 || gCount > table.capacity) {
+                      ScaffoldMessenger.of(ctx).showSnackBar(
+                        SnackBar(content: Text('Số lượng khách phải từ 1 đến ${table.capacity} người!')),
                       );
                       return;
                     }
@@ -693,11 +819,16 @@ class _FloorTablePageState extends State<FloorTablePage>
     if (confirmed != true || !mounted) return;
 
     final guestCount = int.tryParse(guestCtrl.text) ?? table.capacity;
+    final depositAmount = double.tryParse(depositCtrl.text.trim()) ?? 0.0;
     final result = await TableRepository.reserveTable(
       tableId: table.id,
       customerName: nameCtrl.text.trim(),
       phoneNumber: phoneCtrl.text.trim(),
       guestCount: guestCount,
+      arrivalTime: arrivalTime,
+      durationMinutes: durationMinutes,
+      holdGraceMinutes: holdGraceMinutes,
+      depositAmount: depositAmount,
       note: noteCtrl.text.trim().isEmpty ? null : noteCtrl.text.trim(),
     );
 
@@ -719,7 +850,7 @@ class _FloorTablePageState extends State<FloorTablePage>
 
   Future<void> _handleCheckInReservation(DiningTable table) async {
     final reservations = await TableRepository.getReservations();
-    final match = reservations.where((r) => r['tableId'] == table.id && (r['status'] == 0 || r['status'] == null)).toList();
+    final match = reservations.where((r) => r['tableId'] == table.id && (r['status'] == 0 || r['status'] == 1 || r['status'] == null)).toList();
     if (match.isNotEmpty) {
       final resId = match.first['reservationId'] as int? ?? 0;
       if (resId > 0) {
@@ -753,7 +884,7 @@ class _FloorTablePageState extends State<FloorTablePage>
 
   Future<void> _handleCancelReservation(DiningTable table) async {
     final reservations = await TableRepository.getReservations();
-    final match = reservations.where((r) => r['tableId'] == table.id && (r['status'] == 0 || r['status'] == null)).toList();
+    final match = reservations.where((r) => r['tableId'] == table.id && (r['status'] == 0 || r['status'] == 1 || r['status'] == null)).toList();
     if (match.isNotEmpty) {
       final resId = match.first['reservationId'] as int? ?? 0;
       if (resId > 0) {
@@ -814,8 +945,14 @@ class _FloorTablePageState extends State<FloorTablePage>
                         itemBuilder: (_, i) {
                           final r = list[i];
                           final resId = r['reservationId'] as int? ?? 0;
-                          final tableName = r['tableName']?.toString() ?? 'Bàn #${r['tableId']}';
+                          final status = (r['status'] as num?)?.toInt() ?? 1;
+                          final canCheckInOrCancel = status == 0 || status == 1;
+                          final tableName = r['tableName']?.toString().isNotEmpty == true ? r['tableName'].toString() : 'Bàn #${r['tableId']}';
                           final arr = r['arrivalTime'] != null ? DateTime.tryParse(r['arrivalTime'].toString()) : null;
+                          final exp = r['expiresAt'] != null ? DateTime.tryParse(r['expiresAt'].toString()) : null;
+                          final deposit = (r['depositAmount'] as num?)?.toDouble() ?? 0.0;
+                          final statusText = r['statusText']?.toString() ??
+                              (status == 2 ? 'Đã nhận bàn' : (status == 4 ? 'Quá hạn' : 'Đã xác nhận'));
                           return Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
@@ -834,15 +971,39 @@ class _FloorTablePageState extends State<FloorTablePage>
                                         style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                                       ),
                                     ),
-                                    Text('${r['guestCount'] ?? 2} khách', style: const TextStyle(fontSize: 12, color: Color(0xFFD97706), fontWeight: FontWeight.bold)),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: status == 2 ? const Color(0xFFECFDF5) : const Color(0xFFFFFBEB),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        statusText,
+                                        style: TextStyle(
+                                          fontSize: 10.5,
+                                          fontWeight: FontWeight.bold,
+                                          color: status == 2 ? const Color(0xFF059669) : const Color(0xFFD97706),
+                                        ),
+                                      ),
+                                    ),
                                   ],
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
-                                  'SĐT: ${r['phoneNumber'] ?? ''}${arr != null ? ' • Giờ đến: ${DateFormat('HH:mm dd/MM').format(arr)}' : ''}',
+                                  'SĐT: ${r['phoneNumber'] ?? ''} • ${r['guestCount'] ?? 2} khách'
+                                  '${arr != null ? ' • Đến: ${DateFormat('HH:mm dd/MM').format(arr)}' : ''}'
+                                  '${exp != null ? ' (giữ đến ${DateFormat('HH:mm').format(exp)})' : ''}',
                                   style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
                                 ),
-                                if (resId > 0) ...[
+                                if (deposit > 0)
+                                  Padding(
+                                    padding: const EdgeInsets.only(top: 3),
+                                    child: Text(
+                                      'Đã cọc: ${NumberFormat.currency(locale: 'vi_VN', symbol: 'đ').format(deposit)}',
+                                      style: const TextStyle(fontSize: 12, color: Color(0xFF059669), fontWeight: FontWeight.w600),
+                                    ),
+                                  ),
+                                if (resId > 0 && canCheckInOrCancel) ...[
                                   const SizedBox(height: 8),
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.end,
@@ -970,7 +1131,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                 const SizedBox(height: 16),
                 const Divider(height: 1, color: Color(0xFFF1F5F9)),
                 const SizedBox(height: 12),
-                if (table.status == 1 && table.currentOrderId != null)
+                if (table.isOccupied && table.currentOrderId != null)
                   _buildActionTile(
                     icon: Icons.receipt_long_rounded,
                     iconColor: const Color(0xFF0F172A),
@@ -1011,13 +1172,13 @@ class _FloorTablePageState extends State<FloorTablePage>
                   iconColor: const Color(0xFF0284C7),
                   iconBg: const Color(0xFFF0F9FF),
                   title: 'Đổi trạng thái bàn',
-                  subtitle: 'Trống, Đang có khách, Đã đặt trước',
+                  subtitle: 'Trống, Có khách, Chờ phục vụ, Đã đặt trước',
                   onTap: () {
                     Navigator.pop(bottomSheetCtx);
                     _showChangeStatusDialog(table);
                   },
                 ),
-                  if (table.status == 1) ...[
+                if (table.isOccupied) ...[
                   _buildActionTile(
                     icon: Icons.merge_type_rounded,
                     iconColor: const Color(0xFF7C3AED),
@@ -1041,20 +1202,19 @@ class _FloorTablePageState extends State<FloorTablePage>
                     },
                   ),
                 ],
-                if (table.status == 0) ...[
+                if (table.isAvailable)
                   _buildActionTile(
                     icon: Icons.bookmark_add_outlined,
                     iconColor: const Color(0xFFD97706),
                     iconBg: const Color(0xFFFFFBEB),
                     title: 'Đặt bàn trước',
-                    subtitle: 'Lưu thông tin khách đặt bàn & giờ đến',
+                    subtitle: 'Lưu thông tin khách, giờ đến & thời hạn giữ bàn',
                     onTap: () {
                       Navigator.pop(bottomSheetCtx);
                       _handleTableReservation(table);
                     },
                   ),
-                ],
-                if (table.status == 2 || table.status == 3) ...[
+                if (table.isReserved) ...[
                   _buildActionTile(
                     icon: Icons.how_to_reg_rounded,
                     iconColor: const Color(0xFF059669),
@@ -1078,7 +1238,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                     },
                   ),
                 ],
-                if (table.status == 1)
+                if (table.isOccupied) ...[
                   _buildActionTile(
                     icon: Icons.swap_horiz_rounded,
                     iconColor: const Color(0xFFD97706),
@@ -1090,7 +1250,6 @@ class _FloorTablePageState extends State<FloorTablePage>
                       _handleTableTransfer(table);
                     },
                   ),
-                  if (table.status == 1) ...[
                   _buildActionTile(
                     icon: Icons.check_circle_outline_rounded,
                     iconColor: const Color(0xFF059669),
@@ -1100,6 +1259,17 @@ class _FloorTablePageState extends State<FloorTablePage>
                     onTap: () {
                       Navigator.pop(bottomSheetCtx);
                       _updateTableStatus(table, 0);
+                    },
+                  ),
+                  _buildActionTile(
+                    icon: Icons.bookmark_add_outlined,
+                    iconColor: const Color(0xFFD97706),
+                    iconBg: const Color(0xFFFFFBEB),
+                    title: 'Đặt lịch trước (khung giờ sau)',
+                    subtitle: 'Lưu thông tin khách, giờ đến & thời hạn giữ bàn',
+                    onTap: () {
+                      Navigator.pop(bottomSheetCtx);
+                      _handleTableReservation(table);
                     },
                   ),
                 ],
@@ -1294,9 +1464,19 @@ class _FloorTablePageState extends State<FloorTablePage>
                 dialogCtx,
                 table,
                 status: 2,
+                title: 'Chờ phục vụ',
+                subtitle: 'Khách đang đợi bếp/bar lên món',
+                color: const Color(0xFFD97706),
+                icon: Icons.hourglass_top_rounded,
+              ),
+              const SizedBox(height: 8),
+              _buildStatusOption(
+                dialogCtx,
+                table,
+                status: 3,
                 title: 'Đã đặt trước',
                 subtitle: 'Khách hẹn giờ trước giữ chỗ',
-                color: const Color(0xFFD97706),
+                color: const Color(0xFF0284C7),
                 icon: Icons.bookmark_border,
               ),
             ],
@@ -1492,8 +1672,8 @@ class _FloorTablePageState extends State<FloorTablePage>
 
   Widget _buildSummaryBar() {
     final available = _allTables.where((t) => t.status == 0).length;
-    final occupied = _allTables.where((t) => t.status == 1).length;
-    final reserved = _allTables.where((t) => t.status == 2 || t.status == 3).length;
+    final occupied = _allTables.where((t) => t.status == 1 || t.status == 2).length;
+    final reserved = _allTables.where((t) => t.status == 3).length;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1604,10 +1784,15 @@ class _FloorTablePageState extends State<FloorTablePage>
         text = 'CÓ KHÁCH';
         break;
       case 2:
-      case 3:
         bg = const Color(0xFFFFFBEB);
         fg = const Color(0xFFB45309);
         dot = const Color(0xFFF59E0B);
+        text = 'CHỜ MÓN';
+        break;
+      case 3:
+        bg = const Color(0xFFE0F2FE);
+        fg = const Color(0xFF0369A1);
+        dot = const Color(0xFF0284C7);
         text = 'ĐÃ ĐẶT';
         break;
       default:
@@ -1746,11 +1931,18 @@ class _FloorTablePageState extends State<FloorTablePage>
         actionLabel = 'Xem đơn';
         break;
       case 2:
-      case 3:
         borderColor = const Color(0xFFF59E0B);
         glowColor = const Color(0x12F59E0B);
         actionBg = const Color(0xFFFFFBEB);
         actionFg = const Color(0xFFB45309);
+        actionIcon = Icons.receipt_long_rounded;
+        actionLabel = 'Xem đơn';
+        break;
+      case 3:
+        borderColor = const Color(0xFF0284C7);
+        glowColor = const Color(0x120284C7);
+        actionBg = const Color(0xFFE0F2FE);
+        actionFg = const Color(0xFF0369A1);
         actionIcon = Icons.check_circle_outline_rounded;
         actionLabel = 'Nhận bàn';
         break;
@@ -1805,7 +1997,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                     const Icon(Icons.people_alt_rounded, size: 14, color: Color(0xFF64748B)),
                     const SizedBox(width: 4),
                     Text(
-                      '${table.capacity} chỗ${table.status == 1 && table.itemCount > 0 ? ' • ${table.itemCount} món' : ''}',
+                      '${table.capacity} chỗ${table.isOccupied && table.itemCount > 0 ? ' • ${table.itemCount} món' : ''}',
                       style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: Color(0xFF475569)),
                     ),
                     if (table.currentOrderId != null) ...[
@@ -1825,7 +2017,7 @@ class _FloorTablePageState extends State<FloorTablePage>
                     ],
                   ],
                 ),
-                if (table.status == 1)
+                if (table.isOccupied)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
                     decoration: BoxDecoration(
@@ -1856,6 +2048,20 @@ class _FloorTablePageState extends State<FloorTablePage>
                             ),
                           ),
                       ],
+                    ),
+                  )
+                else if (table.nextReservationTime != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFE0F2FE),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      'Hẹn ${DateFormat('HH:mm dd/MM').format(table.nextReservationTime!)} • ${table.nextReservationCustomer ?? 'Khách'}',
+                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF0369A1)),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                 Container(

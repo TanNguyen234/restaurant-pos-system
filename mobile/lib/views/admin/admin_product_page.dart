@@ -7,6 +7,7 @@ import '../../models/category.dart';
 import '../../models/product.dart';
 import '../../repositories/category_repository.dart';
 import '../../repositories/product_repository.dart';
+import 'admin_inventory_page.dart';
 
 class AdminProductPage extends StatefulWidget {
   const AdminProductPage({super.key});
@@ -102,6 +103,120 @@ class _AdminProductPageState extends State<AdminProductPage> {
     if (res['success'] == true) {
       await _loadProducts(page: _currentPage);
     }
+  }
+
+  Future<void> _showAttributesDialog(Product product) async {
+    Product detail;
+    try {
+      detail = await ProductRepository.getProductDetail(product.productId);
+    } catch (_) {
+      detail = product;
+    }
+    if (!mounted) return;
+
+    final groupCtrl = TextEditingController(text: 'Size');
+    final nameCtrl = TextEditingController();
+    final priceCtrl = TextEditingController(text: '0');
+    bool isRequired = false;
+    List<ProductAttribute> attrs = List<ProductAttribute>.from(detail.attributes);
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dCtx, setD) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text('Size / Topping: ${product.productName}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          content: SizedBox(
+            width: 420,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (attrs.isEmpty)
+                    const Text('Món này chưa có tùy chọn Size/Topping.', style: TextStyle(color: Color(0xFF64748B), fontSize: 13))
+                  else
+                    ...attrs.map((a) => ListTile(
+                          dense: true,
+                          contentPadding: EdgeInsets.zero,
+                          title: Text('${a.attributeGroup}: ${a.attributeName} (+${_currencyFormat.format(a.extraPrice)})',
+                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                          subtitle: a.isRequired ? const Text('Bắt buộc chọn', style: TextStyle(fontSize: 11, color: Color(0xFFD97706))) : null,
+                          trailing: IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Color(0xFFDC2626), size: 20),
+                            onPressed: () async {
+                              final r = await ProductRepository.deleteAttribute(a.attributeId);
+                              if (!dCtx.mounted) return;
+                              if (r['success'] == true) {
+                                final refreshed = await ProductRepository.getProductDetail(product.productId);
+                                if (!dCtx.mounted) return;
+                                setD(() => attrs = refreshed.attributes);
+                              }
+                            },
+                          ),
+                        )),
+                  const Divider(height: 20),
+                  const Text('Thêm tùy chọn mới', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                  const SizedBox(height: 8),
+                  DropdownButtonFormField<String>(
+                    initialValue: groupCtrl.text,
+                    decoration: const InputDecoration(labelText: 'Nhóm', border: OutlineInputBorder(), isDense: true),
+                    items: const ['Size', 'Topping', 'Đường', 'Đá']
+                        .map((g) => DropdownMenuItem(value: g, child: Text(g)))
+                        .toList(),
+                    onChanged: (v) {
+                      if (v != null) groupCtrl.text = v;
+                    },
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: nameCtrl,
+                    decoration: const InputDecoration(labelText: 'Tên tùy chọn (VD: Size L / Trân châu)', border: OutlineInputBorder(), isDense: true),
+                  ),
+                  const SizedBox(height: 8),
+                  TextField(
+                    controller: priceCtrl,
+                    keyboardType: TextInputType.number,
+                    decoration: const InputDecoration(labelText: 'Phụ thu (VNĐ)', border: OutlineInputBorder(), isDense: true),
+                  ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Bắt buộc chọn theo nhóm', style: TextStyle(fontSize: 13)),
+                    value: isRequired,
+                    onChanged: (v) => setD(() => isRequired = v ?? false),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Đóng')),
+            FilledButton(
+              onPressed: () async {
+                if (nameCtrl.text.trim().isEmpty) return;
+                final r = await ProductRepository.addAttribute(
+                  productId: product.productId,
+                  attributeGroup: groupCtrl.text.trim(),
+                  attributeName: nameCtrl.text.trim(),
+                  extraPrice: double.tryParse(priceCtrl.text.trim()) ?? 0,
+                  isRequired: isRequired,
+                );
+                if (!dCtx.mounted) return;
+                if (r['success'] == true) {
+                  nameCtrl.clear();
+                  priceCtrl.text = '0';
+                  final refreshed = await ProductRepository.getProductDetail(product.productId);
+                  if (!dCtx.mounted) return;
+                  setD(() => attrs = refreshed.attributes);
+                }
+              },
+              child: const Text('Thêm'),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showProductFormDialog({Product? product}) {
@@ -574,6 +689,20 @@ class _AdminProductPageState extends State<AdminProductPage> {
                                           '${_currencyFormat.format(item.price)} / ${item.unit}',
                                           style: const TextStyle(color: Color(0xFFEF4444), fontWeight: FontWeight.bold, fontSize: 13),
                                         ),
+                                        if (item.recipeCount > 0 || item.autoDisabledByStock)
+                                          Padding(
+                                            padding: const EdgeInsets.only(top: 2),
+                                            child: Text(
+                                              'BOM: ${item.recipeCount} NL • Vốn: ${_currencyFormat.format(item.estimatedCogs)}${item.maxServings != null ? ' • Còn: ${item.maxServings} phần' : ''}${item.autoDisabledByStock ? ' • [TỰ TẮT KHO]' : ''}',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w600,
+                                                color: item.autoDisabledByStock ? const Color(0xFFDC2626) : const Color(0xFF0284C7),
+                                              ),
+                                              maxLines: 1,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                          ),
                                         if (item.description != null && item.description!.isNotEmpty)
                                           Text(item.description!, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)), maxLines: 1, overflow: TextOverflow.ellipsis),
                                       ],
@@ -581,6 +710,24 @@ class _AdminProductPageState extends State<AdminProductPage> {
                                     trailing: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
+                                        IconButton(
+                                          icon: const Icon(Icons.science_outlined, color: Color(0xFF7C3AED), size: 20),
+                                          tooltip: 'Định lượng BOM',
+                                          onPressed: () => Navigator.push(
+                                            context,
+                                            MaterialPageRoute(
+                                              builder: (_) => AdminInventoryPage(
+                                                initialProductId: item.productId,
+                                                initialTab: 1,
+                                              ),
+                                            ),
+                                          ).then((_) => _loadProducts(page: _currentPage)),
+                                        ),
+                                        IconButton(
+                                          icon: const Icon(Icons.tune_rounded, color: Color(0xFF0284C7), size: 20),
+                                          tooltip: 'Size / Topping',
+                                          onPressed: () => _showAttributesDialog(item),
+                                        ),
                                         Switch(
                                           value: item.isAvailable,
                                           onChanged: (_) => _toggleAvailability(item),

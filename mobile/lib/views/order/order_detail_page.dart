@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/order.dart';
@@ -37,8 +38,43 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
   final _orderRepo = OrderRepository();
   final currencyFormatter = NumberFormat.currency(locale: 'vi_VN', symbol: 'đ');
 
+  static bool _isSvgBytes(Uint8List bytes) {
+    final prefix = utf8.decode(bytes.take(64).toList(), allowMalformed: true).trimLeft();
+    return prefix.startsWith('<');
+  }
+
+  Widget _buildVietQrImage() {
+    if (_vietQrBytes != null) {
+      if (_isSvgBytes(_vietQrBytes!)) {
+        return SvgPicture.memory(
+          _vietQrBytes!,
+          height: 260,
+          fit: BoxFit.contain,
+        );
+      }
+      return Image.memory(
+        _vietQrBytes!,
+        height: 220,
+        fit: BoxFit.contain,
+      );
+    }
+    return Image.network(
+      _vietQr!.qrImageUrl,
+      height: 220,
+      fit: BoxFit.contain,
+      errorBuilder: (_, _, _) => Container(
+        height: 160,
+        color: const Color(0xFFF1F5F9),
+        child: const Center(
+          child: Icon(Icons.qr_code_2_rounded, size: 64, color: Color(0xFF0284C7)),
+        ),
+      ),
+    );
+  }
+
   OrderModel? _order;
   VietQrModel? _vietQr;
+  Uint8List? _vietQrBytes;
   bool _isLoading = true;
   bool _isProcessingPayment = false;
   bool _isRestoringToCart = false;
@@ -64,12 +100,16 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
     try {
       final order = await _orderRepo.getOrderById(widget.orderId);
       VietQrModel? qr;
+      Uint8List? qrBytes;
       if (order != null && !order.isPaid && order.status != 4) {
         try {
           qr = await _orderRepo.getVietQr(
             widget.orderId,
             amount: order.remainingAmount > 0 ? order.remainingAmount : order.finalAmount,
           );
+          if (qr != null) {
+            qrBytes = await _orderRepo.getVietQrImageBytes(widget.orderId, amount: qr.amount);
+          }
         } catch (_) {}
       }
 
@@ -77,6 +117,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
       setState(() {
         _order = order;
         _vietQr = qr;
+        _vietQrBytes = qrBytes;
         _isLoading = false;
       });
 
@@ -310,12 +351,17 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
 
   Future<void> _handleConfirmPayment() async {
     if (_order == null) return;
+    if (_paymentMethod == 'VNPay') {
+      await _launchVnpaySandbox();
+      return;
+    }
+
     setState(() => _isProcessingPayment = true);
 
-    final amountToPay = _order!.remainingAmount > 0 ? _order!.remainingAmount : _order!.finalAmount;
+    final amountToPay = _order!.remainingAmount;
     final result = await _orderRepo.confirmPayment(
       orderId: _order!.orderId,
-      paymentMethod: _paymentMethod == 'VNPay' ? 'Cash' : _paymentMethod,
+      paymentMethod: _paymentMethod,
       amount: amountToPay,
       note: 'Thanh toán tại màn hình chi tiết đơn hàng',
     );
@@ -691,18 +737,7 @@ class _OrderDetailPageState extends State<OrderDetailPage> {
                                 children: [
                                   ClipRRect(
                                     borderRadius: BorderRadius.circular(12),
-                                    child: Image.network(
-                                      _vietQr!.qrImageUrl,
-                                      height: 220,
-                                      fit: BoxFit.contain,
-                                      errorBuilder: (_, _, _) => Container(
-                                        height: 160,
-                                        color: const Color(0xFFF1F5F9),
-                                        child: const Center(
-                                          child: Icon(Icons.qr_code_2_rounded, size: 64, color: Color(0xFF0284C7)),
-                                        ),
-                                      ),
-                                    ),
+                                    child: _buildVietQrImage(),
                                   ),
                                   const SizedBox(height: 12),
                                   Container(

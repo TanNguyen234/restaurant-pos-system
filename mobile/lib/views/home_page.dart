@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/category.dart';
@@ -18,6 +19,51 @@ import 'product_detail_page.dart';
 class HomePage extends StatefulWidget {
   final int? initialCategoryId;
   const HomePage({super.key, this.initialCategoryId});
+
+  /// Xây dựng payload giỏ hàng khi bấm thêm nhanh, tự động chọn option mặc định cho các nhóm bắt buộc.
+  @visibleForTesting
+  static Map<String, dynamic> buildQuickAddCartItem(Product product) {
+    final requiredGroups = <String>{};
+    if (product.attributes.isNotEmpty) {
+      for (final a in product.attributes) {
+        if (a.isRequired && a.attributeGroup.trim().isNotEmpty) {
+          requiredGroups.add(a.attributeGroup);
+        }
+      }
+    }
+
+    final selected = <ProductAttribute>[];
+    for (final group in requiredGroups) {
+      final groupAttrs = product.attributes.where((a) => a.attributeGroup == group);
+      if (groupAttrs.isNotEmpty) {
+        selected.add(
+          groupAttrs.reduce((a, b) => a.extraPrice <= b.extraPrice ? a : b),
+        );
+      }
+    }
+
+    final extraTotal = selected.fold<double>(0.0, (sum, a) => sum + a.extraPrice);
+    final unitPrice = product.price + extraTotal;
+    final modifiers = selected
+        .map((a) => {
+              'attributeId': a.attributeId,
+              'modifierName': a.attributeName,
+              'modifierGroup': a.attributeGroup,
+              'extraPrice': a.extraPrice,
+            })
+        .toList();
+    final note = selected.isNotEmpty ? selected.map((a) => a.attributeName).join(' • ') : null;
+
+    return {
+      'product_id': product.productId,
+      'product_name': product.productName,
+      'price': unitPrice,
+      'quantity': 1,
+      'image_url': product.imageUrl,
+      'note': note,
+      'modifiers_json': modifiers.isNotEmpty ? jsonEncode(modifiers) : null,
+    };
+  }
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -138,15 +184,7 @@ class _HomePageState extends State<HomePage> {
       return;
     }
 
-    final cartItem = {
-      'product_id': product.productId,
-      'product_name': product.productName,
-      'price': product.price,
-      'quantity': 1,
-      'image_url': product.imageUrl,
-      'note': null,
-      'modifiers_json': null,
-    };
+    final cartItem = HomePage.buildQuickAddCartItem(product);
     await _dbHelper.insertOrUpdateCart(cartItem);
 
     if (!mounted) return;

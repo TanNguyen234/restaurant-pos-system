@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../models/product.dart';
 import '../repositories/product_repository.dart';
+import '../utils/category_helper.dart';
 import '../utils/database_helper.dart';
 import '../utils/snackbar_helper.dart';
 import '../widgets/skeleton_loading.dart';
@@ -166,7 +167,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
   Widget build(BuildContext context) {
     final sizes = _detailProduct.attributes.where((a) => a.attributeGroup == 'Size').toList();
     final toppings = _detailProduct.attributes.where((a) => a.attributeGroup == 'Topping').toList();
-    final isDrink = _detailProduct.categoryId <= 4;
+    final isDrink = isDrinkCategory(_detailProduct.categoryId);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF8FAFC),
